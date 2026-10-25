@@ -221,33 +221,39 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 ## Apple Cash tracking (H1)
 
 There is one funding account (`accounts.parent`, label `Funding account`), plus
-savings and spending. Allowance and Apple Cash purchases both draw from funding.
+savings and spending. Allowance draws from funding; new Apple Cash purchases draw from savings.
 These routes record money already paid outside MoneyQuest; no Apple payment or
 Nessie instruction is made. No account may go negative.
 
 | Method and route | Auth | Request / response |
 | --- | --- | --- |
-| `POST /api/parent/wallet/send` | Parent | Retired: HTTP 410. Use `POST /api/parent/funding/add` instead. |
-| `POST /api/child/wallet/spend` | Child | `{amount,merchant,at?,external_id?}` records `parent → merchant`, `kind:wallet_spend`; HTTP 200 returns the transaction plus `duplicate`. Amount $0.01–$10,000; merchant <=120 chars; date ISO 8601 with zone or Unix milliseconds; external ID <=64 chars. Over-limit purchases record and notify without an approval hold; G4 unusual-spend notices also apply. |
-| `POST /api/parent/wallet/pending/:id/record` | Parent | `{}` posts the saved receipt if funding covers it. Returns the transaction plus `duplicate`; repeating a successful record or the original external ID cannot debit twice. HTTP 409 if still short. |
+| `POST /api/parent/wallet/send` | Parent | Retired: HTTP 410. Use My money → Received for money already received outside the app. |
+| `POST /api/child/wallet/receive` | Child | `{amount,note,request_id}`; Credits outside money already received to savings exactly once per request ID; retries waiting purchases in order. Does not debit parent funding. |
+| `POST /api/child/wallet/spend` | Child | `{amount,merchant,at?,external_id?}` records `savings → merchant`, `kind:wallet_spend`; HTTP 200 returns the transaction plus `duplicate`. Amount $0.01–$10,000; merchant <=120 chars; date ISO 8601 with zone or Unix milliseconds; external ID <=64 chars. Over-limit purchases record and notify without an approval hold; G4 unusual-spend notices also apply. |
+| `POST /api/parent/wallet/pending/:id/record` | Parent | `{}` posts the saved receipt if savings covers it. Returns the transaction plus `duplicate`; repeating a successful record or the original external ID cannot debit twice. HTTP 409 if still short. |
 | `POST /api/parent/wallet/pending/:id/dismiss` | Parent | `{}` removes the pending receipt and audits the dismissal. External-ID retries return the dismissed receipt without a debit. |
 | `GET /api/child/wallet/token` | Parent + configured, unlocked PIN | `{token:null,id,expiresAt,lastPing,connected}` for the selected child's active Shortcut, null ID/time if absent; no mutation. |
 | `POST /api/child/wallet/token` | Parent + configured, unlocked PIN | `{}` rotates/revokes only that child's Shortcut sessions; returns `{token,id,expiresAt,lastPing,connected}`. Raw token is shown only in this response; hashes only in storage. |
 | `POST /api/child/wallet/ping` | Child | `{}` returns `{ok:true,childId,at}` and records the connection time without a transaction. |
 
-Short funding returns HTTP **409** with
-`{error:"Your grown-up's funding is short for that. Ask them to add money!",reason:"funding_short",shortBy:N}`
-(`N` is cents). No transfer posts. The receipt is saved in `walletPending` (newest
-20 retained) and the parent is notified once per receipt. Use Inbox → Add money,
-then Record now, or retry the original Shortcut body and external ID after funding.
-The first receipt's amount, merchant and time win on retries. Receipt keys survive
-rolling ledger/pending retention and restarts. Receipts older than the pending cap
-can still be retried with their original external ID after funding is added.
-Manual purchases without an external ID cannot be matched to a Shortcut entry.
+Short savings returns HTTP **409** with
+`{error:"Your savings are short. Record money you received, then retry this purchase.",reason:"savings_short",shortBy:N}`.
+`N` is cents. The original receipt is saved without a debit and the parent is
+notified once. Recording received money automatically retries waiting receipts
+in arrival order, including durable IDs outside the newest-20 pending list.
+Parent Record now or retrying the original purchase can also post it once covered.
+The first receipt's amount, merchant and date win on retries. Historical posted
+purchases retain their original source; they are not charged again.
+`POST /api/child/wallet/receive` accepts $0.01–$10,000, a sender note (1–120 chars),
+and a required request ID (1–64 chars). It posts `outside → savings`, kind
+`wallet_received`, notifies the parent, and never debits parent Funding. Its
+request IDs are durable and namespaced separately from purchase IDs. A replay
+returns the original entry without crediting twice or rerunning pending receipts.
+Do not manually re-add allowance/rewards already credited by the app.
 
-Ping and spend each allow **60/hour per selected child and authenticated session**,
+Receive, ping and spend each allow **60/hour per selected child and authenticated session**,
 in independent windows starting at the first request. Invalid authenticated
-payloads, short-funded attempts and retries count. HTTP **429** returns
+payloads, short-savings attempts and retries count. HTTP **429** returns
 `{error:"Let's take a little break. Try again soon!",retryAfterSeconds:N}` with
 `Retry-After: N`. Keep the original body and external ID and retry after the delay.
 A rejected rate-limited request changes no receipt or balance. Limits reset on
@@ -261,9 +267,8 @@ cents (`today`, ISO `week`, calendar `month`, in the family time zone). Parent
 state has the same fields, the three `accounts`, up to 60 `walletTransactions`
 (newest recorded first, purchases only), `walletPending`, and `walletLastPing`.
 Purchases include merchant, purchase time `ts`, `recordedAt`, optional external ID,
-and `overLimit` / `unusual` flags. Pending receipts show as waiting for funding.
-G5 considers the next allowance, unpaid reward/extra commitments and the last
-seven days of Apple Cash spending. `hasDueWork` is unchanged.
+and `overLimit` / `unusual` flags. Pending receipts show as waiting for savings.
+G5 considers the next allowance, unpaid reward/extra commitments and seven days of historical parent-funded Apple Cash spending. New savings-funded purchases do not consume the parent funding forecast. `hasDueWork` is unchanged.
 
 Migration moves a positive legacy wallet balance into funding with an audit,
 drops negative tracked debt with an audit, and deletes `accounts.wallet`.

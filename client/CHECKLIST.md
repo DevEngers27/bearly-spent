@@ -253,3 +253,11 @@ Socket-free coverage: `server/h11.test.js` and `client/h11.test.mjs`.
 - [ ] At 360/390px and desktop widths, open Ask about MoneyQuest from More or the sidebar. Ask about kid codes and Apple Cash; check loading, errors/retry, keyboard focus, wrapped Markdown steps, and Help links. Navigate away or switch children during a pending answer; the old answer must not appear in the new panel. Device-offline disables asking; no-key server mode still returns guide text.
 - [ ] Open Help from Welcome and parent More. Parent guide appears first, kid guide second, with readable numbered steps and a working Apple Cash setup link. No credentials or family data appear in the public page.
 - [ ] Tap the How do I…? chip in the kid talk bar. Finish a question about friends or goals and check exact UI steps and the custom bear name. With Claude configured, inspect lookup_help's kid-only results and personalised wardrobe, postcards, budget, pending Apple Cash and current-goal facts. No model/provider live verification is implied by stubbed tests.
+
+## Apple Cash savings flow
+
+- [ ] Child My money → Received accepts cents and a sender note; a failed request can be retried without crediting twice. Savings increases, Spending and parent Funding stay unchanged, parent receives a notice.
+- [ ] Apple Cash automation purchase deducts once from Savings, updates goal progress and bear size, and leaves other accounts unchanged. Replaying its ID changes nothing.
+- [ ] An uncovered purchase waits without a negative balance. Adding received money retries waiting receipts in order; Record now and original-ID retries cannot double debit. Dismissed receipts stay dismissed.
+- [ ] Child Home shows Savings and Spending; Apple Cash activity and Buddy use Savings, without presenting parent Funding as a child Apple Cash balance. Phone-width Received form and five tabs remain usable.
+- [ ] Existing historical purchases keep their original source. No real payment or Wallet balance read is introduced.

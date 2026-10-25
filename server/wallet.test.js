@@ -1,6 +1,7 @@
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { seed, migrate, readChild, mutateChild, _clearStoreForTest } from "./store.js";
@@ -20,6 +21,7 @@ function browser(ip = "wallet-test") {
   let cookie = "";
   return {
     async call(method, url, body, token, now = Date.now()) {
+      if (url.includes("/wallet/receive") && body) body = { note: "Parent transfer", request_id: randomUUID(), ...body };
       const parsed = new URL(url, "https://local");
       const req = { body, ip, query: Object.fromEntries(parsed.searchParams), headers: token ? { authorization: `Bearer ${token}` } : { cookie } };
       const res = {
@@ -80,52 +82,52 @@ test("H1.1: seed has three accounts; wallet migration moves positive funds, drop
   }
 });
 
-test("H1.2: Apple Cash posts parent to merchant, conserves money and never overdraws funding", () => {
+test("H1.2: Apple Cash posts savings to merchant, conserves money and never overdraws savings", () => {
   const db = seed(Date.now());
   const total = () => Object.values(db.accounts).reduce((sum, a) => sum + a.balance, 0)
     + db.transactions.filter((t) => t.status === "posted" && t.to === "merchant").reduce((sum, t) => sum + t.amount, 0);
   const before = total(), spending = db.accounts.spending.balance;
-  db.accounts.parent.balance = 425;
+  db.accounts.savings.balance = 425;
   const fundedTotal = total();
   const txn = spend(db, { external_id: "one" });
-  assert.equal(txn.from, "parent");
+  assert.equal(txn.from, "savings");
   assert.equal(txn.to, "merchant");
   assert.equal(txn.kind, "wallet_spend");
-  assert.equal(db.accounts.parent.balance, 0);
+  assert.equal(db.accounts.savings.balance, 0);
   assert.equal(db.accounts.spending.balance, spending);
   assert.equal(total(), fundedTotal);
-  assert.equal(spend(db, { external_id: "two" }).reason, "funding_short");
-  assert.equal(db.accounts.parent.balance, 0);
+  assert.equal(spend(db, { external_id: "two" }).reason, "savings_short");
+  assert.equal(db.accounts.savings.balance, 0);
   assert.equal(db.transactions.filter((t) => t.kind === "wallet_spend").length, 1);
   runGuardian(db);
   assert.equal(db.transactions.find((t) => t.id === txn.id).flagged, undefined);
   assert.ok(before > fundedTotal);
 });
 
-test("H1.2: short funding returns 409, saves one pending receipt and notifies once; add then record exactly once", async () => {
+test("H1.2: short savings returns 409, saves one pending receipt and notifies once; add then record exactly once", async () => {
   const f = await family(), token = await tokenFor(f);
-  await f.parent.call("POST", "/api/parent/funding/add", { amount: 4 });
+  await f.parent.call("POST", "/api/child/wallet/receive", { amount: 4 });
   const body = { amount: 10, merchant: "shoukun", external_id: "receipt-one" };
   const call = () => f.parent.call("POST", f.route("spend"), body, token);
   for (let i = 0; i < 2; i++) {
     const result = await call();
     assert.equal(result.status, 409);
-    assert.deepEqual(result.body, { error: "Your grown-up's funding is short for that. Ask them to add money!", reason: "funding_short", shortBy: 600 });
+    assert.deepEqual(result.body, { error: "Your savings are short. Record money you received, then retry this purchase.", reason: "savings_short", shortBy: 600 });
   }
   const db = readChild(f.id), pending = db.walletPending[0];
   assert.equal(db.walletPending.length, 1);
   assert.equal(db.transactions.filter((t) => t.kind === "wallet_spend").length, 0);
   assert.equal(db.notifications.filter((n) => n.ref === pending.id).length, 1);
-  assert.equal(db.notifications.find((n) => n.ref === pending.id).text, "Mia's Apple Cash spent $10.00 at shoukun but funding only has $4.00 — add money, then record it.");
+  assert.equal(db.notifications.find((n) => n.ref === pending.id).text, "Mia's Apple Cash spent $10.00 at shoukun but savings only has $4.00 — record received money, then retry it.");
   const route = `/api/parent/wallet/pending/${pending.id}/record`;
   assert.equal((await f.parent.call("POST", route, {})).status, 409);
-  await f.parent.call("POST", "/api/parent/funding/add", { amount: 6 });
+  await f.parent.call("POST", "/api/child/wallet/receive", { amount: 6 });
   const result = await f.parent.call("POST", route, {});
   assert.equal(result.status, 200);
-  assert.equal(result.body.duplicate, false);
+  assert.equal(result.body.duplicate, true);
   assert.equal((await f.parent.call("POST", route, {})).body.duplicate, true);
   assert.equal((await call()).body.id, result.body.id);
-  assert.equal(db.accounts.parent.balance, 0);
+  assert.equal(db.accounts.savings.balance, 0);
   assert.equal(db.walletPending.length, 0);
   assert.equal(db.transactions.filter((t) => t.kind === "wallet_spend").length, 1);
 });
@@ -135,21 +137,21 @@ test("H1.2: pending original payload wins on retry; dismissal is audited and ret
   await f.parent.call("POST", f.route("spend"), { amount: 10, merchant: "Books", external_id: "dismiss" });
   const pending = readChild(f.id).walletPending[0];
   assert.equal((await f.parent.call("POST", `/api/parent/wallet/pending/${pending.id}/dismiss`, {})).status, 200);
-  await f.parent.call("POST", "/api/parent/funding/add", { amount: 20 });
+  await f.parent.call("POST", "/api/child/wallet/receive", { amount: 20 });
   assert.equal((await f.parent.call("POST", f.route("spend"), { amount: 1, merchant: "Changed", external_id: "dismiss" })).body.status, "dismissed");
-  assert.equal(readChild(f.id).accounts.parent.balance, 2000);
+  assert.equal(readChild(f.id).accounts.savings.balance, 2000);
   assert.equal(readChild(f.id).walletPending.length, 0);
   assert.ok(readChild(f.id).audit.some((a) => a.action === "wallet_pending_dismissed"));
-  mutateChild(f.id, (db) => { db.accounts.parent.balance = 0; });
+  mutateChild(f.id, (db) => { db.accounts.savings.balance = 0; });
   await f.parent.call("POST", f.route("spend"), { amount: 10, merchant: "Original", external_id: "retry" });
-  await f.parent.call("POST", "/api/parent/funding/add", { amount: 20 });
+  await f.parent.call("POST", "/api/child/wallet/receive", { amount: 20 });
   const replay = await f.parent.call("POST", f.route("spend"), { amount: 1, merchant: "Changed", external_id: "retry" });
   assert.equal(replay.body.amount, 1000);
   assert.equal(replay.body.merchant, "Original");
 });
 
 test("H1.2: pending queue caps at 20 and evicted external IDs still do not notify twice", () => {
-  const db = seed(Date.now()); db.accounts.parent.balance = 0;
+  const db = seed(Date.now()); db.accounts.savings.balance = 0;
   for (let i = 0; i < 25; i++) spend(db, { external_id: `pending-${i}` });
   assert.equal(db.walletPending.length, 20);
   const before = structuredClone(db);
@@ -169,11 +171,12 @@ test("H1.2: durable idempotency survives ledger retention without points, audit 
   assert.deepEqual(restored, saved);
 });
 
-test("H1.2/6: G4 limit and unusual notices still fire without holds; G5 budgets seven-day Apple Cash pace", () => {
+test("H1.2/6: G4 limit and unusual notices still fire without holds; G5 excludes savings-funded Apple Cash purchases", () => {
   const now = Date.now(), db = seed(now);
   db.transactions = []; db.allowance.spendLimit = 500;
   for (let i = 0; i < 3; i++) spend(db, { amount: 100 }, now);
   const approvals = db.approvals.length;
+  db.accounts.savings.balance = 3000;
   const txn = spend(db, { amount: 2000 }, now);
   assert.equal(txn.status, "posted");
   assert.equal(txn.overLimit, true); assert.equal(txn.unusual, true);
@@ -181,14 +184,14 @@ test("H1.2/6: G4 limit and unusual notices still fire without holds; G5 budgets 
   assert.ok(db.audit.some((a) => a.data.policy === "G4.limit"));
   assert.ok(db.audit.some((a) => a.data.policy === "G4.anomaly"));
   assert.ok(db.notifications.some((n) => /above the \$5.00 purchase limit/.test(n.text)));
-  db.accounts.parent.balance = 3000;
+  db.accounts.savings.balance = 3000;
   assert.equal(hasDueWork(db, now), false);
   runGuardian(db, now);
-  assert.ok(db.audit.some((a) => a.data.policy === "G5"));
-  assert.equal(db.allowance.lowFundsWarnedFor, 300);
+  assert.equal(db.audit.some((a) => a.data.policy === "G5"), false);
+  assert.equal(db.allowance.lowFundsWarnedFor, undefined);
   runGuardian(db, now + 7 * DAY);
   assert.equal(db.allowance.lowFundsWarnedFor, undefined);
-  assert.equal(snapshot(db).apple_cash_note, "Apple Cash money comes from your grown-up's funding");
+  assert.equal(snapshot(db).apple_cash_note, "Apple Cash purchases deduct from savings; received money is added manually");
 });
 
 test("H1.2: malformed wallet purchases fail with 400 before any mutation", () => {
@@ -206,7 +209,7 @@ test("H1.1/3/5: views carry funding and timezone totals without a wallet account
   const txn = spend(db, { amount: 900 }, now);
   for (let i = 0; i < 70; i++) db.transactions.push({ id: `other-${i}`, kind: "spend", status: "posted", from: "spending", to: "merchant", amount: 1 });
   const child = childView(db, now), parent = parentView(db);
-  assert.equal(child.balances.parent, 24100); assert.equal(child.balances.wallet, undefined);
+  assert.equal(child.balances.savings, 1100); assert.equal(child.balances.parent, 25000); assert.equal(child.balances.wallet, undefined);
   assert.equal(child.walletSpent.today, 900);
   assert.equal(child.walletLastTransaction.id, txn.id);
   assert.ok(!child.transactions.some((t) => t.id === txn.id));
@@ -260,7 +263,7 @@ test("F2 token rotation invalidates the old child session and preserves paired b
 test("F2 Shortcut Bearer authentication scopes spends, pings and token access to the correct roles and family", async () => {
   const f = await family(), other = await family("other");
   const token = await tokenFor(f);
-  await f.parent.call("POST", "/api/parent/funding/add", { amount: 10 });
+  await f.parent.call("POST", "/api/child/wallet/receive", { amount: 10 });
   const before = structuredClone(readChild(f.id));
   assert.equal((await f.parent.call("POST", f.route("ping"), {}, token)).body.childId, f.id);
   assert.deepEqual(readChild(f.id).transactions, before.transactions);
@@ -274,8 +277,8 @@ test("F2 Shortcut Bearer authentication scopes spends, pings and token access to
   assert.equal((await f.parent.call("POST", f.route("ping"), null, token)).status, 400);
   assert.equal((await f.parent.call("POST", f.route("spend"), { amount: 3.25, merchant: "Books", external_id: "abc" }, token)).status, 200);
   assert.equal((await f.parent.call("POST", f.route("spend"), { amount: 3.25, merchant: "Books", external_id: "abc" }, token)).body.duplicate, true);
-  assert.equal(readChild(f.id).accounts.parent.balance, 675);
-  assert.equal(readChild(other.id).accounts.parent.balance, 0);
+  assert.equal(readChild(f.id).accounts.savings.balance, 675);
+  assert.equal(readChild(other.id).accounts.savings.balance, 0);
   // Parent cookies remain parent sessions after credential-less ping/spend tests.
   assert.equal((await f.parent.call("GET", "/api/auth/me")).body.role, "parent");
   const parentState = await f.parent.call("GET", "/api/parent/state");
@@ -287,9 +290,9 @@ test("H1.7: selected-child funding and external IDs stay isolated", async () => 
   const f = await family();
   const sibling = (await f.parent.call("POST", "/api/parent/children", { name: "Leo", age: 8, bearName: "Pip" })).body.id;
   for (const id of [f.id, sibling]) {
-    assert.equal((await f.parent.call("POST", `/api/parent/funding/add?child=${id}`, { amount: 10 })).status, 200);
+    assert.equal((await f.parent.call("POST", `/api/child/wallet/receive?child=${id}`, { amount: 10 })).status, 200);
     assert.equal((await f.parent.call("POST", `/api/child/wallet/spend?child=${id}`, { amount: 1, merchant: "Shop", external_id: "same" })).body.duplicate, false);
-    assert.equal(readChild(id).accounts.parent.balance, 900);
+    assert.equal(readChild(id).accounts.savings.balance, 900);
   }
   assert.equal((await f.parent.call("POST", "/api/parent/topup", { amount: 10 })).status, 404);
 });
@@ -297,7 +300,7 @@ test("H1.7: selected-child funding and external IDs stay isolated", async () => 
 test("F2b wallet ping and spend enforce independent 60/hour session limits without mutating rejected requests", async () => {
   const f = await family();
   const token = await tokenFor(f), now = Date.now();
-  await f.parent.call("POST", "/api/parent/funding/add", { amount: 10 });
+  await f.parent.call("POST", "/api/child/wallet/receive", { amount: 10 });
   const ping = () => f.parent.call("POST", f.route("ping"), {}, token, now);
   for (let i = 0; i < 60; i++) assert.equal((await ping()).status, 200);
   const afterPings = structuredClone(readChild(f.id));
@@ -329,19 +332,19 @@ test("F2b wallet ping and spend enforce independent 60/hour session limits witho
   const retry = await f.parent.call("POST", f.route("spend"), body, token, recoveredAt);
   assert.equal(retry.body.id, recovered.body.id);
   assert.equal(retry.body.duplicate, true);
-  assert.equal(readChild(f.id).accounts.parent.balance, 939);
+  assert.equal(readChild(f.id).accounts.savings.balance, 939);
 });
 
 test("F2b wallet quotas isolate paired sessions, sibling shortcuts and parent sessions sharing an IP", async () => {
   const f = await family();
   const token = await tokenFor(f), now = Date.now();
-  await f.parent.call("POST", "/api/parent/funding/add", { amount: 10 });
+  await f.parent.call("POST", "/api/child/wallet/receive", { amount: 10 });
   const link = await f.parent.call("POST", `/api/parent/children/${f.id}/link`, {});
   const kid = browser("wallet");
   assert.equal((await kid.call("POST", "/api/auth/link", { code: link.body.code })).status, 200);
   const sibling = (await f.parent.call("POST", "/api/parent/children", { name: "Leo", age: 8, bearName: "Pip" })).body.id;
   const siblingToken = (await f.parent.call("POST", `/api/child/wallet/token?child=${sibling}`, {})).body.token;
-  await f.parent.call("POST", `/api/parent/funding/add?child=${sibling}`, { amount: 10 });
+  await f.parent.call("POST", `/api/child/wallet/receive?child=${sibling}`, { amount: 10 });
   for (const action of ["ping", "spend"]) {
     const body = action === "ping" ? {} : { amount: 0.01, merchant: "Shop", external_id: "same" };
     for (let i = 0; i < 60; i++) assert.equal((await f.parent.call("POST", f.route(action), body, token, now)).status, 200);
@@ -384,9 +387,9 @@ test("F2 existing session databases migrate device kind and wallet receipts pers
     _databaseForTest(filename);
     const f = await family();
     const token = await tokenFor(f);
-    await f.parent.call("POST", "/api/parent/funding/add", { amount: 10 });
+    await f.parent.call("POST", "/api/child/wallet/receive", { amount: 10 });
     mutateChild(f.id, (db) => spend(db, { external_id: "persistent" }));
-    const balance = readChild(f.id).accounts.parent.balance;
+    const balance = readChild(f.id).accounts.savings.balance;
     // A legacy session table has no device-kind column. Simulate that schema.
     database().exec("ALTER TABLE sessions DROP COLUMN device_kind");
     closeDatabase();
@@ -396,7 +399,7 @@ test("F2 existing session databases migrate device kind and wallet receipts pers
     assert.equal((await f.parent.call("POST", f.route("ping"), {}, token)).status, 200);
     const replay = mutateChild(f.id, (db) => spend(db, { external_id: "persistent" }));
     assert.equal(replay.duplicate, true);
-    assert.equal(readChild(f.id).accounts.parent.balance, balance);
+    assert.equal(readChild(f.id).accounts.savings.balance, balance);
   } finally {
     closeDatabase();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -420,7 +423,7 @@ test("H1.2/7: pending routes require unlocked parent, enforce child/family isola
     await f.parent.call("POST", "/api/parent/unlock", { pin: "2468" });
   }
   assert.equal(readChild(f.id).walletPending.length, 1);
-  assert.equal(readChild(f.id).accounts.parent.balance, 0);
+  assert.equal(readChild(f.id).accounts.savings.balance, 0);
 });
 
 test("H1.1/2: SQLite read persists legacy migration once and pending receipts survive reopen with idempotency", async () => {
@@ -446,11 +449,12 @@ test("H1.1/2: SQLite read persists legacy migration once and pending receipts su
     assert.equal(readChild(f.id).walletPending[0].id, pendingId);
     assert.equal((await f.parent.call("POST", f.route("spend"), body)).status, 409);
     assert.equal(readChild(f.id).notifications.filter((n) => n.ref === pendingId).length, 1);
-    await f.parent.call("POST", "/api/parent/funding/add", { amount: 6 });
+    await f.parent.call("POST", "/api/child/wallet/receive", { amount: 10 });
     const posted = await f.parent.call("POST", f.route("spend"), body);
     assert.equal(posted.status, 200);
     assert.equal((await f.parent.call("POST", `/api/parent/wallet/pending/${pendingId}/record`, {})).body.id, posted.body.id);
-    assert.equal(readChild(f.id).accounts.parent.balance, 0);
+    assert.equal(readChild(f.id).accounts.parent.balance, 400);
+    assert.equal(readChild(f.id).accounts.savings.balance, 0);
   } finally {
     cancelReplan(); closeDatabase(); _clearStoreForTest(); fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -467,10 +471,70 @@ test("H1.5/6: Apple Cash totals use family dates and purchase time, and G5 ignor
   assert.equal(childView(db, now).walletLastTransaction.id, latest.id, "a late arrival is not the latest purchase");
   assert.deepEqual(parentView(db, undefined, now).walletSpent, { today: 200, week: 200, month: 300 });
   for (const [ts, status] of [[now - 7 * DAY, "posted"], [now + DAY, "posted"], [now, "reversed"]]) db.transactions.push({ kind: "wallet_spend", ts, status, amount: 10000 });
-  db.accounts.parent.balance = 1600;
+  db.accounts.parent.balance = db.allowance.amount;
   runGuardian(db, now);
   assert.equal(db.allowance.lowFundsWarnedAt, undefined, "funding covers allowance plus only the valid seven-day pace");
-  db.accounts.parent.balance = 1599;
+  db.accounts.parent.balance = db.allowance.amount - 1;
   runGuardian(db, now);
   assert.equal(db.allowance.lowFundsWarnedFor, 1);
+});
+
+test("Received money credits savings once, preserves other pots and survives SQLite reload", async () => {
+  const f = await family("received"), token = await tokenFor(f);
+  const body = { amount: 12.34, note: "From Dad", request_id: "parent-transfer" };
+  const before = structuredClone(readChild(f.id).accounts);
+  const first = await f.parent.call("POST", f.route("receive"), body, token);
+  assert.equal(first.status, 200); assert.equal(first.body.kind, "wallet_received");
+  assert.equal(readChild(f.id).accounts.savings.balance, before.savings.balance + 1234);
+  assert.equal(readChild(f.id).accounts.parent.balance, before.parent.balance);
+  assert.equal(readChild(f.id).accounts.spending.balance, before.spending.balance);
+  _clearStoreForTest();
+  const saved = structuredClone(readChild(f.id));
+  const retry = await f.parent.call("POST", f.route("receive"), { ...body, amount: 99 }, token);
+  assert.equal(retry.body.id, first.body.id); assert.equal(retry.body.amount, 1234); assert.equal(retry.body.duplicate, true);
+  assert.deepEqual(readChild(f.id).accounts, saved.accounts);
+  assert.equal(readChild(f.id).transactions.filter((t) => t.kind === "wallet_received").length, 1);
+  assert.equal(readChild(f.id).notifications.filter((n) => n.ref === first.body.id).length, 1);
+});
+
+test("Received money validates before mutation and cannot target siblings", async () => {
+  const db = seed(Date.now()), before = structuredClone(db);
+  for (const fields of [{ amount: 0 }, { amount: -1 }, { amount: 10001 }, { amount: true }, { note: "" }, { note: "x".repeat(121) }, { request_id: "" }, { request_id: null }, { request_id: "x".repeat(65) }]) {
+    assert.throws(() => actions.walletReceive(db, { amount: 1, note: "Dad", request_id: "one", ...fields }), is400);
+    assert.deepEqual(db, before);
+  }
+  const f = await family("receive-role"), token = await tokenFor(f);
+  const sibling = (await f.parent.call("POST", "/api/parent/children", { name: "Leo", age: 8, bearName: "Pip" })).body.id;
+  assert.equal((await f.parent.call("POST", `/api/child/wallet/receive?child=${sibling}`, { amount: 1, note: "Dad", request_id: "one" }, token)).status, 404);
+  assert.equal(readChild(sibling).accounts.savings.balance, 0);
+});
+
+test("Received money automatically settles durable pending receipts in order without negative savings", () => {
+  const db = seed(Date.now()); db.accounts.savings.balance = 0;
+  for (let i = 0; i < 22; i++) spend(db, { amount: 100, external_id: `queued-${i}` }, Date.now() + i);
+  assert.equal(db.walletPending.length, 20);
+  const funding = db.accounts.parent.balance;
+  const body = { amount: 2.5, note: "Dad", request_id: "deposit" };
+  actions.walletReceive(db, body);
+  assert.equal(db.accounts.savings.balance, 50);
+  assert.equal(db.accounts.parent.balance, funding);
+  assert.equal(db.walletReceipts["wallet:queued-0"].status, "posted");
+  assert.equal(db.walletReceipts["wallet:queued-1"].status, "posted");
+  assert.equal(db.walletReceipts["wallet:queued-2"].status, "waiting");
+  const saved = structuredClone(db);
+  assert.equal(actions.walletReceive(db, body).duplicate, true);
+  assert.deepEqual(db, saved);
+  assert.equal(spend(db, { amount: 100, external_id: "queued-0" }).duplicate, true);
+  assert.equal(db.accounts.savings.balance, 50);
+});
+
+test("Savings-funded Apple Cash leaves funding forecast alone and recalculates goal progress", () => {
+  const db = seed(Date.now());
+  db.accounts.savings.balance = 12000;
+  actions.walletSpend(db, { amount: 30, merchant: "Bookshop", external_id: "paid" });
+  assert.equal(db.accounts.savings.balance, 9000);
+  assert.equal(db.accounts.parent.balance, 25000);
+  assert.equal(childView(db).goals.find((g) => g.current).status, "active");
+  assert.equal(snapshot(db).apple_cash_money, "$90.00");
+  assert.equal(db.transactions.at(-1).from, "savings");
 });

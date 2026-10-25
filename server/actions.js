@@ -34,6 +34,9 @@ export const actions = {
     amount: money(body.amount, { min: 1 }), merchant: str(body.merchant),
     at: body.at, external_id: body.external_id,
   }, spendPolicy, now)),
+  walletReceive: action((db, body, now) => game.childWalletReceive(db, {
+    amount: money(body.amount, { min: 1 }), note: str(body.note), request_id: body.request_id,
+  }, spendPolicy, now)),
   walletSend: action(() => game.parentWalletSend()),
   walletRecord: action((db, body, pendingId, now) => game.recordWalletPending(db, id(pendingId), spendPolicy, now)),
   walletDismiss: action((db, body, pendingId) => game.dismissWalletPending(db, id(pendingId))),

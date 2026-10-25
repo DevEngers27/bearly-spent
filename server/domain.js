@@ -508,29 +508,28 @@ export function childSpend(db, { amount, memo }, policy, now = Date.now()) {
   return { held: false };
 }
 
-// Apple Cash receipts describe purchases already paid outside the app. Funding
-// covers the record; short receipts wait for a parent deposit without a debit.
+// Apple Cash receipts describe purchases already paid outside the app. Savings covers the record; short receipts wait for received money without a debit.
 export function parentWalletSend() {
-  throw new GameError("Use Add money in Allowance to fund Apple Cash", 410);
+  throw new GameError("Record received money in My money", 410);
 }
 
-const FUNDING_SHORT = "Your grown-up's funding is short for that. Ask them to add money!";
-function fundingShort(db, receipt) {
-  return { error: FUNDING_SHORT, reason: "funding_short", shortBy: receipt.amount - db.accounts.parent.balance };
+const SAVINGS_SHORT = "Your savings are short. Record money you received, then retry this purchase.";
+function savingsShort(db, receipt) {
+  return { error: SAVINGS_SHORT, reason: "savings_short", shortBy: receipt.amount - db.accounts.savings.balance };
 }
 
 function postWalletReceipt(db, receipt, policy, now, actor = "child") {
-  if (db.accounts.parent.balance < receipt.amount) return fundingShort(db, receipt);
+  if (db.accounts.savings.balance < receipt.amount) return savingsShort(db, receipt);
   const verdict = policy(db, receipt.amount, receipt.merchant, { alreadyPaid: true });
   const txn = {
-    id: uid("txn"), pendingId: receipt.id, ts: receipt.ts, recordedAt: now, from: "parent", to: "merchant",
+    id: uid("txn"), pendingId: receipt.id, ts: receipt.ts, recordedAt: now, from: "savings", to: "merchant",
     amount: receipt.amount, kind: "wallet_spend", memo: receipt.merchant, merchant: receipt.merchant,
     idempotencyKey: receipt.idempotencyKey, status: "posted",
     overLimit: !!verdict.overLimit, unusual: !!verdict.unusual,
   };
   if (receipt.external_id !== undefined) txn.external_id = receipt.external_id;
   // These receipts are local records, not instructions to the bank mirror.
-  db.accounts.parent.balance -= txn.amount;
+  db.accounts.savings.balance -= txn.amount;
   db.transactions.push(txn);
   (db.walletReceipts ||= {})[receipt.idempotencyKey] = { ...txn };
   db.walletPending = (db.walletPending || []).filter((p) => p.id !== receipt.id);
@@ -561,15 +560,15 @@ export function childWalletSpend(db, { amount, merchant, at, external_id }, poli
     id: uid("wpend"), ts, createdAt: now, amount, merchant, status: "waiting",
     idempotencyKey: key || uid("wallet"), ...(key ? { external_id: external_id.trim() } : {}),
   };
-  if (db.accounts.parent.balance >= receipt.amount) return postWalletReceipt(db, receipt, policy, now);
+  if (db.accounts.savings.balance >= receipt.amount) return postWalletReceipt(db, receipt, policy, now);
   if (!existing) {
     (db.walletReceipts ||= {})[receipt.idempotencyKey] = receipt;
     (db.walletPending ||= []).push(receipt);
     if (db.walletPending.length > 20) db.walletPending.splice(0, db.walletPending.length - 20);
-    notify(db, "parent", `${db.child.name}'s Apple Cash spent ${dollars(amount)} at ${merchant} but funding only has ${dollars(db.accounts.parent.balance)} — add money, then record it.`, "guardian", receipt.id);
-    audit(db, "child", "wallet_pending", `Apple Cash purchase of ${dollars(amount)} at ${merchant} is waiting for funding`, { pendingId: receipt.id });
+    notify(db, "parent", `${db.child.name}'s Apple Cash spent ${dollars(amount)} at ${merchant} but savings only has ${dollars(db.accounts.savings.balance)} — record received money, then retry it.`, "guardian", receipt.id);
+    audit(db, "child", "wallet_pending", `Apple Cash purchase of ${dollars(amount)} at ${merchant} is waiting for savings`, { pendingId: receipt.id });
   }
-  return fundingShort(db, receipt);
+  return savingsShort(db, receipt);
 }
 
 export function recordWalletPending(db, pendingId, policy, now = Date.now()) {
@@ -592,6 +591,33 @@ export function dismissWalletPending(db, pendingId) {
   for (const n of db.notifications) if (n.ref === pendingId) n.read = true;
   audit(db, "parent", "wallet_pending_dismissed", `Dismissed Apple Cash receipt of ${dollars(receipt.amount)} at ${receipt.merchant}`, { pendingId });
   return { ok: true };
+}
+
+// Money already received outside the app is credited once to the child's savings.
+// It is not another allowance payout and never debits parent funding.
+export function childWalletReceive(db, { amount, note, request_id }, policy, now = Date.now()) {
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1000000) throw new GameError("Enter an amount from $0.01 to $10,000");
+  if (typeof note !== "string" || !note.trim() || note.trim().length > 120) throw new GameError("Who sent you the money?");
+  if (typeof request_id !== "string" || !request_id.trim() || request_id.length > 64) throw new GameError("Use a short receipt ID");
+  const key = `received:${request_id.trim()}`;
+  const existing = db.walletReceipts?.[key];
+  if (existing) return { ...existing, duplicate: true };
+  if (!Number.isSafeInteger(db.accounts.savings.balance + amount)) throw new GameError("Savings balance is too large");
+  const txn = { id: uid("txn"), ts: now, from: "outside", to: "savings", amount,
+    kind: "wallet_received", memo: note.trim(), idempotencyKey: key, status: "posted" };
+  db.accounts.savings.balance += amount;
+  db.transactions.push(txn);
+  (db.walletReceipts ||= {})[key] = { ...txn };
+  audit(db, "child", "wallet_received", `Recorded ${dollars(amount)} received: ${txn.memo}`, { txnId: txn.id });
+  notify(db, "parent", `${db.child.name} recorded ${dollars(amount)} received: ${txn.memo}`, "info", txn.id);
+  // Retry saved purchases in arrival order, including receipts outside the visible list.
+  const waiting = Object.values(db.walletReceipts).filter((r) => r.status === "waiting").sort((a, b) => a.createdAt - b.createdAt);
+  for (const receipt of waiting) {
+    if (db.accounts.savings.balance < receipt.amount) break;
+    postWalletReceipt(db, receipt, policy, now);
+  }
+  moneyMoved(db, "Received money recorded");
+  return { ...txn, duplicate: false };
 }
 
 export function journal(db, { direction, amount, note, prices }, now = Date.now()) {

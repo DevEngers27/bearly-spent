@@ -1926,7 +1926,7 @@ test("H1: parent Apple Cash activity shows funding and historical purchase flags
   state.walletSpent = { week: 425, month: 425 };
   state.walletTransactions = [{ id: "wallet", ts: Date.now(), kind: "wallet_spend", amount: 425, memo: "Corner shop", uncovered: true }];
   const tree = h.render(h.exports.WalletLedger, { state });
-  assert.match(text(tree), /Apple Cash activity.*funding account:.*\$545.00.*week:.*\$4.25.*uncovered/);
+  assert.match(text(tree), /Apple Cash activity.*Savings available for Apple Cash:.*\$20.00.*week:.*\$4.25.*uncovered/);
   assert.equal(nodes(tree, (n) => n.type === "form").length, 0);
   const activity = harness("Parent.jsx");
   state.transactions = state.walletTransactions.map((t) => ({ ...t, from: "parent", to: "merchant", status: "posted" }));

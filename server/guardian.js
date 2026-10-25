@@ -235,7 +235,7 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
   actions.push(...reconcileNow(db, now, trigger));
 
   // G5 — warn once per funding-shortfall episode, including approved unpaid items.
-  const appleCashPace = db.transactions.filter((t) => t.kind === "wallet_spend" && t.status === "posted" && t.ts > now - 7 * DAY && t.ts <= now).reduce((sum, t) => sum + t.amount, 0);
+  const appleCashPace = db.transactions.filter((t) => t.kind === "wallet_spend" && t.from === "parent" && t.status === "posted" && t.ts > now - 7 * DAY && t.ts <= now).reduce((sum, t) => sum + t.amount, 0);
   const upcoming = db.allowance.amount + appleCashPace + db.approvals.filter((a) => ["pending", "approved"].includes(a.status) && !a.paidTxnId && (a.kind === "reward" || a.kind === "extra")).reduce((s, a) => s + a.amount, 0);
   const shortfall = upcoming - db.accounts.parent.balance;
   if (shortfall <= 0) {

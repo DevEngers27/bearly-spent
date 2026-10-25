@@ -9,7 +9,7 @@ merged by Claude (see `docs/VERSIONING.md`).
 ## [Unreleased]
 
 ### In progress (branches)
-- (none)
+- `feat/apple-cash-savings`: Apple Cash purchases use child savings; children can record received money. Review pending.
 
 ## [0.8.5] — 2026-10-25
 

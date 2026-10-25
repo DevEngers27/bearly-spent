@@ -259,13 +259,17 @@ register("POST", "/api/child/wallet/ping", "child", (req, ctx, res, now) => {
 register("POST", "/api/child/wallet/spend", "child", (req, ctx, res, now) => {
   takeLimit("walletSpend", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
   const result = runChildAction(ctx.childId, (db) => actions.walletSpend(db, req.body, now), "walletSpend", now);
-  if (result.reason === "funding_short") res.status(409);
+  if (result.reason === "savings_short") res.status(409);
   return result;
+});
+register("POST", "/api/child/wallet/receive", "child", (req, ctx, res, now) => {
+  takeLimit("walletReceive", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
+  return runChildAction(ctx.childId, (db) => actions.walletReceive(db, req.body, now), "wallet_receive", now);
 });
 register("POST", "/api/parent/wallet/send", "parent", () => game.parentWalletSend());
 register("POST", "/api/parent/wallet/pending/:id/record", "parent", (req, ctx, res, now) => {
   const result = runChildAction(ctx.childId, (db) => actions.walletRecord(db, req.body, req.params.id, now), "wallet_record", now);
-  if (result.reason === "funding_short") res.status(409);
+  if (result.reason === "savings_short") res.status(409);
   return result;
 });
 register("POST", "/api/parent/wallet/pending/:id/dismiss", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.walletDismiss(db, req.body, req.params.id), "wallet_dismiss", now));

@@ -173,23 +173,19 @@ test("W2c.1/5: real-family funding action runs Guardian immediately while demo t
   assert.equal(readChild(DEMO_CHILD_ID).transactions.at(-1).kind, "funding_in");
 });
 
-test("H1.2/6: Add money covers allowance and Apple Cash from one pot without auto-recording pending purchases", async () => {
+test("Apple Cash uses savings while Add money continues funding allowance", async () => {
   const { parent, id } = await family();
   const now = Date.now();
   mutateChild(id, (db) => { db.allowance.amount = 1000; db.allowance.nextRun = now; });
-  const receipt = { amount: 10, merchant: "Bookshop", external_id: "one-pot" };
+  const receipt = { amount: 10, merchant: "Bookshop", external_id: "separate-pots" };
   assert.equal((await parent.call("POST", "/api/child/wallet/spend", receipt)).status, 409);
-  const pendingId = readChild(id).walletPending[0].id;
-  assert.equal((await parent.call("POST", "/api/parent/funding/add", { amount: 15 })).status, 200);
-  assert.equal(readChild(id).accounts.parent.balance, 500, "allowance draws from the same deposit");
-  assert.equal(readChild(id).walletPending.length, 1, "Add money does not silently record a receipt");
-  const route = `/api/parent/wallet/pending/${pendingId}/record`;
-  const stillShort = await parent.call("POST", route, {});
-  assert.equal(stillShort.status, 409);
-  assert.equal(stillShort.body.shortBy, 500);
-  assert.equal((await parent.call("POST", "/api/parent/funding/add", { amount: 5 })).status, 200);
-  assert.equal((await parent.call("POST", route, {})).status, 200);
-  assert.equal(readChild(id).accounts.parent.balance, 0);
+  await parent.call("POST", "/api/parent/funding/add", { amount: 15 });
+  assert.equal(readChild(id).accounts.parent.balance, 500);
+  assert.equal(readChild(id).accounts.savings.balance, 500);
+  assert.equal(readChild(id).walletPending.length, 1);
+  await parent.call("POST", "/api/child/wallet/receive", { amount: 5, note: "From Dad", request_id: "transfer-1" });
+  assert.equal(readChild(id).accounts.savings.balance, 0);
+  assert.equal(readChild(id).accounts.parent.balance, 500);
+  assert.equal(readChild(id).walletPending.length, 0);
   assert.equal((await parent.call("POST", "/api/child/wallet/spend", receipt)).body.duplicate, true);
-  assert.ok(Object.values(readChild(id).accounts).every((a) => a.balance >= 0));
 });

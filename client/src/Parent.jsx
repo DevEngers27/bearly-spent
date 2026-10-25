@@ -166,9 +166,8 @@ function Inbox({ state, run, demo, pending, busy, onAddMoney, mobile }) {
       <ul className="approval-list">
         {receipts.map((receipt) => <li key={receipt.id} className="approval k-wallet_pending">
           <span className="kind-tag">{KIND_LABEL.wallet_pending}</span>
-          <div className="approval-body"><strong>{state.child.name}'s Apple Cash spent {money(receipt.amount)} at {receipt.merchant}</strong><p>Waiting for funding · {formatDateTime(receipt.ts)}</p><p>Add money, then record it.</p></div>
+          <div className="approval-body"><strong>{state.child.name}'s Apple Cash spent {money(receipt.amount)} at {receipt.merchant}</strong><p>Waiting for savings · {formatDateTime(receipt.ts)}</p><p>Your child can add received money in My money → Received. Then this receipt can be recorded.</p></div>
           <div className="approval-actions">
-            <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>
             <button disabled={busy} className="pbtn" onClick={() => run(`parent/wallet/pending/${receipt.id}/record`, {}, "Apple Cash purchase recorded")}>Record now</button>
             <button disabled={busy} className="pbtn" onClick={() => run(`parent/wallet/pending/${receipt.id}/dismiss`, {}, "Receipt dismissed")}>Dismiss</button>
           </div>
@@ -236,7 +235,7 @@ function Overview({ state, onAddMoney, busy }) {
       <div className="p-figures">
         <Figure label={`${state.child.name}'s savings`} value={money(state.accounts.savings.balance)} sub={goal ? `${Math.round((state.accounts.savings.balance / goal.target) * 100)}% of ${goal.title}` : "Set a savings goal"} />
         <Figure label="Spending money" value={money(state.accounts.spending.balance)} />
-        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Covers allowance and Apple Cash" />
+        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Covers allowance and rewards" />
         <Figure label="Adventure points" value={state.child.points} sub="Game points, not money" />
       </div>
       {state.accounts.parent.balance === 0 && state.allowance.amount > 0 && <section className="p-card">
@@ -425,7 +424,7 @@ function Activity({ state }) {
           {state.transactions.map((t) => (
             <tr key={t.id} className={t.status !== "posted" ? "struck" : t.flagged ? "flag" : ""}>
               <td data-label="When"><span className="p-cell-value">{formatDateTime(t.ts)}</span></td>
-              <td data-label="What"><span className="p-cell-value">{t.kind === "wallet_in" ? "Sent via Apple Cash (before 0.7)" : t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</span></td>
+              <td data-label="What"><span className="p-cell-value">{t.kind === "wallet_in" ? "Sent via Apple Cash (before 0.7)" : t.memo}{["wallet_in", "wallet_spend", "wallet_received"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</span></td>
               <td data-label="From → to"><span className="p-cell-value">{label[t.from]} → {label[t.to]}</span></td>
               <td data-label="Amount" className="num"><span className="p-cell-value">{money(t.amount)}</span></td>
               <td data-label="Status"><span className="p-cell-value">{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}{t.uncovered ? " · uncovered" : ""}</span></td>
@@ -665,13 +664,13 @@ function Children({ state, me, refreshMe, run, busy }) {
 
 function WalletLedger({ state }) {
   const rows = [
-    ...(state.walletPending || []).map((r) => ({ ...r, memo: r.merchant, status: "waiting for funding" })),
+    ...(state.walletPending || []).map((r) => ({ ...r, memo: r.merchant, status: "waiting for savings" })),
     ...(state.walletTransactions || []).filter((t) => t.kind === "wallet_spend"),
   ];
   return <section className="p-card p-stack">
     <h2>Apple Cash activity</h2>
-    <p>{state.child.name}'s funding account: <strong>{money(state.accounts.parent.balance)}</strong></p>
-    <p className="p-muted">Apple Cash money comes from your grown-up's funding. Check actual purchases in Wallet.</p>
+    <p>Savings available for Apple Cash: <strong>{money(state.accounts.savings.balance)}</strong></p>
+    <p className="p-muted">Apple Cash purchases deduct from the child’s savings. Received money can be added in My money → Received. Check actual payments in Wallet.</p>
     <p>Apple Cash spent this week: <strong>{money(state.walletSpent?.week ?? 0)}</strong> · This month: <strong>{money(state.walletSpent?.month ?? 0)}</strong></p>
     {state.walletLastPing && <p>Last connection test: {formatDateTime(state.walletLastPing)}</p>}
     <table className="ptable" role="table"><thead><tr><th>When</th><th>What</th><th>Amount</th><th>Status</th></tr></thead><tbody>

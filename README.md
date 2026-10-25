@@ -132,7 +132,7 @@ The UI uses hand-drawn SVGs in `client/src/Icons.jsx` plus illustrated PNGs. Cus
 - Spending outside Apple Cash is manually recorded, and the cash diary does not change balances. Savings cannot yet be withdrawn or used for an actual purchase; Buddy's savings-purchase simulation is hypothetical.
 - Friends and their team contributions are simulated. Team progress has no completion reward, and some aspirational milestone effects in the catalog are not rendered.
 - External integration badges reflect configuration, not a successful live connection.
-- [Apple Cash tracking](docs/apple-cash-shortcut.md) deducts purchases logged manually or by an iPhone Shortcut from the same funding account that covers allowance. Add money in Allowance; short-funded receipts wait in Inbox for Record now or Dismiss. MoneyQuest cannot send Apple Cash or read the actual Wallet balance. Check Wallet and avoid logging a purchase twice.
+- [Apple Cash tracking](docs/apple-cash-shortcut.md) deducts purchases logged manually or by an iPhone Shortcut from the child’s savings. The child adds money already received from a parent in My money → Received. Short-savings receipts wait until covered; adding received money retries queued receipts automatically. Funding remains separate for allowance and rewards. MoneyQuest cannot send Apple Cash or read the actual Wallet balance. Check Wallet and avoid logging a purchase twice.
 
 ## Testing and review
 

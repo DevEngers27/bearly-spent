@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { randomUUID } from "node:crypto";
 import { build } from "esbuild";
 import { seed } from "../server/store.js";
 import { parentView } from "../server/index.js";
@@ -49,7 +50,7 @@ function harness(name, { controller = null } = {}) {
     h: (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } }), Fragment: "fragment",
     window, document: env.document, navigator: env.navigator, sessionStorage: storageApi(session), localStorage: storageApi(storage),
     location: env.location, history: { replaceState: (a, b, url) => { env.location.href = url.href; } },
-    fetch: (...args) => env.fetch(...args), Event, URL, URLSearchParams, console,
+    crypto: { randomUUID }, fetch: (...args) => env.fetch(...args), Event, URL, URLSearchParams, console,
     EventSource: class { constructor(url) { this.url = url; streams.push(this); } close() { this.closed = true; } },
     SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } },
     Date: class extends Date { static now() { return env.now; } },
@@ -78,6 +79,7 @@ function stateFixture() {
 
 test("H1.5: Paid with defaults to Apple Cash, validates the selected source and guards form submit", async () => {
   const h = harness("Child.jsx"), calls = [], state = stateFixture();
+  state.balances.savings = 400;
   const props = { state, start: "spend", close: noop, run: async (...args) => { calls.push(args); return {}; } };
   const render = () => h.render(h.exports.MoneySheet, props);
   let tree = render();
@@ -87,7 +89,7 @@ test("H1.5: Paid with defaults to Apple Cash, validates the selected source and 
   nodes(tree, (n) => n.props.id === "money-amount")[0].props.onChange({ target: { value: "4.25" } });
   tree = render();
   assert.equal(byText(tree, "Record it").props.disabled, true);
-  assert.match(text(tree), /Your grown-up's funding is short for that. Ask them to add money!/);
+  assert.match(text(tree), /Your savings are short. Record money you received first./);
   await nodes(tree, (n) => n.type === "form")[0].props.onSubmit(submit);
   assert.equal(calls.length, 0);
   byText(tree, "Spending money").props.onClick();
@@ -101,7 +103,7 @@ test("H1.5: Paid with defaults to Apple Cash, validates the selected source and 
   assert.equal(calls[0][2]({ held: true }), "That's a big buy. We asked your grown-up first.");
   state.balances.spending = 400;
   assert.equal(byText(render(), "Record it").props.disabled, true);
-  state.balances.parent = 425;
+  state.balances.savings = 425;
   byText(render(), "Apple Cash").props.onClick();
   assert.equal(byText(render(), "Record it").props.disabled, false);
   await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
@@ -109,18 +111,18 @@ test("H1.5: Paid with defaults to Apple Cash, validates the selected source and 
   assert.equal(calls[1][1].amount, 4.25);
 });
 
-test("H1.5: Home strip shows funding as Apple Cash money and opens each source; pill shows today and last spend", () => {
+test("H1.5: Home strip shows child savings and spending without parent funding; pill shows today and last spend", () => {
   const state = stateFixture();
   state.walletSpent = { today: 650 };
   state.walletLastTransaction = { memo: "Lunch", amount: 425, ts: Date.now() };
   const h = harness("Child.jsx"), opened = [];
   const tree = h.render(h.exports.Home, { state, open: (...args) => opened.push(args) });
   const strip = nodes(tree, (n) => n.props.className === "balances-strip")[0];
-  assert.match(text(strip), /Savings.*\$20.00.*Spending.*\$10.00.*Apple Cash money.*\$4.00.*set aside by your grown-up/);
+  assert.match(text(strip), /Savings.*\$20.00.*Spending.*\$10.00/);
   const buttons = nodes(strip, (n) => n.type === "button");
-  assert.equal(buttons.length, 3);
+  assert.equal(buttons.length, 2);
   buttons.forEach((button) => button.props.onClick());
-  assert.equal(JSON.stringify(opened), JSON.stringify([["money", {}], ["money", { start: "spend", wallet: false }], ["money", { start: "spend", wallet: true }]]));
+  assert.equal(JSON.stringify(opened), JSON.stringify([["money", {}], ["money", { start: "spend", wallet: false }]]));
   assert.match(text(nodes(tree, (n) => n.props.className === "wallet-pill")[0]), /Apple Cash.*\$6.50.*today.*Lunch.*\$4.25/);
 });
 
@@ -132,7 +134,7 @@ test("H1.4: Overview renders four figures with funding coverage and body-font nu
   assert.equal(figures.length, 4);
   assert.deepEqual(Array.from(figures, (n) => n.props.label), ["Mia's savings", "Spending money", "Funding account", "Adventure points"]);
   assert.equal(figures[2].props.value, "$545.00");
-  assert.equal(figures[2].props.sub, "Covers allowance and Apple Cash");
+  assert.equal(figures[2].props.sub, "Covers allowance and rewards");
   const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
   const numberRule = css.match(/\.p-figure b \{([^}]+)\}/)[1];
   for (const rule of [/font-family: var\(--body\)/, /font-variant-numeric: tabular-nums/, /min-width: 0/, /overflow-wrap: anywhere/, /line-height: 1.25/]) assert.match(numberRule, rule);
@@ -144,17 +146,37 @@ test("H1.2/3: Inbox pending card wires Add money, Record now and Dismiss; Apple 
   state.walletPending = [{ id: "receipt-one", amount: 1000, merchant: "shoukun", ts: Date.now() }];
   state.notifications = []; state.approvals = [];
   const tree = h.render(h.exports.Inbox, { state, pending: [], run: async (...args) => calls.push(args), onAddMoney: () => calls.push(["focus-funding"]), mobile: true });
-  assert.match(text(tree), /Mia.*Apple Cash spent\s+\$10.00\s+at\s+shoukun.*Waiting for funding/);
+  assert.match(text(tree), /Mia.*Apple Cash spent\s+\$10.00\s+at\s+shoukun.*Waiting for savings/);
   assert.equal(nodes(tree, (n) => n.props.className === "empty").length, 1, "only Notifications is empty");
-  await byText(tree, "Add money").props.onClick();
   await byText(tree, "Record now").props.onClick();
   await byText(tree, "Dismiss").props.onClick();
-  assert.equal(JSON.stringify(calls.map((call) => call[0])), JSON.stringify(["focus-funding", "parent/wallet/pending/receipt-one/record", "parent/wallet/pending/receipt-one/dismiss"]));
+  assert.equal(JSON.stringify(calls.map((call) => call[0])), JSON.stringify(["parent/wallet/pending/receipt-one/record", "parent/wallet/pending/receipt-one/dismiss"]));
   const busy = h.render(h.exports.Inbox, { state, pending: [], busy: true });
-  for (const label of ["Add money", "Record now", "Dismiss"]) assert.equal(byText(busy, label).props.disabled, true);
+  for (const label of ["Record now", "Dismiss"]) assert.equal(byText(busy, label).props.disabled, true);
   state.walletSpent = { week: 425, month: 625 };
   state.walletTransactions = [{ id: "posted", ts: Date.now(), memo: "Lunch", amount: 425, kind: "wallet_spend", status: "posted", overLimit: true, unusual: true }];
   const activity = h.render(h.exports.WalletLedger, { state });
-  assert.match(text(activity), /Apple Cash activity.*week:.*\$4.25.*month:.*\$6.25.*shoukun.*waiting for funding.*Lunch.*above purchase limit.*unusual spend/);
+  assert.match(text(activity), /Apple Cash activity.*week:.*\$4.25.*month:.*\$6.25.*shoukun.*waiting for savings.*Lunch.*above purchase limit.*unusual spend/);
   assert.equal(nodes(activity, (n) => n.type === "form").length, 0);
+});
+
+
+test("Received form credits actual received money and preserves the request ID across a failed retry", async () => {
+  const h = harness("Child.jsx"), calls = [], state = stateFixture();
+  let closed = 0;
+  const props = { state, start: "receive", close: () => closed++, run: async (...args) => { calls.push(args); return calls.length === 1 ? null : {}; } };
+  const render = () => h.render(h.exports.MoneySheet, props);
+  assert.match(text(render()), /Received.*Who sent you the money/);
+  assert.match(text(render()), /Do not add allowance or rewards already recorded/);
+  const amount = () => nodes(render(), (n) => n.props.id === "money-amount")[0];
+  assert.equal(amount().props.step, "0.01");
+  amount().props.onChange({ target: { value: "12.34" } });
+  nodes(render(), (n) => n.type === "input" && n.props.maxLength === 80)[0].props.onChange({ target: { value: "Dad" } });
+  for (let i = 0; i < 2; i++) await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.equal(calls[0][0], "child/wallet/receive");
+  assert.equal(calls[0][1].amount, 12.34);
+  assert.equal(calls[0][1].note, "Dad");
+  assert.ok(calls[0][1].request_id);
+  assert.equal(calls[0][1].request_id, calls[1][1].request_id);
+  assert.equal(closed, 1);
 });

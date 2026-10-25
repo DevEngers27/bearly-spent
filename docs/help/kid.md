@@ -14,8 +14,9 @@ Tip: Your grown-up can read your chats. Keep passwords, addresses, and phone num
 1. Tap **Save money** or **Spent money** on **Home** to open **My money**.
 2. In **Save**, choose an amount and tap **Save it**. This moves spending money into savings.
 3. In **Spent**, choose **Apple Cash** or **Spending money** under **Paid with**, enter the amount and what you bought, then tap **Record it**.
-4. Use **Cash diary** and **Add to diary** for cash outside the app. It does not change your app balances.
-Tip: Only record Apple Cash yourself if your Shortcut has not already recorded it. Ask your grown-up if funding is short. MoneyQuest records money; it does not send real money.
+4. When your grown-up sends you money outside the app, open **Received**, enter the amount and sender, then tap **Add received money**. This adds to savings. Do not add allowance or rewards already recorded in the app.
+5. Use **Cash diary** and **Add to diary** for cash outside the app. It does not change your app balances.
+Tip: Apple Cash purchases deduct from savings automatically when your configured Shortcut reports them. Only record a purchase yourself if your Shortcut has not already recorded it. If savings are short, the purchase waits; recording received money retries waiting purchases. MoneyQuest records money; it does not send real money.
 
 ## Goals
 1. On **Home**, tap **Switch goal**, or **My goals** if you have no current goal.

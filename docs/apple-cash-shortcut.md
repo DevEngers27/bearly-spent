@@ -1,9 +1,11 @@
 # Apple Cash tracking
 
 MoneyQuest records Apple Cash activity; it does not connect to an Apple Cash API,
-send money or read the actual Wallet balance. Apple Cash money comes from your
-grown-up's funding: allowance and recorded Apple Cash purchases use the same
-funding account. Add money in Allowance to record funds set aside for your child.
+send money or read the actual Wallet balance. Apple Cash purchases deduct from
+**the child's savings**. When a parent sends money outside the app, the child
+records it in **My money → Received**, entering the amount and who sent it. This
+adds to savings without deducting parent Funding. Do not add allowance or rewards
+that MoneyQuest has already credited.
 Use only the Apple Cash card in your automation, not every card in Wallet.
 
 ## Create the child's Shortcut token
@@ -87,42 +89,42 @@ A successful phone ping checks the token and connection. Check the next real
 purchase against the ledger to verify the transaction automation too.
 401 means revoked/expired credentials; generate a new token and update the phone.
 
-## Funding and manual purchases
+## Received money and purchases
 
-Use **Allowance → Add money** to record money set aside for your child. Funding
-covers both allowance and Apple Cash purchases. There is no separate Apple Cash
-account or Send via Apple Cash form; the former send route returns HTTP 410.
-Check the actual balance and payments in Wallet yourself.
+After receiving money from a parent, the child opens **My money → Received**,
+enters the amount and sender, then taps **Add received money**. This credits
+savings as `outside → savings`, kind `wallet_received`, and notifies the parent.
+The client supplies a stable `request_id` for retries. The money is already
+received outside the app; this entry does not send a payment, debit Funding,
+or credit Spending. Avoid adding allowance or rewards already recorded.
 
-The child can use **My money → Spent → Paid with → Apple Cash** (the default) to
-record a purchase manually, or choose **Spending money** for that pot. The sheet
-shows the selected source's available amount and disables Record when short.
-Avoid manually logging any purchase the automation already recorded: manual
-entries have no shared external ID and cannot be automatically matched.
-Apple Cash entries are tagged in Recent, parent Transactions and Apple Cash activity.
+With the Apple Cash Transaction automation configured above, each reported
+purchase deducts from savings automatically. Without that automation the app
+cannot observe Wallet activity. The child can manually use **My money → Spent →
+Apple Cash** for an unrecorded purchase. Do not manually enter a purchase already
+reported by the Shortcut. **Spending money** still uses the separate Spending pot.
 
-A covered purchase records `parent → merchant`, kind `wallet_spend`. Purchases
-above the purchase limit notify the parent and still record, because they already
-happened; G4 also flags unusual purchases. Short funding never posts a transfer
-or makes funding negative. Instead, the server keeps a pending receipt (latest
-20) and notifies the parent once. Inbox has **Add money**, **Record now**, and
-**Dismiss**. After adding funds, Record now posts exactly once; retrying the
-original Shortcut ID returns the same transaction. Dismiss is audited and that
-external ID will not post on later retries. Apple Cash activity lists pending
-receipts as **waiting for funding**, plus weekly/monthly spending totals.
+New purchases post `savings → merchant`, kind `wallet_spend`. Over-limit purchases
+notify the parent but are recorded because the payment already happened. When
+savings are short, the API saves the original receipt and returns HTTP 409 with
+`reason: "savings_short"` and `shortBy` in cents; no account goes negative. Recording
+received money automatically retries waiting receipts in arrival order, stopping
+at the first receipt that savings cannot cover. This includes retained receipt
+IDs outside the newest-20 visible pending list. Parent Inbox also offers
+**Record now** and **Dismiss**. Retrying a posted or dismissed external ID does not
+deduct again. Keep the original external ID and body through network/rate retries.
+
+Parent Funding continues to cover scheduled allowance and approved rewards.
+It is separate from the child's savings and is not charged for new Apple Cash
+purchases. Historical purchases keep their original source and are not recharged.
+Legacy wallet migration is unchanged. Apple Cash activity shows savings, pending
+receipts, and weekly/monthly purchase totals; check real payments in Wallet.
 
 | HTTP | Meaning | What to do |
 | --- | --- | --- |
-| 200 | Recorded; `duplicate:true` means already recorded. A dismissed receipt returns `status:"dismissed"` without a debit. | Finish; do not submit a new ID. |
-| 409 | `{error,reason:"funding_short",shortBy}`; shortBy is cents; receipt saved, no debit. | Ask the parent to Add money and Record now, or retry the original body and external ID after funding. |
-| 429 | Quota used; `Retry-After` header and `retryAfterSeconds` give the wait. | Keep the purchase and original ID; retry after the delay. |
-
-The original receipt details win if a retry changes its payload. Receipt keys
-survive retention and restart; purchases older than the pending list cap can
-still be retried with their original external ID once funded. Old sent-money
-history is labeled **Sent via Apple Cash (before 0.7)**. Migration moves positive
-legacy Apple Cash balances to funding, drops negative tracked balances, and audits
-the change.
+| 200 | Recorded; `duplicate:true` means already processed. | Finish; do not create another ID. |
+| 409 | `reason:"savings_short"`; original receipt saved without a debit. | Record genuinely received money; queued receipts retry automatically, or retry the original purchase. |
+| 429 | `Retry-After` and `retryAfterSeconds` give the wait. | Preserve the original body and ID and retry after the delay. |
 
 ## Token API
 

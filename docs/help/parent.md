@@ -22,8 +22,9 @@ Tip: MoneyQuest is a simulated ledger. Adding funding and paying allowance never
 1. Open **Children** and find **Apple Cash tracking** for the right child. Set a parent PIN first, then unlock parent mode.
 2. Choose **Generate Shortcut token** and **Copy token**. Follow the setup guide at /help/apple-cash (also linked by **How to connect the iPhone Shortcut**).
 3. Run the Shortcut connection test and check **Connected**. Rotating a token disconnects the previous Shortcut. **Unlink** disconnects it too.
-4. Check **Apple Cash activity**. Receipts waiting for funding appear in **Approvals**; choose **Add money**, then **Record now**, or **Dismiss** an unwanted receipt.
-Tip: The Shortcut records purchases already made in Wallet. It never sends Apple Cash. Do not record the same purchase manually as well. Never paste a Shortcut token into help or chat.
+4. Check **Apple Cash activity**. Purchases deduct from the child's savings. After receiving money outside the app, the child records it in My money → Received. This credits savings without charging Funding.
+5. Receipts waiting for savings appear in **Approvals**. Recording received money retries them automatically; you can also choose **Record now**, or **Dismiss** an unwanted receipt.
+Tip: The Shortcut records purchases already made in Wallet. It never sends Apple Cash. Do not record the same purchase manually as well, or add received money already credited as allowance or rewards. Never paste a Shortcut token into help or chat.
 
 ## Approvals
 1. Open **Inbox** on a phone, or **Approvals** in the desktop sidebar, for the selected child.

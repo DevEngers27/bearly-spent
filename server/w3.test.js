@@ -20,7 +20,7 @@ test("W3.1: offline helper, trip notifications and audit use the child's bear na
   db.child.points = 500;
   game.startAdventure(db, "san_francisco", now);
   game.finalizeAdventures(db, now + game.ADVENTURE_MS);
-  db.accounts.parent.balance = 0;
+  db.accounts.savings.balance = 0;
   game.childWalletSpend(db, { amount: 100, merchant: "Bookshop" }, spendPolicy, now);
   assert.ok(db.notifications.some((n) => /Bo is home/.test(n.text)));
   assert.ok(db.notifications.some((n) => n.text.startsWith(`${db.child.name}'s Apple Cash`)), "the overspend notice names the child, not the bear");
