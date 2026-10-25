@@ -11,7 +11,7 @@ import * as catalog from "../server/catalog.js";
 import { childView } from "../server/index.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
-  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet", "Parent.jsx": "Overview, Goals, Allowance, Inbox, Guardian, Settings, Children, Security, BuddyLog", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot" }[name];
+  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet", "Parent.jsx": "Overview, Goals, Allowance, Inbox, Guardian, Settings, Children, Security, BuddyLog", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
   const result = await build({
     stdin: { contents: await readFile(new URL(`src/${name}`, import.meta.url), "utf8") + (extra ? `\nexport { ${extra} };` : ""), resolveDir: new URL("src/", import.meta.url).pathname, loader: "jsx" },
     bundle: true, write: false, format: "cjs", external: ["react"], jsxFactory: "h", jsxFragment: "Fragment", define: { "import.meta.env.PROD": "false" },
@@ -433,7 +433,8 @@ test("C6 / C16 / C3: App returns to Welcome on unauthorized; controllerchange of
   byText(tree, "Updated! Tap to reload").props.onClick();
   assert.equal(reloads, 1);
   const loading = h.render(h.exports.Loading, { error: new Error("Failed to fetch") });
-  assert.equal(text(loading).trim(), "Can't reach MoneyQuest right now. Check your connection and try again.");
+  assert.match(text(loading), /Can't reach MoneyQuest right now\. Check your connection and try again\./);
+  assert.ok(byText(loading, "Try again"));
 });
 
 // Wave 2 account integration: exercise real event handlers without sockets.
@@ -645,7 +646,7 @@ test("B5b: Children pairs the path child consistently, counts down expiry, and a
   assert.equal(refreshed, 1);
 });
 
-test("B5b: Security sets or changes PIN and makes unavailable global sign-out explicit", async () => {
+test("B5b: Security sets or changes PIN and offers global sign-out", async () => {
   for (const pinSet of [false, true]) {
     const h = harness("Parent.jsx"), requests = [];
     let refreshed = 0;
@@ -656,8 +657,8 @@ test("B5b: Security sets or changes PIN and makes unavailable global sign-out ex
     await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
     assert.deepEqual(requests, [["/api/parent/pin", { pin: "5678" }]]);
     assert.equal(refreshed, 1);
-    assert.equal(byText(render(), "Sign out everywhere").props.disabled, true);
-    assert.match(text(render()), /isn't available yet/);
+    assert.notEqual(byText(render(), "Sign out everywhere").props.disabled, true);
+    assert.equal(byText(render(), "Confirm sign out everywhere"), undefined);
   }
 });
 
@@ -744,9 +745,16 @@ test("B5b: client cookie requests work against the real account dispatcher throu
   await assert.rejects(parent.api("parent/state"), { status: 403, message: "Please unlock parent mode" });
   await parent.api("parent/unlock", { pin: "5678" });
   assert.equal((await parent.api("parent/state")).childId, second.id);
+  const otherParent = browser("other-parent-client");
+  await otherParent.api("auth/login", { email: "wave2@example.test", password: "a-good-password" });
+  await assert.rejects(otherParent.api("auth/logout-all", {}), { status: 403, message: "Please unlock parent mode" });
+  await otherParent.api("parent/unlock", { pin: "5678" });
+  await otherParent.api("auth/logout-all", {});
+  await assert.rejects(otherParent.api("auth/me"), { status: 401 });
+  await assert.rejects(parent.api("auth/me"), { status: 401 });
+  assert.equal((await kid.api("state")).child.name, "Leo");
   await kid.api("auth/logout", {});
   await assert.rejects(kid.api("auth/me"), { status: 401 });
-  assert.equal((await parent.api("auth/me")).role, "parent");
 });
 
 test("B5b: Welcome handles demo discovery on both public success and unauthenticated error responses", async () => {
@@ -761,4 +769,242 @@ test("B5b: Welcome handles demo discovery on both public success and unauthentic
     assert.equal(welcome.props.demo, true);
     assert.equal(welcome.props.error, null);
   }
+});
+
+test("B5b follow-up R1/R4: wrong password, wrong PIN and rate limits stay inline without losing input or identity", async () => {
+  for (const form of ["signin", "pin"]) {
+    for (const status of [401, 429]) {
+      const h = harness("App.jsx");
+      h.storage.set("mq_last_state", "keep snapshot");
+      h.storage.set("mq_child_session", "keep identity");
+      let unauthorized = 0, limited = 0, accepted = 0;
+      h.window.addEventListener("mq:unauthorized", () => unauthorized++);
+      h.window.addEventListener("mq:rate-limit", () => limited++);
+      const message = status === 429 ? "Let's take a little break. Try again soon!" : form === "pin" ? "That PIN didn't match" : "Email or password didn't match";
+      const component = form === "pin" ? h.exports.PinGate : h.exports.AuthScreen;
+      const props = { screen: "signin", navigate: () => assert.fail("must stay on form"), onSession: () => accepted++, onOk: () => accepted++, onCancel: noop };
+      const render = () => h.render(component, props);
+      changeField(render(), form === "pin" ? "Parent PIN" : "Email", form === "pin" ? "5678" : "parent@example.test");
+      h.fetch = async () => new Response(JSON.stringify({ error: message }), { status });
+      await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+      await new Promise(setImmediate);
+      const tree = render();
+      assert.equal(nodes(tree, (n) => n.props.role === "alert").map(text).join(""), message);
+      assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, form === "pin" ? "5678" : "parent@example.test");
+      assert.equal(h.storage.get("mq_last_state"), "keep snapshot");
+      assert.equal(h.storage.get("mq_child_session"), "keep identity");
+      assert.equal(unauthorized, 0);
+      assert.equal(limited, status === 429 ? 1 : 0);
+      assert.equal(accepted, 0);
+    }
+  }
+  const h = harness("api.js");
+  h.fetch = async () => new Response('{"error":"Try again"}', { status: 401 });
+  let unauthorized = 0;
+  h.window.addEventListener("mq:unauthorized", () => unauthorized++);
+  await assert.rejects(h.exports.api("parent/unlock?child=one", {}), { status: 401 });
+  await assert.rejects(h.exports.api("auth/login?next=home", {}), { status: 401 });
+  assert.equal(unauthorized, 0);
+  await assert.rejects(h.exports.api("state"), { status: 401 });
+  assert.equal(unauthorized, 1);
+});
+
+test("B5b follow-up R2: only child-scoped 404 requests for the current identity trigger selection recovery", async () => {
+  const h = harness("api.js");
+  let resets = 0;
+  h.window.addEventListener("mq:child-reset", () => resets++);
+  h.fetch = async () => new Response('{"error":"Child not found"}', { status: 404 });
+  await assert.rejects(h.exports.api("auth/me"), { status: 404 });
+  assert.equal(resets, 0);
+  h.exports.setSelectedChild("stale-child");
+  for (const path of ["state", "parent/state?before=message", "child/save"]) {
+    await assert.rejects(h.exports.api(path), { status: 404 });
+  }
+  assert.equal(resets, 3);
+  await assert.rejects(h.exports.api("parent/children/other/link?child=other", {}), { status: 404 });
+  assert.equal(resets, 4);
+  let finish;
+  h.fetch = () => new Promise((resolve) => { finish = resolve; });
+  const stale = h.exports.api("state");
+  h.exports.setSelectedChild("new-selection");
+  finish(new Response('{"error":"Child not found"}', { status: 404 }));
+  await assert.rejects(stale, { status: 404 });
+  assert.equal(resets, 4);
+});
+
+test("B5b follow-up R2: scoped 404 refreshes the children list and recovers the first child in parent and Kid mode", async () => {
+  for (const kidMode of [false, true]) {
+    const h = await appHarness(meFixture());
+    let tree = h.tree();
+    nodes(tree, (n) => n.type === "select")[0].props.onChange({ target: { value: "child-two" } });
+    tree = h.tree();
+    if (kidMode) { byText(tree, "Kid mode").props.onClick(); tree = h.tree(); }
+    const rootName = kidMode ? "ChildRoot" : "ParentRoot";
+    const before = nodes(tree, (n) => n.type?.name === rootName)[0];
+    const requests = [], current = meFixture();
+    // Simulate deletion of both cached children, leaving a new first child.
+    current.children = [{ ...current.children[0], id: "server-first" }];
+    current.activeChild = current.children[0];
+    h.fetch = async (url) => {
+      requests.push(url);
+      if (url === "/api/auth/me") return new Response(JSON.stringify(current));
+      return new Response('{"error":"Child not found"}', { status: 404 });
+    };
+    const root = harness("App.jsx");
+    root.exports.setSelectedChild("child-two");
+    root.fetch = async () => new Response('{"error":"Child not found"}', { status: 404 });
+    const props = { ...before.props, toast: noop, onConnection: noop };
+    root.render(root.exports[rootName], props); root.flush();
+    await new Promise(setImmediate);
+    // API reset events are on the shared browser window in the real app.
+    root.window.addEventListener("mq:child-reset", () => h.window.dispatchEvent(new Event("mq:child-reset")));
+    const failed = root.render(root.exports[rootName], props);
+    await failed.props.onRetry();
+    await new Promise(setImmediate);
+    tree = h.tree();
+    const recovered = nodes(tree, (n) => n.type?.name === rootName)[0];
+    assert.equal(recovered.props.childId, "server-first");
+    assert.notEqual(recovered.props.key, before.props.key);
+    assert.equal(h.storage.get("mq_selected_child"), "server-first");
+    assert.deepEqual(requests, ["/api/auth/me"]);
+    assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, 0);
+    const remounted = harness("App.jsx");
+    remounted.exports.setSelectedChild(recovered.props.childId);
+    remounted.fetch = async (url) => {
+      assert.equal(new URL(url, h.location).searchParams.get("child"), "server-first");
+      return new Response(JSON.stringify({ ...stateFixture(), childId: "server-first" }));
+    };
+    remounted.render(remounted.exports[rootName], { ...recovered.props, onConnection: noop }); remounted.flush();
+    await new Promise(setImmediate);
+    assert.equal(nodes(remounted.render(remounted.exports[rootName], { ...recovered.props, onConnection: noop }), (n) => ["Child", "Parent"].includes(n.type?.name)).length, 1);
+  }
+});
+
+test("B5b follow-up R2: recovery cannot overwrite a newer manual child selection or sign-out", async () => {
+  for (const signOut of [false, true]) {
+    const h = await appHarness(meFixture());
+    let finish;
+    h.fetch = () => new Promise((resolve) => { finish = resolve; });
+    h.tree();
+    h.window.dispatchEvent(new Event("mq:child-reset"));
+    if (signOut) h.window.dispatchEvent(new Event("mq:unauthorized"));
+    else nodes(h.tree(), (n) => n.type === "select")[0].props.onChange({ target: { value: "child-two" } });
+    finish(new Response(JSON.stringify(meFixture())));
+    await new Promise(setImmediate);
+    const tree = h.tree();
+    if (signOut) assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen")[0].props.screen, "welcome");
+    else assert.equal(nodes(tree, (n) => n.type?.name === "ParentRoot")[0].props.childId, "child-two");
+  }
+});
+
+test("B5b follow-up R3: initial state failures offer retry and only parent Kid mode offers grown-up recovery", async () => {
+  for (const role of ["child", "parent", "kid-mode-parent"]) {
+    const h = harness("App.jsx"), requests = [];
+    let back = 0, fail = true;
+    h.fetch = async (url) => {
+      requests.push(url);
+      if (fail) return new Response('{"error":"Oops"}', { status: 500 });
+      return new Response(JSON.stringify(stateFixture()));
+    };
+    const component = role === "parent" ? h.exports.ParentRoot : h.exports.ChildRoot;
+    const props = { childId: "child-one", toast: noop, onConnection: noop, ...(role === "kid-mode-parent" ? { onGrownUps: () => back++ } : {}) };
+    h.render(component, props); h.flush();
+    await new Promise(setImmediate);
+    const failed = h.render(component, props);
+    const display = harness("App.jsx");
+    const screen = display.render(display.exports.Loading, failed.props);
+    assert.ok(byText(screen, "Try again"));
+    assert.equal(Boolean(byText(screen, "Back to grown-ups")), role === "kid-mode-parent");
+    if (role === "kid-mode-parent") { byText(screen, "Back to grown-ups").props.onClick(); assert.equal(back, 1); }
+    fail = false;
+    await byText(screen, "Try again").props.onClick();
+    assert.equal(nodes(h.render(component, props), (n) => ["Child", "Parent"].includes(n.type?.name)).length, 1);
+    assert.equal(requests.length, 2);
+  }
+});
+
+test("B5b follow-up N1: kid code typing and paste use exactly the server alphabet", () => {
+  const h = harness("App.jsx"), props = { screen: "link", navigate: noop, onSession: noop };
+  const render = () => h.render(h.exports.AuthScreen, props);
+  changeField(render(), "Kid code", "aAeEiIoOuUlLsSzZ0125! b-c d.3 4 6 7 8 9");
+  assert.equal(nodes(render(), (n) => n.type === "input")[0].props.value, "BCD346");
+  for (const character of "BCDFGHJKMNPQRTVWXY346789") {
+    changeField(render(), "Kid code", character.toLowerCase());
+    assert.equal(nodes(render(), (n) => n.type === "input")[0].props.value, character);
+  }
+});
+
+test("B5b follow-up logout-all: Security confirms, cancels and respects busy state before invoking logout", async () => {
+  const h = harness("Parent.jsx");
+  let calls = 0;
+  const props = { me: meFixture(), run: async (fn) => fn(), onSignOutAll: async () => { calls++; }, busy: false };
+  const render = (extra = {}) => h.render(h.exports.Security, { ...props, ...extra });
+  assert.equal(byText(render(), "Confirm sign out everywhere"), undefined);
+  byText(render(), "Sign out everywhere").props.onClick();
+  assert.equal(calls, 0);
+  assert.match(text(render()), /Paired kid devices stay signed in/);
+  assert.equal(byText(render({ busy: true }), "Confirm sign out everywhere").props.disabled, true);
+  byText(render(), "Cancel").props.onClick();
+  assert.equal(byText(render(), "Confirm sign out everywhere"), undefined);
+  byText(render(), "Sign out everywhere").props.onClick();
+  await byText(render(), "Confirm sign out everywhere").props.onClick();
+  assert.equal(calls, 1);
+});
+
+test("B5b follow-up logout-all: cookie POST returns to Welcome only on success, locked errors open PIN", async () => {
+  for (const status of [200, 403, 423, 500]) {
+    const h = await appHarness(meFixture()), calls = [];
+    h.fetch = async (url, options) => {
+      calls.push([url, options]);
+      return new Response(JSON.stringify(status === 200 ? { ok: true } : { error: status === 500 ? "Oops" : "Please unlock parent mode" }), { status });
+    };
+    const root = nodes(h.tree(), (n) => n.type?.name === "ParentRoot")[0];
+    if (status === 200) await root.props.onSignOutAll();
+    else await assert.rejects(root.props.onSignOutAll(), { status });
+    const [url, options] = calls[0];
+    assert.equal(new URL(url, h.location).pathname, "/api/auth/logout-all");
+    assert.equal(options.method, "POST");
+    assert.equal(options.credentials, "same-origin");
+    assert.equal(options.body, "{}");
+    const tree = h.tree();
+    assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen").length, status === 200 ? 1 : 0);
+    assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, [403, 423].includes(status) ? 1 : 0);
+    if (status === 200) assert.equal(h.storage.has("mq_selected_child"), false);
+  }
+});
+
+test("B5b follow-up demo: Welcome fetches unauthenticated availability on each entry and honors true and false", async () => {
+  const h = await appHarness({ ...meFixture(), demo: true });
+  let demo = true;
+  const requests = [];
+  h.fetch = async (url) => {
+    requests.push(url);
+    return new Response(JSON.stringify({ error: "Sign in again", demo }), { status: 401 });
+  };
+  h.window.dispatchEvent(new Event("mq:unauthorized"));
+  h.tree();
+  await new Promise(setImmediate);
+  let tree = h.tree();
+  let welcome = nodes(tree, (n) => n.type?.name === "AuthScreen")[0];
+  assert.equal(welcome.props.demo, true);
+  welcome.props.navigate("signin"); h.tree();
+  demo = false;
+  nodes(h.tree(), (n) => n.type?.name === "AuthScreen")[0].props.navigate("welcome"); h.tree();
+  await new Promise(setImmediate);
+  tree = h.tree();
+  welcome = nodes(tree, (n) => n.type?.name === "AuthScreen")[0];
+  assert.equal(welcome.props.demo, false);
+  assert.deepEqual(requests, ["/api/auth/me", "/api/auth/me"]);
+});
+
+test("B5b follow-up demo: a delayed Welcome discovery 401 cannot eject the sign-in form", async () => {
+  const h = await appHarness(meFixture());
+  let finish;
+  h.fetch = () => new Promise((resolve) => { finish = resolve; });
+  h.window.dispatchEvent(new Event("mq:unauthorized"));
+  const welcome = nodes(h.tree(), (n) => n.type?.name === "AuthScreen")[0];
+  welcome.props.navigate("signin"); h.tree();
+  finish(new Response('{"error":"Sign in","demo":true}', { status: 401 }));
+  await new Promise(setImmediate);
+  assert.equal(nodes(h.tree(), (n) => n.type?.name === "AuthScreen")[0].props.screen, "signin");
 });

@@ -19,7 +19,7 @@ const KIND_LABEL = { reward: "Reward", task: "Task check", spend: "Purchase", ex
 const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
-export default function Parent({ state, toast, me, refreshMe, onSignOut, offline }) {
+export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignOutAll, offline }) {
   const [sec, setSec] = useState("inbox");
   const [run, pendingAction] = useAction(toast, offline);
   const busy = pendingAction || offline;
@@ -62,7 +62,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, offline
         {sec === "buddy" && <BuddyLog {...ctx} />}
         {sec === "settings" && <Settings {...ctx} />}
         {sec === "children" && <Children me={me} refreshMe={refreshMe} {...ctx} />}
-        {sec === "security" && <Security me={me} refreshMe={refreshMe} onSignOut={onSignOut} {...ctx} />}
+        {sec === "security" && <Security me={me} refreshMe={refreshMe} onSignOut={onSignOut} onSignOutAll={onSignOutAll} {...ctx} />}
       </main>
     </div>
   );
@@ -457,8 +457,9 @@ function Children({ me, refreshMe, run, busy }) {
   </div>;
 }
 
-function Security({ me, refreshMe, onSignOut, run, busy }) {
+function Security({ me, refreshMe, onSignOut, onSignOutAll, run, busy }) {
   const [pin, setPin] = useState("");
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const save = async (event) => {
     event.preventDefault();
     const result = await run(async () => {
@@ -479,8 +480,11 @@ function Security({ me, refreshMe, onSignOut, run, busy }) {
     <section className="p-card">
       <h2>Signed-in devices</h2>
       <button className="pbtn" disabled={busy} onClick={() => run(onSignOut)}>Sign out</button>
-      <button className="pbtn" disabled>Sign out everywhere</button>
-      <p className="p-muted">Sign out everywhere isn't available yet. Sign out on each device for now.</p>
+      <button className="pbtn" disabled={busy} onClick={() => setConfirmSignOut(true)}>Sign out everywhere</button>
+      {confirmSignOut && <div className="p-stack">
+        <p>Sign out of all your parent sessions, including this device? Paired kid devices stay signed in.</p>
+        <div className="row"><button className="pbtn" disabled={busy} onClick={() => setConfirmSignOut(false)}>Cancel</button><button className="pbtn primary" disabled={busy} onClick={() => run(onSignOutAll)}>Confirm sign out everywhere</button></div>
+      </div>}
     </section>
   </div>;
 }

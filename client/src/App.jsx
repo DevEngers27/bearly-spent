@@ -15,6 +15,7 @@ export default function App() {
   const [updated, setUpdated] = useState(false);
   const [parentOffline, setParentOffline] = useState(false);
   const authVersion = useRef(0);
+  const resettingChild = useRef(false);
   const toast = useCallback((text, tone = "ok") => {
     const id = Math.random();
     setToasts((t) => [...t, { id, text, tone }]);
@@ -38,7 +39,7 @@ export default function App() {
     const locked = next.role === "parent" && !kidMode && next.family.pinSet && (next.unlockedUntil <= Date.now() || savedMode === "locked");
     setPinOpen(locked);
     setView(next.role === "child" || locked || kidMode ? "kid" : "parent");
-    if (next.demo === true) setDemo(true);
+    setDemo(next.demo === true);
   }, []);
   const welcome = useCallback(() => {
     authVersion.current++;
@@ -51,29 +52,51 @@ export default function App() {
     const unauthorized = () => welcome();
     const locked = () => { setView("kid"); setPinOpen(true); };
     const limited = (event) => toast(event.message, "error");
+    const resetChild = async () => {
+      if (!me || resettingChild.current) return;
+      resettingChild.current = true;
+      const version = authVersion.current;
+      try {
+        // Omitting the selection asks the server for its current first child,
+        // even if the stored selection or cached children list is stale.
+        const next = await api("auth/me", undefined, { includeChild: false });
+        if (version !== authVersion.current) return;
+        const activeChild = next.children[0];
+        setSelectedChild(activeChild.id);
+        try { localStorage.setItem("mq_selected_child", activeChild.id); } catch {}
+        const recovered = { ...next, activeChild };
+        setMe(recovered);
+        rememberSession(recovered);
+        setParentOffline(false);
+      } catch (err) {
+        if (version === authVersion.current && err.status !== 401) toast(err.message, "error");
+      } finally { resettingChild.current = false; }
+    };
     const onUpdate = () => setUpdated(true);
     window.addEventListener("mq:unauthorized", unauthorized);
     window.addEventListener("mq:locked", locked);
     window.addEventListener("mq:rate-limit", limited);
+    window.addEventListener("mq:child-reset", resetChild);
     navigator.serviceWorker?.addEventListener("controllerchange", onUpdate);
     return () => {
       window.removeEventListener("mq:unauthorized", unauthorized);
       window.removeEventListener("mq:locked", locked);
       window.removeEventListener("mq:rate-limit", limited);
+      window.removeEventListener("mq:child-reset", resetChild);
       navigator.serviceWorker?.removeEventListener("controllerchange", onUpdate);
     };
-  }, [welcome, toast]);
+  }, [me, welcome, toast]);
   useEffect(() => {
     let active = true;
     const version = authVersion.current;
     api("auth/me").then((next) => {
       if (!active || version !== authVersion.current) return;
-      if (next.demo === true) setDemo(true);
+      setDemo(next.demo === true);
       if (!next.role) { welcome(); return; }
       acceptSession(next, true);
     }).catch((err) => {
       if (!active) return;
-      if (err.demo) setDemo(true);
+      setDemo(err.demo === true);
       if (err.status === 401) { setView("welcome"); return; }
       if (version !== authVersion.current) return;
       const cached = !err.status && cachedChildSession();
@@ -85,6 +108,17 @@ export default function App() {
     });
     return () => { active = false; };
   }, [acceptSession, welcome]);
+  const onWelcome = view === "welcome";
+  useEffect(() => {
+    if (!onWelcome) return;
+    let active = true;
+    api("auth/me", undefined, { handleUnauthorized: false }).then((next) => {
+      if (active) setDemo(next.demo === true);
+    }).catch((err) => {
+      if (active) setDemo(err.demo === true);
+    });
+    return () => { active = false; };
+  }, [onWelcome]);
   useEffect(() => {
     const url = new URL(location.href);
     if (view === "parent" || pinOpen) url.searchParams.set("role", "parent");
@@ -98,6 +132,10 @@ export default function App() {
     await api("auth/logout", {});
     welcome();
   };
+  const signOutAll = async () => {
+    await api("auth/logout-all", {});
+    welcome();
+  };
   const enterParent = () => {
     if (me?.role !== "parent") return;
     if (me.family.pinSet) { setView("kid"); setPinOpen(true); }
@@ -106,6 +144,7 @@ export default function App() {
   const selectChild = (id) => {
     const activeChild = me.children.find((c) => c.id === id);
     if (!activeChild) return;
+    authVersion.current++;
     setSelectedChild(id);
     try { localStorage.setItem("mq_selected_child", id); } catch {}
     setMe({ ...me, activeChild });
@@ -134,7 +173,7 @@ export default function App() {
       {view === "loading" && <Loading />}
       {!me && view !== "loading" && <AuthScreen key={view} screen={view} navigate={setView} demo={demo} onSession={acceptSession} error={error} />}
       {me && view === "kid" && <ChildRoot key={me.activeChild.id} childId={me.activeChild.id} toast={toast} onGrownUps={me.role === "parent" ? enterParent : undefined} onSignOut={me.role === "child" ? signOut : undefined} />}
-      {me?.role === "parent" && view === "parent" && <ParentRoot key={me.activeChild.id} childId={me.activeChild.id} me={me} refreshMe={refreshMe} onSignOut={signOut} toast={toast} onConnection={setParentOffline} />}
+      {me?.role === "parent" && view === "parent" && <ParentRoot key={me.activeChild.id} childId={me.activeChild.id} me={me} refreshMe={refreshMe} onSignOut={signOut} onSignOutAll={signOutAll} toast={toast} onConnection={setParentOffline} />}
       {me?.role === "parent" && pinOpen && <PinGate onOk={(result) => { setMe({ ...me, unlockedUntil: result.unlockedUntil }); setPinOpen(false); setView("parent"); }} onCancel={() => { setPinOpen(false); setView("kid"); }} />}
       <div className="toasts" aria-live="polite">
         {updated && <button className="toast ok" onClick={() => location.reload()}>Updated! Tap to reload</button>}
@@ -144,8 +183,12 @@ export default function App() {
   );
 }
 
-function Loading({ error }) {
-  return <div className="loading"><img className="loading-bear" src="/bear/poses/bear_front.png" alt="" />{error ? "Can't reach MoneyQuest right now. Check your connection and try again." : "Packing the backpack…"}</div>;
+function Loading({ error, onRetry, onGrownUps }) {
+  return <div className="loading"><img className="loading-bear" src="/bear/poses/bear_front.png" alt="" />{error ? <>
+    <p role="alert">Can't reach MoneyQuest right now. Check your connection and try again.</p>
+    <button className="btn honey" onClick={onRetry || (() => location.reload())}>Try again</button>
+    {onGrownUps && <button className="btn" onClick={onGrownUps}>Back to grown-ups</button>}
+  </> : "Packing the backpack…"}</div>;
 }
 
 function SignOut({ onSignOut, toast }) {
@@ -154,20 +197,20 @@ function SignOut({ onSignOut, toast }) {
 }
 
 function ChildRoot({ childId, toast, onGrownUps, onSignOut }) {
-  const { state, error, offline } = useLiveState("child", childId);
+  const { state, error, offline, refresh } = useLiveState("child", childId);
   const hasState = Boolean(state);
   useEffect(() => {
     if (offline && hasState) toast(OFFLINE_MESSAGE);
   }, [offline, hasState, toast]);
-  if (!state) return <Loading error={error} />;
+  if (!state) return <Loading error={error} onRetry={refresh} onGrownUps={onGrownUps} />;
   return <><Child state={state} toast={toast} offline={offline} onGrownUps={onGrownUps} />{onSignOut && <div className="kid-signout"><SignOut onSignOut={onSignOut} toast={toast} /></div>}</>;
 }
 
-function ParentRoot({ childId, me, refreshMe, onSignOut, toast, onConnection }) {
-  const { state, error, offline } = useLiveState("parent", childId);
+function ParentRoot({ childId, me, refreshMe, onSignOut, onSignOutAll, toast, onConnection }) {
+  const { state, error, offline, refresh } = useLiveState("parent", childId);
   useEffect(() => { onConnection(offline); }, [offline, onConnection]);
-  if (!state) return <Loading error={error} />;
-  return <Parent state={state} me={me} refreshMe={refreshMe} onSignOut={onSignOut} toast={toast} offline={offline} />;
+  if (!state) return <Loading error={error} onRetry={refresh} />;
+  return <Parent state={state} me={me} refreshMe={refreshMe} onSignOut={onSignOut} onSignOutAll={onSignOutAll} toast={toast} offline={offline} />;
 }
 
 function AuthScreen({ screen, navigate, demo, onSession, error }) {
@@ -214,7 +257,7 @@ function AuthScreen({ screen, navigate, demo, onSession, error }) {
           </>}
           {screen === "link" && <>
             <p>Ask your grown-up for your six-character kid code.</p>
-            <label>Kid code<input className="kid-code" autoComplete="off" autoCapitalize="characters" spellCheck={false} required minLength={6} maxLength={6} value={fields.code} onChange={(e) => setFields({ ...fields, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) })} /></label>
+            <label>Kid code<input className="kid-code" autoComplete="off" autoCapitalize="characters" spellCheck={false} required minLength={6} maxLength={6} value={fields.code} onChange={(e) => setFields({ ...fields, code: e.target.value.toUpperCase().replace(/[^BCDFGHJKMNPQRTVWXY346789]/g, "").slice(0, 6) })} /></label>
             <div className="code-keys" aria-label="Code keyboard">{"BCDFGHJKMNPQRTVWXY346789".split("").map((key) => <button className="pbtn" type="button" key={key} disabled={busy || fields.code.length === 6} onClick={() => setFields({ ...fields, code: fields.code + key })}>{key}</button>)}<button className="pbtn" type="button" disabled={busy} onClick={() => setFields({ ...fields, code: fields.code.slice(0, -1) })}>Delete</button></div>
           </>}
           <button className="btn honey wide" disabled={busy}>{screen === "create" ? "Create family" : screen === "link" ? "Let's go!" : "Sign in"}</button>

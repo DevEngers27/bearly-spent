@@ -33,29 +33,37 @@ export function cachedChildSession() {
   } catch { return null; }
 }
 
-export function apiUrl(path) {
+export function apiUrl(path, includeChild = true) {
   const [route, query = ""] = path.split("?");
   const publicRoute = ["auth/login", "auth/register", "auth/link", "demo/login"].includes(route);
-  const selection = selectedChild && !publicRoute && !/(^|&)child=/.test(query);
+  const selection = includeChild && selectedChild && !publicRoute && !/(^|&)child=/.test(query);
   return `/api/${path}${selection ? `${query ? "&" : "?"}child=${encodeURIComponent(selectedChild)}` : ""}`;
 }
 
 // Shared by JSON and audio requests so every authenticated route handles expiry.
-export async function apiResponse(path, body) {
-  const res = await fetch(apiUrl(path), {
+export async function apiResponse(path, body, { includeChild = true, handleUnauthorized = true } = {}) {
+  const version = identityVersion;
+  const url = apiUrl(path, includeChild);
+  const route = path.split("?")[0];
+  const parentRoute = route.startsWith("parent/") || route === "auth/logout-all";
+  const res = await fetch(url, {
     method: body === undefined ? "GET" : "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.status === 401) {
+  if (res.status === 401 && handleUnauthorized && !["parent/unlock", "auth/login"].includes(route)) {
     clearSessionCache();
     window.dispatchEvent(new Event("mq:unauthorized"));
   }
-  if (path.startsWith("parent/") && res.status === 423) window.dispatchEvent(new Event("mq:locked"));
+  if (parentRoute && res.status === 423) window.dispatchEvent(new Event("mq:locked"));
+  if (res.status === 404) {
+    const childId = new URLSearchParams(url.split("?")[1]).get("child");
+    if (childId && version === identityVersion) window.dispatchEvent(new Event("mq:child-reset"));
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    if (path.startsWith("parent/") && (res.status === 403 && /unlock|locked/i.test(data.error || ""))) window.dispatchEvent(new Event("mq:locked"));
+    if (parentRoute && (res.status === 403 && /unlock|locked/i.test(data.error || ""))) window.dispatchEvent(new Event("mq:locked"));
     const err = new Error(data.error || (res.status >= 500 ? "Something went wrong on the server. Try again." : `Request failed (${res.status})`));
     err.status = res.status;
     err.demo = data.demo === true;
@@ -69,9 +77,9 @@ export async function apiResponse(path, body) {
   return res;
 }
 
-export async function api(path, body) {
+export async function api(path, body, options) {
   const version = identityVersion;
-  const res = await apiResponse(path, body);
+  const res = await apiResponse(path, body, options);
   const data = await res.json().catch(() => ({}));
   if (path.split("?")[0] === "state" && body === undefined && version === identityVersion) {
     try { localStorage.setItem("mq_last_state", JSON.stringify(data)); } catch {}
@@ -102,7 +110,7 @@ export function useAction(toast, offline = false) {
       if (ok) toast(typeof ok === "function" ? ok(result) : ok);
       return result;
     } catch (e) {
-      if (e.status !== 429) toast(e.message, "error");
+      toast(e.message, "error");
       return null;
     } finally {
       inflight.current = false;
