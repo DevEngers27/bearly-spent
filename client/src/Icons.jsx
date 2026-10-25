@@ -1,4 +1,4 @@
-// Hand-drawn style icon set for MoneyQuest (no emoji). 24×24, ink outline,
+// Hand-drawn style icon set for Bearly Spent (no emoji). 24×24, ink outline,
 // soft palette fills. To swap in your own art for any icon, save a PNG as
 // client/public/icons/ui/<name>.png and add the name to CUSTOM below.
 const CUSTOM = new Set([]);

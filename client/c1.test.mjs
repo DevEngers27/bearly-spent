@@ -451,7 +451,7 @@ test("C6 / C16 / C3: App returns to Welcome on unauthorized; controllerchange of
   assert.equal(reloads, 2);
   h.document.activeElement = null;
   const loading = h.render(h.exports.Loading, { error: new Error("Failed to fetch") });
-  assert.match(text(loading), /Can't reach MoneyQuest right now\. Check your connection and try again\./);
+  assert.match(text(loading), /Can't reach Bearly Spent right now\. Check your connection and try again\./);
   assert.ok(byText(loading, "Try again"));
 });
 
@@ -1763,7 +1763,7 @@ test("W2c.2: every family has the Send money form, with validated fields, ledger
     const props = { state, demo, busy: false, run: async (path, body) => { requests.push([path, { ...body }]); return succeeds ? { ok: true } : null; } };
     const render = () => h.render(h.exports.Allowance, props);
     let tree = render();
-    assert.ok(text(tree).includes("Record money you gave your child. It goes straight into Savings. MoneyQuest never moves real money."));
+    assert.ok(text(tree).includes("Record money you gave your child. It goes straight into Savings. Bearly Spent never moves real money."));
     assert.equal(Boolean(byText(tree, "Add $50")), false);
     assert.equal(Boolean(byText(tree, "Fast-forward")), demo);
     const form = () => nodes(render(), (n) => n.type === "form" && n.props["aria-label"] === "Send money")[0];

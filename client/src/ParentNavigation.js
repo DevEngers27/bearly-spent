@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 export const MONEY_SECTIONS = [["allowance", "Allowance"], ["goals", "Goals & tasks"], ["activity", "Transactions"]];
 export const KIDS_SECTIONS = [["children", "Children"], ["settings", "Friends & privacy"]];
-export const MORE_SECTIONS = [["guardian", "Guardian log"], ["buddy", "Buddy chats"], ["help", "Ask about MoneyQuest"], ["account", "Account"], ["security", "Security"]];
+export const MORE_SECTIONS = [["guardian", "Guardian log"], ["buddy", "Buddy chats"], ["help", "Ask about Bearly Spent"], ["account", "Account"], ["security", "Security"]];
 export const PARENT_TABS = [["inbox", "Inbox", "envelope"], ["overview", "Home", "home"], ["money", "Money", "wallet"], ["kids", "Kids", "paws"], ["more", "More", "more"]];
 
 const contains = (sections, id) => sections.some(([key]) => key === id);

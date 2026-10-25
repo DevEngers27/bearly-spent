@@ -1,4 +1,4 @@
-# MoneyQuest for kids
+# Bearly Spent for kids
 
 ## Home and your bear
 1. Open **Home** to see <bear>, your money, and your goal.
@@ -7,7 +7,7 @@ Tip: Saving helps <bear> grow. Your savings milestones stay yours.
 
 ## Talking to <bear>
 1. Tap <bear> at home to talk. Type your question and tap **Send**.
-2. Try **How do I…?** for help using MoneyQuest. Open **Chat** to read **Our chat**.
+2. Try **How do I…?** for help using Bearly Spent. Open **Chat** to read **Our chat**.
 Tip: Your grown-up can read your chats. Keep passwords, addresses, and phone numbers private. Chat rests while <bear> is away, chatting is switched off, or your device is offline.
 
 Sound: <bear> reads each reply out loud. Tap **Sound on** in the talk bar to switch the voice off (it then says **Sound off**). In **Our chat**, tap **Read aloud** under any reply to hear it again.
@@ -17,7 +17,7 @@ Sound: <bear> reads each reply out loud. Tap **Sound on** in the talk bar to swi
 2. In **Save**, choose an amount and tap **Save it**. This moves spending money into savings.
 3. In **Spent**, choose **Apple Cash** or **Spending money** under **Paid with**, enter the amount and what you bought, then tap **Record it**.
 4. Use **Cash diary** and **Add to diary** for cash outside the app. It does not change your app balances.
-Tip: Only record Apple Cash yourself if your Shortcut has not already recorded it. Apple Cash purchases come out of your Savings; if Savings is short, the rest is added for you and your grown-up gets a note. MoneyQuest records money; it does not send real money.
+Tip: Only record Apple Cash yourself if your Shortcut has not already recorded it. Apple Cash purchases come out of your Savings; if Savings is short, the rest is added for you and your grown-up gets a note. Bearly Spent records money; it does not send real money.
 
 ## Record money you received
 1. Tap **Save money** on **Home** to open **My money**, then choose **Received**.

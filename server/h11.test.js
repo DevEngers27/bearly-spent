@@ -112,7 +112,7 @@ test("H11.4–6 guides load numbered sections, track every quoted UI label, and 
   const client = new URL("../client/src/", import.meta.url);
   const source = readdirSync(client).filter((name) => name.endsWith(".jsx")).map((name) => readFileSync(new URL(name, client), "utf8")).join("\n");
   for (const audience of ["kid", "parent"]) {
-    assert.ok(guides[audience].startsWith("# MoneyQuest"));
+    assert.ok(guides[audience].startsWith("# Bearly Spent"));
     for (const section of guides[audience].split(/^## /m).slice(1)) {
       assert.match(section, /\n1\. /); assert.match(section, /\nTip: /);
     }
@@ -247,7 +247,7 @@ test("H11.7 provider failure and empty/no-match answers fall back to local paren
 test("H11.8 public help renders parent then kid guides with escaped content and no request interpolation", async () => {
   const result = await device().call("GET", "/help?bear=%3Cscript%3E&token=PRIVATE_TOKEN");
   assert.equal(result.status, 200); assert.equal(result.headers["content-type"], "html");
-  assert.ok(result.body.indexOf("MoneyQuest for parents") < result.body.indexOf("MoneyQuest for kids"));
+  assert.ok(result.body.indexOf("Bearly Spent for parents") < result.body.indexOf("Bearly Spent for kids"));
   assert.match(result.body, /<ol><li>/); assert.match(result.body, /<strong>Get a kid code<\/strong>/);
   assert.match(result.body, /href="\/help\/apple-cash"/);
   assert.doesNotMatch(result.body, /PRIVATE_TOKEN|<script>|<bear>/);
@@ -260,8 +260,8 @@ test("H11.8 public help renders parent then kid guides with escaped content and 
 test("H11.6b the kid guide travels inside the bear's system prompt with the bear's name", () => {
   const db = seed(Date.now()); db.child.bear.name = "Pecan";
   const prompt = _internals.systemPrompt(db);
-  assert.match(prompt, /How MoneyQuest works/);
+  assert.match(prompt, /How Bearly Spent works/);
   assert.match(prompt, /## Goals/); assert.match(prompt, /Switch goal/);
   assert.ok(prompt.includes("Tap Pecan at home to talk") || prompt.includes("Pecan"));
-  assert.ok(!prompt.includes("<bear>") && !prompt.includes("# MoneyQuest for kids"));
+  assert.ok(!prompt.includes("<bear>") && !prompt.includes("# Bearly Spent for kids"));
 });

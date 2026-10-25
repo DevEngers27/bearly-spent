@@ -1,6 +1,6 @@
 # Apple Cash tracking
 
-MoneyQuest records Apple Cash activity; it does not connect to an Apple Cash API,
+Bearly Spent records Apple Cash activity; it does not connect to an Apple Cash API,
 send money or read the actual Wallet balance. Apple Cash purchases come out of the
 child's Savings. If Savings is short, the missing amount is added automatically
 as money received from the grown-up, who gets a note. Allowance is recorded
@@ -25,7 +25,7 @@ not paired browsers or siblings. The database stores a hash, never the raw token
 
 ## iPhone automation
 
-Use your MoneyQuest site's HTTPS origin in place of `https://YOUR_MONEYQUEST_SITE`.
+Use your Bearly Spent site's HTTPS origin in place of `https://YOUR_MONEYQUEST_SITE`.
 The iPhone must be able to reach that site.
 
 1. Open Shortcuts → Automation → New Automation → Transaction.

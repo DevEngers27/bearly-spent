@@ -1,4 +1,4 @@
-# MoneyQuest for parents
+# Bearly Spent for parents
 
 ## Create family, sign in, and PIN
 1. On Welcome, choose **Create family**, enter your name, email, password, and one to four children, then submit. Use **Sign in** for an existing account.
@@ -16,7 +16,7 @@ Tip: A six-character kid code signs in a device. An eight-character friend code 
 1. Open **Allowance** (under the Money tab on phones). Set **Weekly allowance ($)**, **Saved automatically (%)**, **Purchase limit without approval ($)**, and **Rewards go to**, then choose **Save rules**.
 2. Under **Send money**, enter **Amount ($)** and an optional **Note**, then choose **Send money**. Record up to $500 at once; it goes straight into the child's Savings.
 3. Check the next payout in **Allowance & limits**. The Guardian records scheduled allowance directly into Savings and Spending. **Overview** shows **Received this month**, including money you sent, money your child recorded, and automatic Apple Cash shortfall credits.
-Tip: MoneyQuest records money; it never transfers real money. Send the actual money separately. Coordinate with your child so only one of you records each payment. Retrying a failed submission keeps the same receipt ID.
+Tip: Bearly Spent records money; it never transfers real money. Send the actual money separately. Coordinate with your child so only one of you records each payment. Retrying a failed submission keeps the same receipt ID.
 
 ## Apple Cash and the Shortcut
 1. Open **Children** and find **Apple Cash tracking** for the right child. Set a parent PIN first, then unlock parent mode.
@@ -57,7 +57,7 @@ Tip: The Guardian follows schedules and approvals, prevents overdrafts, reverses
 ## Buddy chats and AI
 1. Open **Buddy chats** (under More on phones) to read **Money Buddy chats** for the selected child. Use **Load older** when offered.
 2. Buddy can explain balances and goals, read wardrobe and travel progress, look up app instructions, write a savings plan, and propose a mission for your approval.
-3. Open **Ask about MoneyQuest** for app help. Type a question and choose **Ask**. Answers use this guide; question and answer pairs are not saved in MoneyQuest.
+3. Open **Ask about Bearly Spent** for app help. Type a question and choose **Ask**. Answers use this guide; question and answer pairs are not saved in Bearly Spent.
 Tip: AI can make mistakes. Buddy cannot move money or approve requests. With no AI key, guide lookup and a basic offline planner work. Turn child chat off in Friends & privacy when needed.
 
 ## Signing out
@@ -69,4 +69,4 @@ Tip: Children will need new kid codes after a family-wide sign-out. Switching to
 1. Review child conversations in **Buddy chats** and activity in **Guardian log** and **Transactions**.
 2. Keep emails, addresses, passwords, kid codes, and Shortcut tokens out of help and chat. Obvious personal details are redacted before AI calls; this is not a guarantee for every kind of private text.
 3. Use **Devices** and **Unlink**, or **Sign out everywhere**, to revoke access you no longer want.
-Tip: MoneyQuest stores account and game records on its server. Child chats are retained for parent review; parent help pairs are not stored. AI-enabled help sends a redacted question, guide excerpts, children's first names, the selected child, PIN-set status, and Shortcut connection status to the AI provider. It cannot delete data or change account settings for you.
+Tip: Bearly Spent stores account and game records on its server. Child chats are retained for parent review; parent help pairs are not stored. AI-enabled help sends a redacted question, guide excerpts, children's first names, the selected child, PIN-set status, and Shortcut connection status to the AI provider. It cannot delete data or change account settings for you.

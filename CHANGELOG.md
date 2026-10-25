@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to MoneyQuest are recorded here. The format follows
+All notable changes to Bearly Spent (formerly MoneyQuest) are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/). Each entry names the review trail:
 every batch was implemented by Codex, reviewed by Gemini, and verified and
@@ -10,6 +10,39 @@ merged by Claude (see `docs/VERSIONING.md`).
 
 ### In progress (branches)
 - (none)
+
+## [0.9.0] — 2026-10-25
+
+### Changed
+- **The app is called Bearly Spent.** Every screen, the installed app's
+  name, the help pages, the guides and the bear's own words use the new
+  name; internal identifiers keep the old one.
+- **The child's money is the child's.** Apple Cash purchases reported by
+  the iPhone Shortcut (or recorded in Spent with "Paid with: Apple Cash")
+  come out of the child's Savings. If Savings is short, the rest is added
+  automatically as money received from the grown-up (never a negative
+  balance) and the parent gets one notification. The parent's funding
+  account is gone: allowance pays straight into the child's accounts,
+  "Add money" became "Send money" (credits Savings), the kid's "Apple Cash
+  money · set aside by your grown-up" card is removed, and Parent Overview
+  shows Savings · Spending · Received this month · Adventure points.
+
+### Added
+- "Received money" in My money: the child records money received from
+  their grown-up; it goes into Savings at once and the parent is told.
+- Retry safety: every manual money form carries a client id, so a retried
+  submission never moves money twice; the Shortcut keeps its transaction
+  id check. The kid app warns before recording the same amount twice
+  within two minutes.
+
+### Migration
+- A positive funding balance moves into Savings with an audit line;
+  receipts that were waiting for funding are posted against Savings with
+  the same auto-cover rule.
+
+### Review trail
+- H12 (Codex from spec H12.md, Gemini review) and H13 (Codex from spec
+  H13.md, Gemini review), merged and checked by Claude. 395 server tests and 240 client tests.
 
 ## [0.8.8] — 2026-10-25
 
@@ -98,7 +131,7 @@ merged by Claude (see `docs/VERSIONING.md`).
   `docs/help/parent.md`, every button name checked against the screens by
   a test). The kid guide rides inside the bear's prompt, so asking the bear
   "How do I add a friend?" or "How do I sign out?" gets the exact steps; a
-  `lookup_help` tool double-checks. Parents get an "Ask about MoneyQuest"
+  `lookup_help` tool double-checks. Parents get an "Ask about Bearly Spent"
   panel under More (20 questions an hour per family, nothing stored) and a
   public `/help` page linked from Welcome and More. A "How do I…?" chip in
   the talk bar.

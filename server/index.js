@@ -1,4 +1,4 @@
-// MoneyQuest API. Importable without opening sockets or starting timers.
+// Bearly Spent API. Importable without opening sockets or starting timers.
 import express from "express";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -508,6 +508,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     try { tick(); } catch (e) { console.error("[tick]", e.message); }
   }, 2000);
   createApp().listen(Number(process.env.PORT || 8787), () => {
-    console.log(`MoneyQuest API ready (buddy: ${buddyMode()}, bank: ${nessieEnabled() ? "nessie" : "simulated"})`);
+    console.log(`Bearly Spent API ready (buddy: ${buddyMode()}, bank: ${nessieEnabled() ? "nessie" : "simulated"})`);
   });
 }
