@@ -214,7 +214,10 @@ export const postcardMetrics = (state) => state.metrics?.postcards || {
 };
 
 export const GOAL_ICONS = ["bike", "game", "book", "gift", "trip", "toy", "other"];
-export const goalPicture = (icon) => ({ bike: "🚲", game: "🎮", book: "📚", gift: "🎁", trip: "🧳", toy: "🧸", other: "⭐" }[icon] || "⭐");
+// Goal pictures use the hand-drawn icon set; labels are for selects and plain text.
+export const goalIconName = (icon) => ({ bike: "bike", game: "target", book: "book", gift: "gift", trip: "tent", toy: "balloon", other: "star" }[icon] || "star");
+export const goalLabel = (icon) => ({ bike: "Bike", game: "Game", book: "Book", gift: "Gift", trip: "Trip", toy: "Toy", other: "Something else" }[icon] || "Something else");
+export const goalStatusLabel = (status) => ({ active: "Saving", reached: "Reached!", bought: "Bought", archived: "Put away" }[status || "active"] || "Saving");
 export function currentSavingsGoal(state) {
   const id = state.currentGoalId !== undefined ? state.currentGoalId : state.child.currentGoalId;
   const live = (g) => !g.status || ["active", "reached"].includes(g.status);

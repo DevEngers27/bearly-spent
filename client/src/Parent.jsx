@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAction, GOAL_ICONS, goalPicture, currentSavingsGoal } from "./api.js";
+import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAction, GOAL_ICONS, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 
 const SECTIONS = [
@@ -261,13 +261,13 @@ function SavingsGoal({ state, goal, create = false, run, busy }) {
   const waiting = selected && state.approvals.some((a) => a.kind === "goal_purchase" && a.goalId === selected.id && ["pending", "approved"].includes(a.status) && !a.paidTxnId);
   return (
     <section className="p-card">
-      <h2>{selected ? `${goalPicture(selected.icon)} ${selected.title}` : "Set a savings goal"}</h2>
-      {selected && <p>{selected.status || "active"}{current ? " · Current goal" : ""}</p>}
+      <h2>{selected ? `${selected.title} (${goalLabel(selected.icon)})` : "Set a savings goal"}</h2>
+      {selected && <p>{goalStatusLabel(selected.status)}{current ? " · Current goal" : ""}</p>}
       {!selected && <p>Pick something your child would love to save for.</p>}
       <form className="pform pform-row" onSubmit={async (e) => { e.preventDefault(); if (await run(`parent/goals${selected ? `/${selected.id}` : ""}`, sg, selected ? "Savings goal updated" : "Savings goal created")) { if (!selected) setSg({ title: "", target: 50, icon: "bike" }); } }}>
         <label>Saving for<input required maxLength={40} disabled={busy || !live || waiting} value={sg.title} onChange={(e) => setSg({ ...sg, title: e.target.value })} /></label>
         <label>Target ($)<input required type="number" inputMode="decimal" min="1" max="1000" step="0.01" disabled={busy || !live || waiting} value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
-        <label>Picture<select disabled={busy || !live || waiting} value={sg.icon} onChange={(e) => setSg({ ...sg, icon: e.target.value })}>{GOAL_ICONS.map((icon) => <option key={icon} value={icon}>{goalPicture(icon)} {icon}</option>)}</select></label>
+        <label>Picture<select disabled={busy || !live || waiting} value={sg.icon} onChange={(e) => setSg({ ...sg, icon: e.target.value })}>{GOAL_ICONS.map((icon) => <option key={icon} value={icon}>{goalLabel(icon)}</option>)}</select></label>
         <button disabled={busy || !live || waiting} className="pbtn">{selected ? "Update" : "Create savings goal"}</button>
       </form>
       {selected && <div className="btn-row">

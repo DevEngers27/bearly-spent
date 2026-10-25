@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction, GOAL_ICONS, goalPicture, currentSavingsGoal } from "./api.js";
+import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction, GOAL_ICONS, goalIconName, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import MapView from "./MapView.jsx";
@@ -212,7 +212,7 @@ function GoalsSheet({ state, run, busy, close }) {
         const live = !g.status || ["active", "reached"].includes(g.status);
         const waiting = state.pendingRequests.some((a) => a.kind === "goal_purchase" && a.goalId === g.id);
         return <li key={g.id}>
-          <strong>{goalPicture(g.icon)} {g.title}</strong><p>{money(g.target)} · {g.status || "active"}{current?.id === g.id ? " · Current goal" : ""}</p>
+          <strong><Icon name={goalIconName(g.icon)} size={20} /> {g.title}</strong><p>{money(g.target)} · {goalStatusLabel(g.status)}{current?.id === g.id ? " · Current goal" : ""}</p>
           <div className="btn-row">
             {live && current?.id !== g.id && <button disabled={busy} className="btn small sage" onClick={() => run(`child/goals/${g.id}/current`, {}, "Let's save for this!")}>Save for this</button>}
             {live && <button disabled={busy || waiting} className="btn small" onClick={() => edit(g)}>Edit</button>}
@@ -226,7 +226,7 @@ function GoalsSheet({ state, run, busy, close }) {
       <fieldset disabled={busy}>
         <label>Saving for<input required maxLength={40} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label>
         <label>Target ($)<input required type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })} /></label>
-        <label>Picture<select value={draft.icon} onChange={(e) => setDraft({ ...draft, icon: e.target.value })}>{GOAL_ICONS.map((icon) => <option key={icon} value={icon}>{goalPicture(icon)} {icon}</option>)}</select></label>
+        <label>Picture<select value={draft.icon} onChange={(e) => setDraft({ ...draft, icon: e.target.value })}>{GOAL_ICONS.map((icon) => <option key={icon} value={icon}>{goalLabel(icon)}</option>)}</select></label>
         <div className="btn-row"><button className="btn honey">{editing ? "Update goal" : "Create goal"}</button>{editing && <button type="button" className="btn" onClick={reset}>New goal instead</button>}</div>
       </fieldset>
     </form>
@@ -327,7 +327,7 @@ function Home({ state, setTab, open, run, busy, talk }) {
           <div className="jar-text">
             <span className="kicker">Saving for</span>
             <button className="chip" onClick={() => open("goals")}>Switch goal</button>
-            <h2><span aria-hidden="true">{goalPicture(goal.icon)}</span> {goal.title}</h2>
+            <h2><Icon name={goalIconName(goal.icon)} size={26} /> {goal.title}</h2>
             <p><b>{money(Math.min(state.balances.savings, goal.target))}</b> of {moneyShort(goal.target)}{goal.weeksLeft ? ` · about ${goal.weeksLeft} weeks to go` : goal.weeksLeft === 0 ? " · you did it!" : ""}</p>
           </div>
         </div>

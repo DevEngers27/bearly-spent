@@ -71,7 +71,7 @@ test("G1 Goals sheet lists history, creates/edits/switches/archives and preserve
   let success = false;
   const props = { state, run: async (...args) => { calls.push(args); return success ? {} : null; } };
   const render = () => h.render(h.exports.GoalsSheet, props);
-  assert.match(text(render()), /Ben.*New bicycle.*active.*Lego set.*reached.*Current goal.*Old book.*bought.*Trip.*archived/);
+  assert.match(text(render()), /Ben.*New bicycle.*Saving.*Lego set.*Reached!.*Current goal.*Old book.*Bought.*Trip.*Put away/);
   assert.equal(button(render(), "Save for this").props.disabled, undefined);
   await button(render(), "Save for this").props.onClick();
   assert.equal(calls.at(-1)[0], "child/goals/goal_bike/current");
