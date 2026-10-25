@@ -636,7 +636,7 @@ function DressSheet({ state, run, close, busy }) {
               onClick={() => (!locked ? run("child/cosmetic/equip", { kind: slot, value: c.value }) : c.cost != null ? setPurchase(c) : null)}>
               {slot === "background"
                 ? <span className="swatch-art scene" style={{ background: SCENE_SWATCH[c.value] }} aria-hidden="true" />
-                : <img className="swatch-art" src={`/bear/w2/thumbs/${c.value}.png`} alt="" loading="lazy" />}
+                : <img className="swatch-art" src={`/bear/w3/thumbs/${c.value}.png`} alt="" loading="lazy" />}
               <span>{c.label}</span>
               <small>{!locked ? (on ? "Wearing" : c.cost === 0 ? "Free" : "Yours") : c.cost != null ? <><Icon name="sparkle" size={12} /> {c.cost}</> : `Save ${moneyShort(c.milestone)} to unlock`}</small>
             </button>
