@@ -476,11 +476,17 @@ function replanState(childId) {
   return replans.get(childId);
 }
 
+export function replanPending(childId) {
+  const state = replans.get(childId);
+  return Boolean(state?.timer || state?.running);
+}
+
 export function cancelReplan(childId) {
   const states = childId === undefined ? replans.values() : [replanState(childId)];
   for (const state of states) {
     clearTimeout(state.timer);
     state.timer = null;
+    state.running = null;
     state.reasons.length = 0;
     state.sequence += 1;
   }
@@ -507,42 +513,51 @@ export async function replan(childId, reason) {
   const db = readChild(childId);
   const canWrite = () => sequence === state.sequence && readChild(childId) === db && db.settings.buddyEnabled;
   if (!canWrite()) return;
-  reason = redact(reason).text;
-  if (buddyMode() !== "claude") {
-    mutateChild(childId, (d) => {
-      if (!canWrite()) return;
-      d.buddy.plan = offlinePlan(d, reason);
-      audit(d, "buddy", "plan_updated", `Recalculated plan after: ${reason} (offline planner)`);
-    });
-    return;
-  }
-  const prompt = redact(`[Automatic update — not typed by ${db.child.name}] Something changed: ${reason}. Check the snapshot, then call update_savings_plan with a refreshed plan. Then write one short, cheerful note (max 35 words) telling ${db.child.name} what changed for their goal.`).text;
-  let planUpdated = false;
-  const executeTool = (name, input) => {
-    const out = runTool(name, input, canWrite, childId);
-    if (name === "update_savings_plan" && out?.ok) planUpdated = true;
-    return out;
-  };
+  state.running = sequence;
   try {
-    let { reply, completed } = await _internals.runClaude([{ role: "user", content: prompt }], { executeTool, canWrite, childId });
-    if (!canWrite()) return;
-    if (planUpdated && completed !== false) reply = await screenReply(reply, canWrite, childId);
-    if (!canWrite()) return;
-    mutateChild(childId, (d) => {
+    reason = redact(reason).text;
+    if (buddyMode() !== "claude") {
+      mutateChild(childId, (d) => {
+        if (!canWrite()) return;
+        d.buddy.plan = offlinePlan(d, reason);
+        audit(d, "buddy", "plan_updated", `Recalculated plan after: ${reason} (offline planner)`);
+      });
+      return;
+    }
+    const prompt = redact(`[Automatic update — not typed by ${db.child.name}] Something changed: ${reason}. Check the snapshot, then call update_savings_plan with a refreshed plan. Then write one short, cheerful note (max 35 words) telling ${db.child.name} what changed for their goal.`).text;
+    let planUpdated = false;
+    const executeTool = (name, input) => {
+      const out = runTool(name, input, canWrite, childId);
+      if (name === "update_savings_plan" && out?.ok) planUpdated = true;
+      return out;
+    };
+    try {
+      let { reply, completed } = await _internals.runClaude([{ role: "user", content: prompt }], { executeTool, canWrite, childId });
       if (!canWrite()) return;
-      if (!planUpdated || completed === false) {
-        audit(d, "buddy", "replan_no_note", "Automatic replan finished without a completed plan update; no chat note posted.");
-        return;
-      }
-      if (d.buddy.plan) d.buddy.plan.reason = reason;
-      d.buddy.chat.push({ id: uid("msg"), role: "assistant", text: reply, ts: Date.now(), auto: true });
-    });
-  } catch (e) {
-    console.error("[buddy] replan error:", e.message);
-    if (!canWrite()) return;
-    mutateChild(childId, (d) => {
+      if (planUpdated && completed !== false) reply = await screenReply(reply, canWrite, childId);
       if (!canWrite()) return;
-      d.buddy.plan = offlinePlan(d, reason);
-    });
+      mutateChild(childId, (d) => {
+        if (!canWrite()) return;
+        if (!planUpdated || completed === false) {
+          audit(d, "buddy", "replan_no_note", "Automatic replan finished without a completed plan update; no chat note posted.");
+          return;
+        }
+        if (d.buddy.plan) d.buddy.plan.reason = reason;
+        d.buddy.chat.push({ id: uid("msg"), role: "assistant", text: reply, ts: Date.now(), auto: true });
+      });
+    } catch (e) {
+      console.error("[buddy] replan error:", e.message);
+      if (!canWrite()) return;
+      mutateChild(childId, (d) => {
+        if (!canWrite()) return;
+        d.buddy.plan = offlinePlan(d, reason);
+      });
+    }
+  } finally {
+    if (state.running === sequence) {
+      state.running = null;
+      // Publish completion even if Claude could not produce a new tip.
+      if (canWrite()) mutateChild(childId, () => {});
+    }
   }
 }

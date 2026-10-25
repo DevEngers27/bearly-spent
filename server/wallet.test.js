@@ -224,7 +224,7 @@ test("F2 token generation requires a configured unlocked parent PIN and GET neve
   assert.equal((await f.parent.call("POST", f.route("token"), {})).status, 403);
   await f.parent.call("POST", "/api/parent/pin", { pin: "2468" });
   const before = database().prepare("SELECT COUNT(*) AS n FROM sessions").get().n;
-  assert.deepEqual((await f.parent.call("GET", f.route("token"))).body, { token: null, id: null, expiresAt: null });
+  assert.deepEqual((await f.parent.call("GET", f.route("token"))).body, { token: null, id: null, expiresAt: null, lastPing: null, connected: false });
   assert.equal(database().prepare("SELECT COUNT(*) AS n FROM sessions").get().n, before);
   await f.parent.call("POST", "/api/parent/lock", {});
   for (const method of ["GET", "POST"]) assert.equal((await f.parent.call(method, f.route("token"), method === "POST" ? {} : undefined)).status, 403);

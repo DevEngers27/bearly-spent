@@ -517,6 +517,7 @@ function Settings({ state, run, demo, busy }) {
 function Children({ state, me, refreshMe, run, busy }) {
   useEffect(() => { if (state) refreshMe().catch(() => {}); }, [state?.version]);
   const [child, setChild] = useState({ name: "", age: "9", bearName: "" });
+  const [adding, setAdding] = useState(false);
   const linksKey = `mq_kid_links:${encodeURIComponent(me.family.id)}`;
   const [links, setLinks] = useState(() => { try { return JSON.parse(sessionStorage.getItem(linksKey) || "{}"); } catch { return {}; } });
   useEffect(() => { try { sessionStorage.setItem(linksKey, JSON.stringify(links)); } catch {} }, [linksKey, links]);
@@ -555,7 +556,7 @@ function Children({ state, me, refreshMe, run, busy }) {
       await refreshMe();
       return result;
     }, undefined, "Child added. Set their allowance to get started.");
-    if (result) setChild({ name: "", age: "9", bearName: "" });
+    if (result) { setChild({ name: "", age: "9", bearName: "" }); setAdding(false); }
   };
   const generate = async (id) => {
     const link = await run(() => api(`parent/children/${encodeURIComponent(id)}/link?child=${encodeURIComponent(id)}`, {}));
@@ -565,14 +566,35 @@ function Children({ state, me, refreshMe, run, busy }) {
   return <div className="p-stack">
     <h1>Children</h1>
     <p className="p-muted">Each saver has their own allowance, bear and adventures. Kid codes work once and last 15 minutes.</p>
+    <button className="pbtn primary add-child" disabled={busy} aria-expanded={adding} onClick={() => setAdding((value) => !value)}>Add a child</button>
+    {adding && <form className="p-card pform" onSubmit={add}>
+      <h2>Add a child</h2>
+      <label>Child's name<input required maxLength={24} {...field("name")} /></label>
+      <label>Age<select {...field("age")}>{[7, 8, 9, 10, 11, 12].map((age) => <option key={age} value={age}>{age}</option>)}</select></label>
+      <label>Bear's name<input required maxLength={24} {...field("bearName")} /></label>
+      <button className="pbtn primary" disabled={busy}>Add child</button>
+      <button type="button" className="pbtn" disabled={busy} onClick={() => setAdding(false)}>Cancel</button>
+    </form>}
     {state && <WalletLedger state={state} run={run} busy={busy} />}
     {me.children.map((summary) => {
       const link = links[summary.id];
       const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
-      return <section className="p-card" key={summary.id}>
-        <div className="row"><div><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></div><button className="pbtn" disabled={busy} onClick={() => generate(summary.id)}>Generate kid code</button></div>
+      return <section className="p-card child-card" key={summary.id}>
+        <header><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></header>
+        <section className="kid-signin p-stack" aria-label="Sign in on your child's device">
+          <h3>Sign in on your child's device</h3>
+          <button className="pbtn primary kid-code-button" disabled={busy} onClick={() => generate(summary.id)}>Get a kid code</button>
+          {link && <div className="p-stack">
+            {link.status === "linked" ? <p role="status">Linked ✓</p> : seconds > 0 && link.status !== "expired" ? <>
+              <label className="pform">Kid code<input className="kid-code" readOnly value={link.code} onFocus={(event) => event.target.select()} /></label>
+              <p role="status">Expires in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}. Open “I have a kid code” on your child's device.</p>
+              <button className="pbtn" disabled={busy || !navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(link.code), undefined, "Kid code copied")}>Copy code</button>
+            </> : <p role="status">This code expired. Generate a new one.</p>}
+          </div>}
+        </section>
         <ChildProfileForm key={JSON.stringify(summary)} summary={summary} refreshMe={refreshMe} run={run} busy={busy} />
-        {summary.friendCode && <div className="p-stack">
+        {summary.friendCode && <section className="friend-code-section p-stack" aria-label="Friend code">
+          <h3>Friend code — for adding friends, not for signing in</h3>
           <label className="pform">Friend code<input className="kid-code" readOnly value={summary.friendCode || ""} onFocus={(event) => event.target.select()} /></label>
           <p className="p-muted">Share with a friend's family. This code stays valid until you replace it. It cannot pair a device.</p>
           <button className="pbtn" disabled={busy} onClick={() => setConfirmation({ childId: summary.id, kind: "code" })}>Replace friend code</button>
@@ -588,27 +610,13 @@ function Children({ state, me, refreshMe, run, busy }) {
               if (result) setConfirmation(null);
             }}>Confirm {confirmation.kind === "code" ? "replace code" : "unfriend"}</button></div>
           </div>}
-        </div>}
-        <Devices childId={summary.id} busy={busy} onUnlink={(device) => {
+        </section>}
+        <Devices key={`${summary.id}:${shortcutVersions[summary.id] || 0}`} childId={summary.id} busy={busy} onUnlink={(device) => {
           if (device?.kind === "shortcut") setShortcutVersions((current) => ({ ...current, [summary.id]: (current[summary.id] || 0) + 1 }));
         }} />
-        <AppleCashTracking key={`${summary.id}:${shortcutVersions[summary.id] || 0}`} childId={summary.id} pinSet={me.family.pinSet} busy={busy} />
-        {link && <div className="p-stack">
-          {link.status === "linked" ? <p role="status">Linked ✓</p> : seconds > 0 && link.status !== "expired" ? <>
-            <label className="pform">Kid code<input className="kid-code" readOnly value={link.code} onFocus={(event) => event.target.select()} /></label>
-            <p role="status">Expires in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}. Open “I have a kid code” on your child's device.</p>
-            <button className="pbtn" disabled={busy || !navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(link.code), undefined, "Kid code copied")}>Copy code</button>
-          </> : <p role="status">This code expired. Generate a new one.</p>}
-        </div>}
+        <AppleCashTracking key={`${summary.id}:${shortcutVersions[summary.id] || 0}`} childId={summary.id} pinSet={me.family.pinSet} busy={busy} refreshKey={state} onUnlink={() => setShortcutVersions((current) => ({ ...current, [summary.id]: (current[summary.id] || 0) + 1 }))} />
       </section>;
     })}
-    <form className="p-card pform" onSubmit={add}>
-      <h2>Add a child</h2>
-      <label>Child's name<input required maxLength={24} {...field("name")} /></label>
-      <label>Age<select {...field("age")}>{[7, 8, 9, 10, 11, 12].map((age) => <option key={age} value={age}>{age}</option>)}</select></label>
-      <label>Bear's name<input required maxLength={24} {...field("bearName")} /></label>
-      <button className="pbtn primary" disabled={busy}>Add child</button>
-    </form>
   </div>;
 }
 
@@ -630,51 +638,48 @@ function WalletLedger({ state }) {
   </section>;
 }
 
-function AppleCashTracking({ childId, pinSet, busy }) {
+function AppleCashTracking({ childId, pinSet, busy, refreshKey, onUnlink }) {
   const [credential, setCredential] = useState(null);
+  const credentialEpoch = useRef(0);
   const [token, setToken] = useState("");
   const [message, setMessage] = useState("");
   const [run, pending] = useAction((text) => setMessage(text));
   const path = `child/wallet/token?child=${encodeURIComponent(childId)}`;
   useEffect(() => {
     let active = true;
-    if (pinSet) api(path).then((result) => { if (active) setCredential(result); }).catch((err) => { if (active) setMessage(err.message); });
+    const epoch = credentialEpoch.current;
+    if (pinSet) api(path).then((result) => { if (active && epoch === credentialEpoch.current) setCredential(result); }).catch((err) => { if (active && epoch === credentialEpoch.current) setMessage(err.message); });
     return () => { active = false; };
-  }, [path, pinSet]);
+  }, [path, pinSet, refreshKey]);
   const generate = async () => {
+    credentialEpoch.current++;
     const result = await run(() => api(path, {}));
+    credentialEpoch.current++;
     if (result) { setCredential(result); setToken(result.token); setMessage("Copy this token now. Rotating it disconnects the previous Shortcut."); }
   };
-  const test = async () => {
-    const result = await run(() => api(`child/wallet/ping?child=${encodeURIComponent(childId)}`, {}, { bearerToken: token }));
-    if (result) setMessage("Connected! Run the automation on your child's iPhone to check that setup too.");
-  };
-  const url = `${location.origin}/api/child/wallet/spend`;
+  const unlink = () => run(async () => {
+    credentialEpoch.current++;
+    await api(`parent/children/${encodeURIComponent(childId)}/devices/${encodeURIComponent(credential.id)}?child=${encodeURIComponent(childId)}`, undefined, { method: "DELETE" });
+    credentialEpoch.current++;
+    setCredential(null); setToken(""); setMessage("Shortcut unlinked."); onUnlink?.();
+    return { ok: true };
+  });
+  const lastPing = credential?.lastPing;
   return <div className="p-stack wallet-setup">
     <h3>Apple Cash tracking</h3>
-    <p className="p-muted">Use your child's iPhone to record Wallet purchases automatically. Only select the Apple Cash card.</p>
+    <p role="status">{credential?.connected ? "Connected" : "Not connected"}{lastPing ? ` · Last ping: ${formatDateTime(lastPing)}` : " · No ping yet"}</p>
     {!pinSet ? <p>Set a parent PIN in Security, then unlock parent mode to create a Shortcut token.</p> : <>
       <button className="pbtn" disabled={busy || pending} onClick={generate}>{credential?.id ? "Rotate Shortcut token" : "Generate Shortcut token"}</button>
-      {credential?.expiresAt && <p className="p-muted">Token expires {formatDateTime(credential.expiresAt)}. You can unlink it in Devices.</p>}
+      {credential?.id && <button className="pbtn danger" disabled={busy || pending} onClick={unlink}>Unlink</button>}
       {token && <>
         <label className="pform">Shortcut token<input className="shortcut-token" readOnly value={token} onFocus={(e) => e.target.select()} /></label>
         <div className="row">
           <button className="pbtn" disabled={busy || pending || !navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(token), undefined, "Token copied")}>Copy token</button>
-          <button className="pbtn" disabled={busy || pending} onClick={test}>Test connection</button>
         </div>
       </>}
     </>}
     {message && <p role="status">{message}</p>}
-    <ol>
-      <li>Open Shortcuts → Automation → Transaction on your child's iPhone.</li>
-      <li>Select the Apple Cash card and Run Immediately.</li>
-      <li>Add Get Contents of URL. Use POST with a JSON request body to <code>{url}</code>.</li>
-      <li>Add headers: <code>Content-Type: application/json</code> and <code>Authorization: Bearer YOUR_TOKEN</code>. Paste the token above.</li>
-      <li>Map the transaction's amount (dollars), merchant and date into the fields below. Format the date as ISO 8601 with a time zone. Use a stable transaction ID for <code>external_id</code>, and reuse it when retrying.</li>
-    </ol>
-    <pre>{JSON.stringify({ amount: 4.25, merchant: "Corner shop", at: "2026-10-24T12:30:00-07:00", external_id: "wallet-transaction-unique-id" }, null, 2)}</pre>
-    <p className="p-muted">If Wallet provides no transaction ID, make one from the original date, merchant and amount (64 characters max). Keep the same ID on retries. Test without a purchase by POSTing an empty JSON object to <code>{location.origin}/api/child/wallet/ping</code> with the same headers. Do not manually log purchases already recorded by the Shortcut.</p>
-    <p className="p-muted">Purchases and connection tests each allow 60 requests per hour per child session. If the Shortcut gets a 429 response, keep the purchase and retry after the Retry-After delay with the same transaction ID.</p>
+    <a href="/help/apple-cash" target="_blank" rel="noopener noreferrer">How to connect the iPhone Shortcut</a>
   </div>;
 }
 

@@ -6,7 +6,8 @@ import { readChild, mutateChild, resetChild, subscribe, childIdFor, childrenWith
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
 import { runGuardian, injectDuplicatePosting, reconcileNow } from "./guardian.js";
-import { chat, queueReplan, cancelReplan, buddyMode, offlinePlan } from "./buddy.js";
+import { chat, queueReplan, cancelReplan, replanPending, buddyMode, offlinePlan } from "./buddy.js";
+import { appleCashHelp } from "./help.js";
 import { actions } from "./actions.js";
 import { dayKey, weekKey } from "./time.js";
 import * as auth from "./auth.js";
@@ -131,6 +132,7 @@ export function childView(db, now = Date.now()) {
     trades: game.socialTradesView(db),
     pendingRequests: game.socialApprovalsView(db).filter((a) => (a.status === "pending" || (a.kind === "goal_purchase" && a.status === "approved" && !a.paidTxnId)) && ["spend", "extra", "reward", "task", "friend", "friend_request", "trade", "goal_purchase"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.real && a.kind === "friend_request" ? "Friend request waiting for grown-ups" : a.title, ...(a.goalId ? { goalId: a.goalId } : {}) })),
     plan: db.buddy.plan,
+    planPending: db.settings.buddyEnabled && replanPending(childIdFor(db)),
     chat: db.buddy.chat.slice(-30),
     settings: { ...db.settings, coopChallenge: game.isDemoChild(db) && db.settings.coopChallenge },
     catalog: {
@@ -192,6 +194,10 @@ function signedIn(req, res, result, now) {
   res.set("Set-Cookie", auth.cookieHeader(req, result.session, result.token, now));
   return auth.me(auth.resolveContext({ headers: { authorization: `Bearer ${result.token}` } }, {}, now));
 }
+register("GET", "/help/apple-cash", "public", (req, ctx, res) => {
+  res.type("html").send(appleCashHelp(req));
+  return SENT;
+});
 register("POST", "/api/auth/register", "public", (req, ctx, res, now) => signedIn(req, res, auth.register(req.body, options(req, now)), now));
 register("POST", "/api/auth/login", "public", (req, ctx, res, now) => signedIn(req, res, auth.login(req.body, options(req, now)), now));
 register("POST", "/api/auth/link", "public", (req, ctx, res, now) => signedIn(req, res, auth.redeemLink(req.body, options(req, now)), now));
@@ -466,6 +472,7 @@ export function createApp() {
   app.use("/api", (req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
   app.use(express.json({ limit: "32kb" }));
   app.use("/api", (req, res) => dispatch(req.method, `/api${req.path}`, req, res));
+  app.get("/help/apple-cash", (req, res) => dispatch("GET", "/help/apple-cash", req, res));
   const dist = path.join(here, "..", "dist");
   app.use(express.static(dist));
   app.get(/^(?!\/api).*/, (req, res, next) => res.sendFile(path.join(dist, "index.html"), (err) => err && next()));

@@ -7,9 +7,10 @@ import path from "node:path";
 import { database, _databaseForTest, closeDatabase } from "./db.js";
 import { _clearStoreForTest, seed, readChild, importLegacy, DEMO_CHILD_ID } from "./store.js";
 import { hashPassword, verifyPassword, tokenHash, initializeAccounts } from "./auth.js";
-import { dispatch } from "./index.js";
+import { dispatch, createApp, childView } from "./index.js";
+import { renderMarkdown } from "./help.js";
 import { _clearLimitsForTest, MINUTE } from "./limits.js";
-import { cancelReplan } from "./buddy.js";
+import { cancelReplan, queueReplan, _internals } from "./buddy.js";
 
 const DAY = 86400000;
 const initialEnv = { MQ_DEMO: process.env.MQ_DEMO, MQ_DATA_DIR: process.env.MQ_DATA_DIR, NODE_ENV: process.env.NODE_ENV };
@@ -31,6 +32,8 @@ function device(ip = "127.0.0.1") {
         set(key, value) { if (typeof key === "object") { for (const [k, v] of Object.entries(key)) this.set(k, v); } else this.headers[key.toLowerCase()] = value; return this; },
         status(value) { this.statusCode = value; return this; },
         json(value) { this.body = value; return this; },
+        type(value) { this.headers["content-type"] = value; return this; },
+        send(value) { this.body = value; return this; },
       });
       await dispatch(method, parsed.pathname, req, res, now);
       if (res.headers["set-cookie"]) cookie = res.headers["set-cookie"].split(";")[0];
@@ -503,4 +506,116 @@ test("W2.9: demo-only mutations reject real families even on a demo-enabled serv
     assert.equal((await parent.call("POST", `/api/parent/${path}`, { amount: 50 })).status, 404);
   }
   assert.equal(readChild(account.activeChild.id).accounts.parent.balance, 0);
+});
+
+
+test("H6.4 register creates up to four independent children atomically and selects the first", async () => {
+  const browser = device();
+  const children = [
+    { name: "Mia", age: 7, bearName: "Maple" },
+    { name: "Ben", age: 8, bearName: "Bo" },
+    { name: "Kai", age: 10, bearName: "Pip" },
+    { name: "Leo", age: 12, bearName: "Oak" },
+  ];
+  const result = await browser.call("POST", "/api/auth/register", { ...form(), children });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.children.map(({ name, age, bearName }) => ({ name, age, bearName })), children);
+  assert.equal(result.body.activeChild.id, result.body.children[0].id);
+  assert.equal((await browser.call("GET", "/api/auth/me")).body.activeChild.id, result.body.children[0].id);
+  for (const child of result.body.children) {
+    const d = readChild(child.id);
+    assert.equal(d.child.bear.name, child.bearName);
+    assert.deepEqual(Object.values(d.accounts).map((account) => account.balance), [0, 0, 0]);
+    assert.equal(d.settings.timezone, "America/Los_Angeles");
+  }
+  assert.equal(database().prepare("SELECT COUNT(*) AS n FROM sessions").get().n, 1);
+});
+
+test("H6.4 invalid later child rolls back family, parent, children, codes and session", async () => {
+  const browser = device();
+  for (const invalid of [null, { name: "Bad age", age: 13, bearName: "Bo" }, { name: "Good", age: 8, bearName: {} }]) {
+    const result = await browser.call("POST", "/api/auth/register", { ...form(), children: [{ name: "Mia", age: 9, bearName: "Maple" }, invalid] });
+    assert.equal(result.status, 400);
+    assert.equal(result.headers["set-cookie"], undefined);
+    for (const table of ["families", "users", "children", "friend_codes", "sessions"]) assert.equal(database().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, table);
+  }
+  assert.equal((await browser.call("POST", "/api/auth/register", form())).status, 200, "the failed email remains available to old single-child clients");
+});
+
+test("H6.4 register rejects empty, oversized and malformed children arrays", async () => {
+  for (const [index, children] of [[], Array(5).fill({ name: "Mia", age: 9, bearName: "Maple" }), {}, null, "Mia"].entries()) {
+    const result = await device(`10.0.0.${index}`).call("POST", "/api/auth/register", { ...form(), children });
+    assert.equal(result.status, 400);
+    assert.equal(database().prepare("SELECT COUNT(*) AS n FROM families").get().n, 0);
+  }
+});
+
+test("H6.3 help route renders the guide with request host before static and SPA fallback", async () => {
+  const result = await device().call("GET", "/help/apple-cash?token=never-echo-this", undefined, { secure: true, headers: { host: "demo.moneyquest.test:8443" } });
+  assert.equal(result.status, 200); assert.equal(result.headers["content-type"], "html");
+  assert.match(result.body, /<h1>Apple Cash tracking<\/h1>/);
+  assert.match(result.body, /https:\/\/demo.moneyquest.test:8443\/api\/child\/wallet\/spend/);
+  assert.match(result.body, /https:\/\/demo.moneyquest.test:8443\/api\/child\/wallet\/ping/);
+  assert.match(result.body, /<ol>.*Run Immediately/); assert.match(result.body, /<pre><code>.*\n/);
+  assert.match(result.body, /<table>/);
+  assert.doesNotMatch(result.body, /https:\/\/YOUR_MONEYQUEST_SITE|never-echo-this/);
+  const layers = createApp()._router.stack;
+  const help = layers.findIndex((layer) => layer.route?.path === "/help/apple-cash");
+  assert.ok(help >= 0 && help < layers.findIndex((layer) => layer.name === "serveStatic"));
+  assert.equal(database().prepare("SELECT COUNT(*) AS n FROM sessions").get().n, 0, "public help does not require or issue tokens");
+  process.env.NODE_ENV = "production";
+  const proxied = await device().call("GET", "/help/apple-cash", undefined, { headers: { host: "demo.moneyquest.test" } });
+  assert.match(proxied.body, /https:\/\/demo.moneyquest.test\/api\/child\/wallet\/spend/);
+});
+
+test("H6.3 help escapes raw HTML, code and request-host injection", async () => {
+  const html = renderMarkdown('# <script>alert("x")</script>\n\n**<img src=x onerror=alert(1)>** & \"hi\"\n\n```html\n</code><script>bad</script>\n```\n\n- <svg onload=bad>');
+  assert.doesNotMatch(html, /<script|<img|<svg/);
+  assert.match(html, /&lt;script&gt;/); assert.match(html, /&lt;\/code&gt;/); assert.match(html, /&amp;/);
+  const result = await device().call("GET", "/help/apple-cash", undefined, { headers: { host: '\"><script>alert(1)</script>&' } });
+  assert.equal(result.status, 200);
+  assert.doesNotMatch(result.body, /<script|<img/);
+  assert.match(result.body, /&quot;&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;&amp;/);
+});
+
+test("H6.2 replan pending covers debounce and in-flight work, then publishes completion", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const browser = device();
+  const result = await browser.call("POST", "/api/auth/register", form());
+  const id = result.body.activeChild.id;
+  const oldKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "test-key";
+  t.after(() => { if (oldKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = oldKey; });
+  let finish;
+  t.mock.method(_internals, "runClaude", () => new Promise((resolve) => { finish = resolve; }));
+  assert.equal(childView(readChild(id)).planPending, false);
+  queueReplan(id, "Money changed");
+  assert.equal(childView(readChild(id)).planPending, true);
+  t.mock.timers.tick(1500);
+  assert.equal(typeof finish, "function"); assert.equal(childView(readChild(id)).planPending, true);
+  const version = readChild(id).version;
+  finish({ reply: "No plan", completed: false }); await new Promise(setImmediate);
+  assert.equal(childView(readChild(id)).planPending, false);
+  assert.ok(readChild(id).version > version, "completion notifies connected clients even without a new plan");
+  queueReplan(id, "another change"); cancelReplan(id);
+  assert.equal(childView(readChild(id)).planPending, false);
+});
+
+test("H6.3 Shortcut status and last ping stay scoped to the child and rotation needs a fresh ping", async () => {
+  const browser = device(), now = Date.now();
+  const result = await browser.call("POST", "/api/auth/register", { ...form(), children: [{ name: "Mia", age: 9, bearName: "Maple" }, { name: "Ben", age: 8, bearName: "Bo" }] }, { now });
+  const [first, second] = result.body.children;
+  await browser.call("POST", "/api/parent/pin", { pin: "2468" }, { now });
+  const route = (id) => `/api/child/wallet/token?child=${id}`;
+  const token = (await browser.call("POST", route(first.id), {}, { now })).body;
+  assert.equal(token.connected, false); assert.equal(token.lastPing, null);
+  const ping = await device().call("POST", "/api/child/wallet/ping", {}, { now: now + 1, headers: { authorization: `Bearer ${token.token}` } });
+  assert.equal(ping.status, 200);
+  const status = (await browser.call("GET", route(first.id), undefined, { now: now + 2 })).body;
+  assert.equal(status.connected, true); assert.equal(status.lastPing, now + 1); assert.equal(status.token, null);
+  const sibling = (await browser.call("GET", route(second.id), undefined, { now: now + 2 })).body;
+  assert.equal(sibling.connected, false); assert.equal(sibling.lastPing, null);
+  const rotated = (await browser.call("POST", route(first.id), {}, { now: now + 3 })).body;
+  assert.equal(rotated.connected, false); assert.equal(rotated.lastPing, now + 1);
+  assert.equal((await browser.call("GET", route(first.id), undefined, { now: now + 4 })).body.connected, false);
 });

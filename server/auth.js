@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { database, transaction } from "./db.js";
-import { CODE_ALPHABET, createChild, childRecord, listChildren, mutateFamilyChildren, seed, demoSeed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
+import { CODE_ALPHABET, createChild, readChild, childRecord, listChildren, mutateFamilyChildren, seed, demoSeed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
 import { GameError, audit } from "./domain.js";
 import { object, str } from "./validate.js";
 import { takeLimit, resetLimit, MINUTE } from "./limits.js";
@@ -67,13 +67,15 @@ export function register(body, { ip = "unknown", ua, now = Date.now() } = {}) {
   body = object(body);
   const email = emailAddress(body.email), password = passwordText(body.password, true);
   const name = str(body.parentName, { max: 64 }), timezone = timezoneName(body.timezone);
+  const children = body.children === undefined ? [{ name: body.childName, age: body.childAge, bearName: body.bearName }] : body.children;
+  if (!Array.isArray(children) || children.length < 1 || children.length > 4) throw new GameError("Add between 1 and 4 children");
   const familyId = uid("family"), userId = uid("user");
   return transaction((db) => {
     if (db.prepare("SELECT id FROM users WHERE email = ?").get(email)) throw new GameError("That email is already registered");
     db.prepare("INSERT INTO families (id, name, created_at, timezone) VALUES (?, ?, ?, ?)").run(familyId, name, now, timezone);
     db.prepare("INSERT INTO users (id, family_id, role, email, pass_hash, name, created_at) VALUES (?, ?, 'parent', ?, ?, ?, ?)")
       .run(userId, familyId, email, hashPassword(password), name, now);
-    createChild(familyId, { name: body.childName, age: body.childAge, bearName: body.bearName });
+    for (const child of children) createChild(familyId, child);
     return createSession({ familyId, userId, ua, now });
   });
 }
@@ -336,14 +338,15 @@ export function walletToken(context, { rotate = false, now = Date.now() } = {}) 
   if (!context.family.parentPin) throw new GameError("Set a parent PIN in Security first", 403);
   if (context.session.unlocked_until <= now) throw new GameError("Please unlock parent mode", 403);
   childForDevices(context, context.childId);
+  const lastPing = readChild(context.childId).walletLastPing || null;
   if (rotate) return transaction((db) => {
     db.prepare("DELETE FROM sessions WHERE family_id = ? AND child_id = ? AND role = 'child' AND device_kind = 'shortcut'").run(context.family.id, context.childId);
     const { token, session } = createSession({ familyId: context.family.id, childId: context.childId, role: "child", deviceKind: "shortcut", now });
-    return { token, id: deviceId(session.token_hash), expiresAt: session.expires_at };
+    return { token, id: deviceId(session.token_hash), expiresAt: session.expires_at, lastPing, connected: false };
   });
   const session = database().prepare("SELECT * FROM sessions WHERE family_id = ? AND child_id = ? AND role = 'child' AND device_kind = 'shortcut' AND expires_at > ? ORDER BY created_at DESC LIMIT 1")
     .get(context.family.id, context.childId, now);
-  return session ? { token: null, id: deviceId(session.token_hash), expiresAt: session.expires_at } : { token: null, id: null, expiresAt: null };
+  return session ? { token: null, id: deviceId(session.token_hash), expiresAt: session.expires_at, lastPing, connected: Boolean(lastPing && lastPing >= session.created_at) } : { token: null, id: null, expiresAt: null, lastPing, connected: false };
 }
 export function unlinkDevice(context, childId, sessionId) {
   childForDevices(context, childId);

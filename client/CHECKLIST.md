@@ -136,7 +136,7 @@ The checks below remain pending; no listening server or browser session was star
 
 - [ ] At 390×844, open Weekly budget with a configured allowance, then with $0/unset allowance. Confirm its default, edit to $1, $12.50 and $200, and check rescaled sliders. Invalid/mismatched totals and save/needs below 20%/25% cannot finish. Parent Overview shows the saved total and allocations; repeating in the same week earns no extra points.
 - [ ] Close a speech bubble using × (44px target), tapping outside the scene, Escape and Close talk bar. It stays hidden through countdown/state refreshes; the next talk or reply can show another. Check text scrolling, keyboard focus and reduced motion with a long reply.
-- [ ] During a trip, opening talk shows only the wooden countdown sign and a static “<bear> is on a trip — back soon!” bubble. No Home bear or Zz appears, including when talk was open before departure. Watch several countdown ticks: no typewriter restart.
+- [ ] During a trip, opening talk shows only the wooden countdown sign and “<bear> is on a trip! Back in m:ss”, with only the time changing. No Home bear or Zz appears, including when talk was open before departure. Watch several countdown ticks: no typewriter restart.
 - [ ] Tap a locked point-priced cosmetic: see cost and current balance, cancel with Not now, then Buy. Only Buy spends points. A shortage disables Buy with “Earn N more points”; failures retain the confirmation. Milestone locks and owned-item equip still work.
 - [ ] Parent Delete goal, Unfriend in Children and Friends & privacy, and Replace friend code each require a second inline action. Cancel sends no request; a failed confirmation remains open. Verify selected child scoping and offline/pending disabling.
 - [ ] Decline a friend request as the receiving kid and parent. The requester parent gets the recipient-name notice and “didn't go through” decided status. The receiving kid sees “Request closed”. Sending valid/invalid codes shows the same persistent session receipt, including after leaving Friends.
@@ -150,7 +150,7 @@ The checks below remain pending; no listening server or browser session was star
 - [ ] Spent defaults to Apple Cash. Paid with switches sources and “You have” updates. Record is disabled with a reason if the amount exceeds that source. Spending money still shows the over-limit approval copy.
 - [ ] A short-funded Shortcut purchase returns 409, leaves funding nonnegative, and makes one pending receipt/notification. Retry with the same external ID does not add a card or notice.
 - [ ] Inbox pending receipt has Add money (focuses Allowance's existing funding input), Record now, and Dismiss. Record while still short shows the friendly error. Add funds then Record posts once; retrying Record or the original Shortcut does not debit again. Dismiss removes the card and audits it.
-- [ ] Children retains Shortcut setup and Apple Cash activity shows funding, weekly/monthly totals, purchase flags and receipts waiting for funding. No Send form remains. Recent and Transactions tag Apple Cash; legacy sends say “Sent via Apple Cash (before 0.7)”.
+- [ ] Children links to the Shortcut setup guide and Apple Cash activity shows funding, weekly/monthly totals, purchase flags and receipts waiting for funding. No Send form remains. Recent and Transactions tag Apple Cash; legacy sends say “Sent via Apple Cash (before 0.7)”.
 - [ ] Check on an actual iPhone that 200 finishes, 409 preserves receipt/ID for funding retry, and 429 respects Retry-After. Token scope, PIN gating, expiry and revocation still work.
 ## H2 daily missions
 - Open Missions: Today shows up to three server-assigned missions with hints and rewards; Home's Next up matches the first one.
@@ -161,3 +161,24 @@ The checks below remain pending; no listening server or browser session was star
 - Price detective opens Cash diary; enter a note and two prices. One price or an invalid price cannot submit; both are stored with the diary entry.
 - Finish a lesson: its card says “Review · no points”; reviewing adds no points. First-time lesson, track and save mission rewards are not doubled.
 - Reopen after family-local midnight: missions roll once and persist across refresh/restart. Parent state and Buddy show the same current missions.
+
+
+## H6 phone notes
+
+Socket-free coverage: `client/h6.test.mjs`, additions to `server/auth.test.js`,
+and updated superseded assertions in `client/c1.test.mjs`, `client/h4.test.mjs`,
+`client/w4.test.mjs` and `server/wallet.test.js`. Tests cover countdown identity,
+return/refresh, both away-bear paths, note freshness/current goal, token status,
+escaped public help, atomic multi-child registration and pairing layout order.
+The 360/390px checks validate structure and CSS rules, not browser geometry.
+
+Browser pixel verification remains **pending**: the browser URL policy rejected
+navigation to the socket-free local HTML fixture (`file:` is blocked), and this
+batch prohibits starting a listening server. No server or deployment was started.
+
+- [ ] At 360×780 and 390×844, check Get a kid code is the first full-width primary action in each child card, with no internal card scrolling or clipping. Generate, Copy, expire, link, leave and return; the linked receipt persists. Friend code remains clearly separate below.
+- [ ] Open talk before departure, send the bear away, and reload mid-trip. Home always has the wooden sign and no bear. Open the trip bubble: only the countdown changes. At zero, “Any second now…” lasts at most five seconds; a late state requests refresh, and a returned trip proceeds to the reveal without an old trip bubble.
+- [ ] Change money and the current goal: Thinking appears while a replan is queued/running; the current goal is acknowledged in that same state refresh and Updated uses the configured time zone. Successful and failed replans both clear pending state.
+- [ ] Each child's Apple Cash card has status/last ping, Generate or Rotate, Copy, Unlink and the help link. Rotation waits for a fresh ping. No instructions or JSON appear in the app; the help page has the correct HTTPS host and no private token. Test the actual iPhone Shortcut and compare a purchase with activity.
+- [ ] Create a family with one, two and four children; remove a middle row and refill it. Confirm the first saver is selected and siblings stay independent. Parent → Kids → Children opens Add a child in one tap at the top; failed saves preserve the draft.
+- [ ] Welcome describes where to get a kid code. Check long child/bear names, touch targets, keyboard focus, reduced motion and offline disabled actions on a phone.
