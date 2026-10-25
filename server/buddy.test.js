@@ -439,6 +439,28 @@ test("guard BLOCK replaces a chat reply and only audits the first 80 blocked cha
   assert.ok(!JSON.stringify(read().buddy.chat).includes(blocked));
   assert.equal(read().audit.at(-1).action, "buddy_guard_blocked");
   assert.equal(read().audit.at(-1).detail, blocked.slice(0, 80));
+  const entry = read().audit.at(-1); assert.equal(entry.reason ?? entry.data?.reason, "verdict:BLOCK");
+});
+
+test("a transient guard error is retried once after a short pause; the reply passes when the retry says OK", async (t) => {
+  let calls = 0; const waits = [];
+  t.mock.method(_internals, "wait", async (ms) => { waits.push(ms); });
+  t.mock.method(_internals, "callGuard", async () => { if (calls++ === 0) { const e = new Error("overloaded"); e.status = 529; throw e; } return { content: [{ type: "text", text: "OK" }] }; });
+  assert.equal(await runGuard("You have $152 saved."), "OK"); assert.equal(calls, 2); assert.deepEqual(waits, [500]);
+});
+
+test("two guard errors still block the reply, and the audit and server log say why", async (t) => {
+  const reply = "You have $152 saved. Want a new goal?";
+  t.mock.method(_internals, "runClaude", async () => ({ reply }));
+  t.mock.method(_internals, "wait", async () => {});
+  t.mock.method(_internals, "runGuard", runGuard);
+  const errors = []; t.mock.method(console, "error", (...args) => errors.push(args.join(" ")));
+  t.mock.method(_internals, "callGuard", async () => { const e = new Error("rate limited"); e.status = 429; throw e; });
+  assert.equal((await chat("How long to save $100?")).reply, guardFallback);
+  const entry = read().audit.at(-1); assert.equal(entry.action, "buddy_guard_blocked"); assert.equal(entry.detail, reply.slice(0, 80));
+  assert.equal(entry.reason ?? entry.data?.reason, "error:429 rate limited");
+  assert.ok(errors.some((line) => /\[buddy\] guard error: 429 rate limited/.test(line)), JSON.stringify(errors));
+  assert.ok(!read().buddy.chat.some((m) => m.text === reply));
 });
 
 test("a throwing guard blocks the chat reply", async (t) => {
