@@ -9,14 +9,6 @@ import { money, integer, str, bool, id, oneOf, object, profileName } from "./val
 const action = (fn) => (db, body, ...args) => fn(db, object(body), ...args);
 const optionalNote = (body) => Object.hasOwn(body, "note") ? str(body.note, { required: false }) : "";
 
-function clearFundingEscalations(db) {
-  // A parent deposit can unblock parent-funded payouts, not child spending.
-  db.approvals.forEach((a) => {
-    if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
-    if (a.kind === "topup" && a.status === "pending") game.resolveEscalation(db, a, "approved");
-  });
-}
-
 function renameProfileBear(db, name) {
   const bearName = profileName(name);
   db.child.bear.name = bearName;
@@ -28,11 +20,11 @@ export const actions = {
   walletPing: action(() => ({ ok: true })),
   save: action((db, body, now) => game.childSave(db, money(body.amount, { min: 100 }), now)),
   spend: action((db, body, now) => game.childSpend(db, {
-    amount: money(body.amount, { min: 1 }), memo: str(body.memo),
+    amount: money(body.amount, { min: 1 }), memo: str(body.memo), clientId: game.moneyClientId(body.clientId),
   }, spendPolicy, now)),
   walletSpend: action((db, body, now) => game.childWalletSpend(db, {
     amount: money(body.amount, { min: 1 }), merchant: str(body.merchant),
-    at: body.at, external_id: body.external_id,
+    at: body.at, external_id: body.external_id, clientId: body.clientId,
   }, spendPolicy, now)),
   walletSend: action(() => game.parentWalletSend()),
   walletRecord: action((db, body, pendingId, now) => game.recordWalletPending(db, id(pendingId), spendPolicy, now)),
@@ -107,19 +99,16 @@ export const actions = {
     const a = Object.assign(db.allowance, update);
     game.audit(db, "parent", "allowance_updated", `Allowance $${(a.amount / 100).toFixed(2)}/wk, ${a.savePct}% saved, purchase limit $${(a.spendLimit / 100).toFixed(2)}`);
   }),
-  fundingAdd: action((db, body) => {
-    const amount = money(body.amount, { min: 100, max: 100000 });
-    const note = optionalNote(body);
-    game.recordFunding(db, amount, note);
-    clearFundingEscalations(db);
-  }),
-  topup: action((db, body) => {
-    const amount = money(body.amount, { min: 1, max: 100000 });
-    db.accounts.parent.balance += amount;
-    clearFundingEscalations(db);
-    game.notify(db, "parent", `Funding topped up: $${(amount / 100).toFixed(2)}`, "money");
-    game.audit(db, "parent", "topup", `Added $${(amount / 100).toFixed(2)} to the funding account (simulated deposit)`);
-  }),
+  received: action((db, body, now) => game.receivedMoney(db, {
+    amount: money(body.amount, { min: 1, max: 50000 }), note: Object.hasOwn(body, "note") ? str(body.note, { required: false, max: 60 }) : "",
+    clientId: game.moneyClientId(body.clientId), source: "kid_form",
+  }, now)),
+  sendMoney: action((db, body, now) => game.receivedMoney(db, {
+    amount: money(body.amount, { min: 1, max: 50000 }), note: Object.hasOwn(body, "note") ? str(body.note, { required: false, max: 60 }) : "",
+    clientId: game.moneyClientId(body.clientId), source: "parent",
+  }, now)),
+  fundingAdd: action(() => game.parentWalletSend()),
+  topup: action(() => game.parentWalletSend()),
   settings: action((db, body) => {
     const update = {};
     for (const key of ["requireTradeApproval", "buddyEnabled", "coopChallenge"]) {

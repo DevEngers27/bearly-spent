@@ -47,7 +47,7 @@ async function family(name = "Mia") {
   return { parent, id: result.body.activeChild.id, second: result.body.children[1].id };
 }
 
-test("H11.1 snapshot exposes real wardrobe, postcards, friends, lessons, budget, waiting receipts and current goal", () => {
+test("H11.1 snapshot exposes real wardrobe, postcards, friends, lessons, budget, Savings money model and current goal", () => {
   const db = seed(Date.now());
   db.child.bear.held = "map";
   db.child.lessonsDone = [LESSONS[0].id];
@@ -80,7 +80,8 @@ test("H11.1 snapshot exposes real wardrobe, postcards, friends, lessons, budget,
   assert.deepEqual(snap.friends, { count: 1, names: ["Maya"], pending_requests: 1, pending_swaps: 12 });
   assert.deepEqual(snap.lessons, { finished: 1, total: LESSONS.length, next_titles: LESSONS.slice(1, 4).map((l) => l.title) });
   assert.deepEqual(snap.weekly_budget, { total: "$10.00", save: "$2.50", needs: "$4.00", fun: "$2.50", give: "$1.00", planned_on: "2026-10-24" });
-  assert.deepEqual(snap.apple_cash_waiting, { count: 2, total: "$4.00" });
+  assert.equal(snap.apple_cash_waiting, undefined);
+  assert.equal(snap.apple_cash_note, "Apple Cash purchases come out of your savings; money you receive goes into savings");
   assert.deepEqual(snap.current_goal, { title: "New bicycle", target: "$100.00", saved: "$20.00", weeks_left: 16 });
   assert.doesNotMatch(JSON.stringify(snap), /UNREVEALED_DESTINATION/);
   assert.ok(Buffer.byteLength(JSON.stringify(snapshot(seed()))) < 4000, "normal snapshot stays under 4 KB (the whole shop rides along)");
@@ -152,7 +153,7 @@ test("H11.2–3,6 stubbed Claude receives new snapshot fields and kid-only help 
       { type: "tool_use", id: "help", name: "lookup_help", input: { question: "how do I take a trip", audience: "parent" } },
     ] };
     const results = params.messages.at(-1).content.map((block) => JSON.parse(block.content));
-    for (const key of ["wardrobe", "postcards", "friends", "lessons", "weekly_budget", "apple_cash_waiting", "current_goal"]) assert.ok(key in results[0]);
+    for (const key of ["wardrobe", "postcards", "friends", "lessons", "weekly_budget", "apple_cash_note", "current_goal"]) assert.ok(key in results[0]);
     assert.ok(results[1].every((section) => section.audience === "kid"));
     assert.match(JSON.stringify(results[1]), /Juniper/);
     return { stop_reason: "end_turn", content: [{ type: "text", text: "Open Home." }] };

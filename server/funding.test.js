@@ -56,140 +56,81 @@ after(() => {
   }
 });
 
-test("W2c.1: real-family funding route records cents, a private note and ledger-only audit without a rate limit", async () => {
+const receiptId = "11111111-1111-4111-8111-111111111111";
+
+test("H12: Send money records cents, note, history and child notice once", async () => {
   const { parent, id } = await family();
-  const childNotifications = structuredClone(readChild(id).notifications.filter((n) => n.to === "child"));
-  const result = await parent.call("POST", "/api/parent/funding/add", { amount: "25.50", note: "  Birthday envelope  " });
-  assert.equal(result.status, 200);
-  assert.deepEqual(result.body, { ok: true });
-  const db = readChild(id);
-  assert.equal(db.accounts.parent.balance, 2550);
-  assert.deepEqual(db.transactions.map((t) => [t.from, t.to, t.amount, t.kind, t.memo, t.status]), [["external", "parent", 2550, "funding_in", "Birthday envelope", "posted"]]);
-  assert.ok(db.audit.some((a) => a.actor === "parent" && a.detail === "Recorded $25.50 added to Mia's funding — real money stays with you"));
-  assert.deepEqual(db.notifications.filter((n) => n.to === "child"), childNotifications);
-  assert.equal(childView(db).transactions.length, 0);
-  assert.equal(parentView(db).transactions[0].memo, "Birthday envelope");
-  for (let i = 0; i < 35; i++) assert.equal((await parent.call("POST", "/api/parent/funding/add", { amount: 1 })).status, 200);
-  assert.equal(readChild(id).accounts.parent.balance, 6050);
-  assert.equal(readChild(id).transactions.at(-1).memo, "Added by Jordan");
+  const body = { amount: "25.50", note: "  Birthday envelope  ", clientId: receiptId };
+  const result = await parent.call("POST", "/api/parent/money/send", body);
+  assert.equal(result.status, 200); assert.equal(result.body.source, "parent");
+  const db = readChild(id); assert.equal(db.accounts.savings.balance, 2550);
+  assert.equal(db.transactions[0].note, "Birthday envelope");
+  assert.equal(childView(db).transactions[0].memo, "Received from your grown-up");
+  assert.equal(parentView(db).receivedThisMonth, 2550);
+  assert.equal(db.notifications.filter((n) => n.to === "child" && n.text === "Your grown-up sent you $25.50!").length, 1);
+  const txns = structuredClone(db.transactions), notices = db.notifications.length;
+  assert.equal((await parent.call("POST", "/api/parent/money/send", body)).body.duplicate, true);
+  assert.deepEqual(db.transactions, txns); assert.equal(db.notifications.length, notices);
 });
 
-test("W2c.1: funding requires a parent and current PIN unlock and isolates the selected child", async () => {
-  const { parent, id } = await family();
+test("H12: Send money requires parent PIN unlock and isolates selected children and families", async () => {
+  const { parent, id } = await family(), body = { amount: 50, clientId: receiptId };
   const sibling = (await parent.call("POST", "/api/parent/children", { name: "Leo", age: 8, bearName: "Pip" })).body;
-  const link = await parent.call("POST", `/api/parent/children/${id}/link`, {});
-  const child = device("child");
-  assert.equal((await child.call("POST", "/api/auth/link", { code: link.body.code })).status, 200);
-  const before = structuredClone(readChild(id));
-  assert.equal((await device("anonymous").call("POST", "/api/parent/funding/add", { amount: 50 })).status, 401);
-  assert.equal((await child.call("POST", "/api/parent/funding/add", { amount: 50 })).status, 403);
-  assert.deepEqual(readChild(id), before);
-  assert.equal((await parent.call("POST", "/api/parent/pin", { pin: "5678" })).status, 200);
-  assert.equal((await parent.call("POST", "/api/parent/lock", {})).status, 200);
-  assert.equal((await parent.call("POST", "/api/parent/funding/add", { amount: 50 })).status, 403);
-  assert.equal(readChild(id).accounts.parent.balance, 0);
-  assert.equal((await parent.call("POST", "/api/parent/unlock", { pin: "5678" })).status, 200);
-  assert.equal((await parent.call("POST", `/api/parent/funding/add?child=${sibling.id}`, { amount: 50 })).status, 200);
-  assert.equal(readChild(id).accounts.parent.balance, 0);
-  assert.equal(readChild(sibling.id).accounts.parent.balance, 5000);
-  const outsider = device("outsider");
-  assert.equal((await outsider.call("POST", "/api/auth/register", { ...form, email: "outsider@example.test" })).status, 200);
-  assert.equal((await outsider.call("POST", `/api/parent/funding/add?child=${id}`, { amount: 50 })).status, 404);
-  assert.equal(readChild(id).accounts.parent.balance, 0);
+  const link = await parent.call("POST", `/api/parent/children/${id}/link`, {}), kid = device("kid");
+  await kid.call("POST", "/api/auth/link", { code: link.body.code });
+  assert.equal((await device("anonymous").call("POST", "/api/parent/money/send", body)).status, 401);
+  assert.equal((await kid.call("POST", "/api/parent/money/send", body)).status, 403);
+  await parent.call("POST", "/api/parent/pin", { pin: "5678" }); await parent.call("POST", "/api/parent/lock", {});
+  assert.equal((await parent.call("POST", "/api/parent/money/send", body)).status, 403);
+  await parent.call("POST", "/api/parent/unlock", { pin: "5678" });
+  assert.equal((await parent.call("POST", `/api/parent/money/send?child=${sibling.id}`, body)).status, 200);
+  assert.equal(readChild(id).accounts.savings.balance, 0); assert.equal(readChild(sibling.id).accounts.savings.balance, 5000);
+  const outsider = device("outsider"); await outsider.call("POST", "/api/auth/register", { ...form, email: "outsider@example.test" });
+  assert.equal((await outsider.call("POST", `/api/parent/money/send?child=${id}`, body)).status, 404);
 });
 
-test("W2c.1: funding validates amounts and notes before mutation and accepts both dollar boundaries", async () => {
-  const invalid = [
-    {}, null, [], { amount: 0 }, { amount: -1 }, { amount: 0.999 }, { amount: 1000.001 },
-    ...[null, true, [], {}, "", "oops", "1e309", Infinity, NaN].map((amount) => ({ amount })),
-    ...[null, 42, [], {}, "x".repeat(121)].map((note) => ({ amount: 50, note })),
-  ];
-  const db = seed(Date.now());
-  for (const body of invalid) {
-    const before = structuredClone(db);
-    assert.throws(() => actions.fundingAdd(db, body), (e) => e instanceof GameError && e.status === 400);
+test("H12: received/send validate amount, optional 60-character note and clientId before mutation", () => {
+  const invalid = [null, [], {}, { amount: 0 }, { amount: -1 }, { amount: 500.001 }, { amount: Infinity }, { amount: null }, { amount: true }, { amount: [] }, { amount: {} }, { amount: "" }, { note: null }, { note: 42 }, { note: "x".repeat(61) }, { clientId: undefined }, { clientId: "oops" }];
+  for (const action of [actions.received, actions.sendMoney]) for (const fields of invalid) {
+    const db = seed(), before = structuredClone(db);
+    assert.throws(() => action(db, fields === null || Array.isArray(fields) || !Object.keys(fields).length ? fields : { amount: 20, clientId: receiptId, ...fields }), (e) => e instanceof GameError && e.status === 400);
     assert.deepEqual(db, before);
   }
-  actions.fundingAdd(db, { amount: 1 });
-  actions.fundingAdd(db, { amount: "1000", note: "  " });
-  actions.fundingAdd(db, { amount: "1.236", note: "x".repeat(120) });
-  assert.deepEqual(db.transactions.slice(-3).map((t) => t.amount), [100, 100000, 124]);
-  assert.equal(db.transactions.at(-2).memo, `Added by ${db.family.parentName}`);
-  const { parent, id } = await family();
-  for (const body of invalid) assert.equal((await parent.call("POST", "/api/parent/funding/add", body)).status, 400);
-  assert.equal(readChild(id).accounts.parent.balance, 0);
-  assert.equal(readChild(id).transactions.length, 0);
-});
-
-test("W2c.1/3: Add money clears only parent-funded escalations and Guardian pays blocked allowance and rewards once", () => {
-  const now = Date.now(), db = seed(now);
-  db.accounts.parent.balance = 0;
-  db.accounts.spending.balance = 0;
-  db.allowance.nextRun = now;
-  for (const kind of ["reward", "extra", "spend"]) db.approvals.push({ id: kind, kind, status: "approved", amount: kind === "spend" ? 50000 : 500, title: kind, memo: "Book", reason: "Helping", createdAt: now });
-  runGuardian(db, now);
-  const escalations = db.approvals.filter((a) => a.kind === "topup");
-  assert.equal(escalations.length, 3);
-  assert.ok(escalations.every((a) => /Add money/.test(a.detail)));
-  const spend = db.approvals.find((a) => a.id === "spend"), spendEscalatedAt = spend.escalatedAt;
-  const childReminder = db.approvals.find((a) => a.kind === "child_funds");
-  const childNotifications = structuredClone(db.notifications.filter((n) => n.to === "child"));
-  actions.fundingAdd(db, { amount: 50 });
-  assert.ok(escalations.every((a) => a.status === "approved"));
-  assert.ok(db.notifications.filter((n) => escalations.some((a) => a.id === n.ref)).every((n) => n.read));
-  assert.equal(db.approvals.find((a) => a.id === "reward").escalatedAt, undefined);
-  assert.equal(db.approvals.find((a) => a.id === "extra").escalatedAt, undefined);
-  assert.equal(spend.escalatedAt, spendEscalatedAt);
-  assert.equal(childReminder.status, "pending");
-  assert.deepEqual(db.notifications.filter((n) => n.to === "child"), childNotifications);
-  runGuardian(db, now);
-  assert.equal(db.accounts.parent.balance, 3000);
-  for (const kind of ["reward", "extra"]) assert.ok(db.approvals.find((a) => a.id === kind).paidTxnId);
-  assert.equal(spend.paidTxnId, undefined);
-  const txns = structuredClone(db.transactions);
-  runGuardian(db, now);
-  assert.deepEqual(db.transactions, txns);
-  assert.equal(db.transactions.find((t) => t.kind === "funding_in").flagged, undefined);
-});
-
-test("W2c.1/5: real-family funding action runs Guardian immediately while demo topup stays demo-only", async () => {
-  const { parent, id } = await family();
-  const now = Date.now();
-  mutateChild(id, (db) => { db.allowance.amount = 1000; db.allowance.nextRun = now; runGuardian(db, now); });
-  assert.equal((await parent.call("POST", "/api/parent/funding/add", { amount: 20 })).status, 200);
-  assert.equal(readChild(id).accounts.parent.balance, 1000);
-  assert.equal(readChild(id).transactions.filter((t) => t.kind === "allowance").reduce((sum, t) => sum + t.amount, 0), 1000);
-  for (const demo of ["0", "1"]) {
-    process.env.MQ_DEMO = demo;
-    assert.equal((await parent.call("POST", "/api/parent/topup", { amount: 50 })).status, 404);
+  for (const amount of [0.01, 500]) {
+    const db = seed(); assert.equal(actions.sendMoney(db, { amount, clientId: receiptId, note: "x".repeat(60) }).amount, amount * 100);
   }
-  initializeAccounts();
-  const demo = device("demo");
-  assert.equal((await demo.call("POST", "/api/demo/login", {})).status, 200);
-  const before = readChild(DEMO_CHILD_ID).accounts.parent.balance;
-  assert.equal((await demo.call("POST", "/api/parent/topup", { amount: 50 })).status, 200);
-  assert.equal(readChild(DEMO_CHILD_ID).accounts.parent.balance, before + 5000);
-  assert.equal((await demo.call("POST", "/api/parent/funding/add", { amount: 1 })).status, 200);
-  assert.equal(readChild(DEMO_CHILD_ID).transactions.at(-1).kind, "funding_in");
 });
 
-test("H1.2/6: Add money covers allowance and Apple Cash from one pot without auto-recording pending purchases", async () => {
+test("H12: allowance and approved rewards pay once without funding while child shortages still wait", () => {
+  const now = Date.now(), db = seed(now); db.accounts.spending.balance = 0; db.allowance.nextRun = now;
+  for (const kind of ["reward", "extra", "spend"]) db.approvals.push({ id: kind, kind, status: "approved", amount: kind === "spend" ? 50000 : 500, title: kind, memo: "Book", reason: "Helping" });
+  runGuardian(db, now);
+  for (const kind of ["reward", "extra"]) assert.ok(db.approvals.find((a) => a.id === kind).paidTxnId);
+  assert.equal(db.approvals.find((a) => a.id === "spend").paidTxnId, undefined);
+  assert.ok(db.approvals.some((a) => a.kind === "child_funds")); assert.ok(!db.approvals.some((a) => a.kind === "topup"));
+  assert.ok(!db.audit.some((a) => ["allowance_blocked", "low_funds_warning"].includes(a.action)));
+  const txns = structuredClone(db.transactions); runGuardian(db, now); assert.deepEqual(db.transactions, txns);
+});
+
+test("H12: legacy funding routes return 410 for real and demo families without money changes", async () => {
   const { parent, id } = await family();
-  const now = Date.now();
+  for (const path of ["funding/add", "topup", "wallet/send", "wallet/pending/old/record", "wallet/pending/old/dismiss"]) {
+    const before = structuredClone(readChild(id));
+    assert.equal((await parent.call("POST", `/api/parent/${path}`, { amount: 20 })).status, 410);
+    assert.deepEqual(readChild(id), before);
+  }
+  process.env.MQ_DEMO = "1"; initializeAccounts(); const demo = device("demo"); await demo.call("POST", "/api/demo/login", {});
+  assert.equal((await demo.call("POST", "/api/parent/topup", { amount: 50 })).status, 410);
+});
+
+test("H12: automatic Apple Cash cover and scheduled allowance are independent credits", async () => {
+  const { parent, id } = await family(), now = Date.now();
   mutateChild(id, (db) => { db.allowance.amount = 1000; db.allowance.nextRun = now; });
-  const receipt = { amount: 10, merchant: "Bookshop", external_id: "one-pot" };
-  assert.equal((await parent.call("POST", "/api/child/wallet/spend", receipt)).status, 409);
-  const pendingId = readChild(id).walletPending[0].id;
-  assert.equal((await parent.call("POST", "/api/parent/funding/add", { amount: 15 })).status, 200);
-  assert.equal(readChild(id).accounts.parent.balance, 500, "allowance draws from the same deposit");
-  assert.equal(readChild(id).walletPending.length, 1, "Add money does not silently record a receipt");
-  const route = `/api/parent/wallet/pending/${pendingId}/record`;
-  const stillShort = await parent.call("POST", route, {});
-  assert.equal(stillShort.status, 409);
-  assert.equal(stillShort.body.shortBy, 500);
-  assert.equal((await parent.call("POST", "/api/parent/funding/add", { amount: 5 })).status, 200);
-  assert.equal((await parent.call("POST", route, {})).status, 200);
-  assert.equal(readChild(id).accounts.parent.balance, 0);
+  const receipt = { amount: 10, merchant: "Bookshop", external_id: "own-money" };
+  const result = await parent.call("POST", "/api/child/wallet/spend", receipt);
+  assert.equal(result.status, 200); assert.equal(result.body.covered, 1000);
+  assert.equal(readChild(id).accounts.savings.balance, 500); assert.equal(readChild(id).accounts.spending.balance, 500);
+  const txns = structuredClone(readChild(id).transactions);
   assert.equal((await parent.call("POST", "/api/child/wallet/spend", receipt)).body.duplicate, true);
-  assert.ok(Object.values(readChild(id).accounts).every((a) => a.balance >= 0));
+  assert.deepEqual(readChild(id).transactions, txns);
 });

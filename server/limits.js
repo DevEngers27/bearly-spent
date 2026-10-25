@@ -13,7 +13,7 @@ export const policies = {
   missionSeen: [30, HOUR],
   chat: [30, HOUR], speak: [60, HOUR], voice: [20, 10 * MINUTE],
   parentHelp: [20, HOUR],
-  walletPing: [60, HOUR], walletSpend: [60, HOUR],
+  walletPing: [60, HOUR], walletSpend: [60, HOUR], money: [60, HOUR],
 };
 
 export function takeLimit(policy, key, now = Date.now(), { retryAfter = false } = {}) {

@@ -4,8 +4,8 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { COSMETICS, SLOTS } from "./catalog.js";
 import { database, transaction } from "./db.js";
-import { GameError, dueAdventures, normalizeGoals, audit, notify } from "./domain.js";
-import { hasDueWork } from "./guardian.js";
+import { GameError, dueAdventures, normalizeGoals, audit, notify, postWalletReceipt } from "./domain.js";
+import { hasDueWork, spendPolicy } from "./guardian.js";
 import { profileName, integer, object } from "./validate.js";
 
 const documents = new Map();
@@ -34,6 +34,7 @@ export function seed(now = Date.now()) {
   return {
     version: 1,
     wardrobeVersion: 2,
+    moneyVersion: 9,
     createdAt: now,
     family: { parentName: "Jordan" },
     child: {
@@ -49,7 +50,6 @@ export function seed(now = Date.now()) {
     },
     // Simulated bank. Balances are in cents to avoid float drift.
     accounts: {
-      parent: { id: "acct_parent", label: "Funding account", balance: 25000 },
       savings: { id: "acct_savings", label: "Mia's savings", balance: 2000 },
       spending: { id: "acct_spending", label: "Mia's spending", balance: 1000 },
     },
@@ -58,11 +58,11 @@ export function seed(now = Date.now()) {
     ],
     transactions: [
       {
-        id: uid("txn"), ts: now - 9 * DAY, from: "parent", to: "savings", amount: 2000,
+        id: uid("txn"), ts: now - 9 * DAY, from: "external", to: "savings", amount: 2000,
         kind: "allowance", memo: "Starting savings", idempotencyKey: "seed-1", status: "posted",
       },
       {
-        id: uid("txn"), ts: now - 9 * DAY, from: "parent", to: "spending", amount: 1500,
+        id: uid("txn"), ts: now - 9 * DAY, from: "external", to: "spending", amount: 1500,
         kind: "allowance", memo: "Starting spending money", idempotencyKey: "seed-2", status: "posted",
       },
       {
@@ -108,7 +108,7 @@ export function seed(now = Date.now()) {
       },
     ],
     trades: [],
-    walletPending: [],
+    moneyReceipts: {},
     tracking: [],
     buddy: {
       plan: null,
@@ -126,20 +126,29 @@ export function migrate(d) {
     const times = (d.audit || []).map((entry) => entry.ts).filter(Number.isFinite);
     d.createdAt = times.length ? Math.min(...times) : Date.now();
   }
-  if (d.accounts?.parent) {
-    d.accounts.parent.label = "Funding account";
-    if (d.accounts.wallet) {
-      const balance = d.accounts.wallet.balance;
+  if (d.accounts?.savings) {
+    // Preserve both older tracked-wallet money and the retired funding balance.
+    for (const key of ["wallet", "parent"]) {
+      if (!d.accounts[key]) continue;
+      const balance = d.accounts[key].balance;
       if (balance > 0) {
-        d.accounts.parent.balance += balance;
-        audit(d, "system", "wallet_migrated", `Moved $${(balance / 100).toFixed(2)} of tracked Apple Cash into the funding account`, { amount: balance });
-      } else if (balance < 0) {
-        audit(d, "system", "wallet_migrated", `Dropped negative tracked Apple Cash balance of -$${(-balance / 100).toFixed(2)}; funding unchanged`, { amount: balance });
+        d.accounts.savings.balance += balance;
+        audit(d, "system", "money_migrated", `Moved $${(balance / 100).toFixed(2)} of ${key === "parent" ? "funding" : "tracked Apple Cash"} into Savings (0.9)`, { amount: balance });
+      } else {
+        audit(d, "system", "money_migrated", `Dropped ${key === "parent" ? "funding" : "tracked Apple Cash"} balance of $${(balance / 100).toFixed(2)} (0.9)`, { amount: balance });
       }
-      delete d.accounts.wallet;
+      delete d.accounts[key];
     }
+    const pending = new Map([...(d.walletPending || []), ...Object.values(d.walletReceipts || {}).filter((r) => r.status === "waiting")].map((r) => [r.idempotencyKey, r]));
+    for (const receipt of pending.values()) postWalletReceipt(d, receipt, spendPolicy, Date.now(), "system");
+    delete d.walletPending;
+    if (d.nessie?.accounts) { delete d.nessie.accounts.parent; delete d.nessie.accounts.wallet; }
+    for (const key of ["escalatedPeriod", "lowFundsWarnedAt", "lowFundsWarnedFor"]) delete d.allowance[key];
+    const retired = new Set(d.approvals.filter((a) => a.kind === "topup").map((a) => a.id));
+    d.approvals = d.approvals.filter((a) => a.kind !== "topup");
+    for (const n of d.notifications) if (retired.has(n.ref) || n.to === "parent" && n.text.startsWith("Heads up: funding account")) n.read = true;
+    d.moneyVersion = 9;
   }
-  d.walletPending ||= [];
   for (const t of d.transactions || []) if (t.kind === "wallet_in") t.memo = "Sent via Apple Cash (before 0.7)";
   for (const p of d.postcards || []) {
     if (p.source === undefined) p.source = p.from ? "trade" : "trip";
@@ -176,7 +185,7 @@ export function migrate(d) {
 }
 
 function retain(d) {
-  for (const [key, cap] of [["tracking", 500], ["audit", 2000], ["transactions", 5000], ["walletPending", 20]]) {
+  for (const [key, cap] of [["tracking", 500], ["audit", 2000], ["transactions", 5000]]) {
     if (d[key].length > cap) d[key].splice(0, d[key].length - cap);
   }
   if (d.buddy.chat.length > 200) d.buddy.chat.splice(0, d.buddy.chat.length - 200);
@@ -210,7 +219,7 @@ export function readChild(childId) {
   const row = database().prepare("SELECT doc FROM children WHERE id = ?").get(childId);
   if (!row) throw new GameError("Child not found", 404);
   const stored = JSON.parse(row.doc);
-  const needsMigration = stored.wardrobeVersion !== 2 || !Number.isFinite(stored.createdAt) || !!stored.accounts?.wallet || stored.accounts?.parent?.label !== "Funding account" || !stored.walletPending;
+  const needsMigration = stored.wardrobeVersion !== 2 || !Number.isFinite(stored.createdAt) || stored.moneyVersion !== 9 || !!stored.accounts?.wallet || !!stored.accounts?.parent || Object.hasOwn(stored, "walletPending");
   const d = migrate(stored);
   // Persist wardrobe/account migrations and timestamps once, including across restarts.
   if (needsMigration) database().prepare("UPDATE children SET doc = ? WHERE id = ?").run(JSON.stringify(d), childId);
@@ -414,7 +423,7 @@ export function importLegacy(filename) {
   if (database().prepare("SELECT id FROM families WHERE id = ?").get(DEMO_FAMILY_ID)) return false;
   // Parse and validate before writing anything. A corrupt file stays untouched.
   const d = migrate(JSON.parse(fs.readFileSync(filename, "utf8")));
-  if (!d.child?.bear || !d.accounts?.parent || !Array.isArray(d.transactions) || !d.buddy || !d.settings) throw new Error("Invalid legacy game document");
+  if (!d.child?.bear || !d.accounts?.savings || !d.accounts?.spending || !Array.isArray(d.transactions) || !d.buddy || !d.settings) throw new Error("Invalid legacy game document");
   delete d.family.parentPin;
   retain(d);
   const now = Date.now();

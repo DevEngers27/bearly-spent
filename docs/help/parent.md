@@ -12,30 +12,30 @@ Tip: If you forget your PIN, the unlock screen offers a password reset for the P
 3. Check for **Linked ✓**. Codes work once and expire after 15 minutes. Under **Devices**, choose **Unlink** to disconnect a device.
 Tip: A six-character kid code signs in a device. An eight-character friend code only adds friends. Generate a new kid code after a child signs out.
 
-## Allowance and Add money
+## Send money
 1. Open **Allowance** (under the Money tab on phones). Set **Weekly allowance ($)**, **Saved automatically (%)**, **Purchase limit without approval ($)**, and **Rewards go to**, then choose **Save rules**.
-2. Under **Funding account**, enter **Amount ($)** and an optional note, then choose **Add money** to record money you have set aside.
-3. Check the next payout in **Allowance & limits**. The Guardian records scheduled allowance when funding is sufficient.
-Tip: MoneyQuest is a simulated ledger. Adding funding and paying allowance never transfer real money. Each child has their own funding record.
+2. Under **Send money**, enter **Amount ($)** and an optional **Note**, then choose **Send money**. Record up to $500 at once; it goes straight into the child's Savings.
+3. Check the next payout in **Allowance & limits**. The Guardian records scheduled allowance directly into Savings and Spending. **Overview** shows **Received this month**, including money you sent, money your child recorded, and automatic Apple Cash shortfall credits.
+Tip: MoneyQuest records money; it never transfers real money. Send the actual money separately. Coordinate with your child so only one of you records each payment. Retrying a failed submission keeps the same receipt ID.
 
 ## Apple Cash and the Shortcut
 1. Open **Children** and find **Apple Cash tracking** for the right child. Set a parent PIN first, then unlock parent mode.
 2. Choose **Generate Shortcut token** and **Copy token**. Follow the setup guide at /help/apple-cash (also linked by **How to connect the iPhone Shortcut**).
 3. Run the Shortcut connection test and check **Connected**. Rotating a token disconnects the previous Shortcut. **Unlink** disconnects it too.
-4. Check **Apple Cash activity**. Receipts waiting for funding appear in **Approvals**; choose **Add money**, then **Record now**, or **Dismiss** an unwanted receipt.
+4. Check **Apple Cash activity**. Purchases come out of Savings. If Savings is short, the missing amount is added automatically and you get a notification; no approval is needed.
 Tip: The Shortcut records purchases already made in Wallet. It never sends Apple Cash. Do not record the same purchase manually as well. Never paste a Shortcut token into help or chat.
 
 ## Approvals
 1. Open **Inbox** on a phone, or **Approvals** in the desktop sidebar, for the selected child.
 2. Review each request and choose **Approve**, **Confirm**, or **Decline** as shown. Some notices use **Mark handled**.
-3. If funding is short, use **Add money** and check the request again. Check **Recently decided** for results.
+3. Check **Recently decided** for results. If a purchase is waiting for child funds, help your child save more or decline it for now.
 Tip: Approving a reached savings-goal purchase records the target from savings; it does not order anything or send real money. Both families and the receiving child must consent to a friendship.
 
 ## Goals & tasks
 1. Open **Goals & tasks**. Use **Reward goal** and **Create goal** for a tracked reward, or **Assign a task** and **Assign task** for a task you will confirm.
 2. Under **Savings goals**, enter the title, target, and picture, then choose **Create savings goal**. Use **Make current** to choose a live goal.
 3. **Archive** puts a goal away. **Bring back** restores it. Choose another current goal before **Delete**. Bought goals remain memories.
-Tip: Savings goals share the child's savings balance. Task points and money rewards are separate; rewards require approval and sufficient funding.
+Tip: Savings goals share the child's savings balance. Task points and money rewards are separate; rewards require approval and are then credited directly.
 
 ## Friends & privacy
 1. Open **Friends & privacy** (under Kids on phones). Choose **Family time zone** for daily and weekly game rules.

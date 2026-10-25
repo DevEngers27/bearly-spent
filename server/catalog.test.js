@@ -280,30 +280,11 @@ test("a failed lesson attempt does not consume its first-pass reward", () => {
   assert.equal(db.child.points, before + 20);
 });
 
-test("handling a guardian topup approval moves no money and clears the pending request", () => {
-  const db = fresh();
-  db.accounts.parent.balance = 0;
-  db.allowance.nextRun = Date.now() - 1;
-  runGuardian(db);
-  const approval = db.approvals.find((a) => a.kind === "topup");
-  assert.equal(approval.fromGuardian, true);
-  const accounts = structuredClone(db.accounts);
-  const transactions = structuredClone(db.transactions);
-  const notifications = db.notifications.length;
-  assert.equal(game.decide(db, approval.id, true), approval);
-  assert.equal(approval.status, "approved");
-  assert.equal(approval.handled, true);
-  assert.ok(approval.decidedAt);
-  assert.equal(db.notifications.length, notifications + 1);
-  assert.equal(db.notifications.find((n) => n.ref === approval.id).read, true);
-  assert.match(db.notifications.at(-1).text, /Funding request handled/);
-  assert.equal(db.audit.at(-1).action, "handled");
-  assert.match(db.audit.at(-1).detail, /^Handled:/);
-  runGuardian(db);
-  assert.deepEqual(db.accounts, accounts);
-  assert.deepEqual(db.transactions, transactions);
-  assert.ok(!db.approvals.some((a) => a.kind === "topup" && a.status === "pending"));
-  db.allowance.nextRun = Date.now() + 86400000;
-  assert.equal(hasDueWork(db), false);
-  assert.throws(() => game.decide(db, approval.id, true), game.GameError);
+test("H12 allowance creates no funding approval or blocked log", () => {
+  const db = fresh(), now = Date.now(); db.allowance.nextRun = now;
+  runGuardian(db, now);
+  assert.ok(!db.approvals.some((a) => a.kind === "topup"));
+  assert.ok(!db.audit.some((a) => a.action === "allowance_blocked"));
+  assert.equal(db.transactions.filter((t) => t.kind === "allowance" && t.ts === now).length, 2);
+  assert.equal(hasDueWork(db, now), false);
 });

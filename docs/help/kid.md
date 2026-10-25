@@ -17,7 +17,13 @@ Sound: <bear> reads each reply out loud. Tap **Sound on** in the talk bar to swi
 2. In **Save**, choose an amount and tap **Save it**. This moves spending money into savings.
 3. In **Spent**, choose **Apple Cash** or **Spending money** under **Paid with**, enter the amount and what you bought, then tap **Record it**.
 4. Use **Cash diary** and **Add to diary** for cash outside the app. It does not change your app balances.
-Tip: Only record Apple Cash yourself if your Shortcut has not already recorded it. Ask your grown-up if funding is short. MoneyQuest records money; it does not send real money.
+Tip: Only record Apple Cash yourself if your Shortcut has not already recorded it. Apple Cash purchases come out of your Savings; if Savings is short, the rest is added for you and your grown-up gets a note. MoneyQuest records money; it does not send real money.
+
+## Record money you received
+1. Tap **Save money** on **Home** to open **My money**, then choose **Received**.
+2. Enter **Amount ($)** and an optional **Note**, then tap **Record it**. You can record up to $500 at once.
+3. Look for “Saved! Your grown-up will see it too.” Your money goes straight into **Savings**.
+Tip: If you just recorded the same amount, check before choosing **Record again**. Choose **Not now** to close without another entry. Ask your grown-up whether they already recorded the money.
 
 ## Goals
 1. On **Home**, tap **Switch goal**, or **My goals** if you have no current goal.

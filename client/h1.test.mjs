@@ -72,89 +72,60 @@ const noop = () => {};
 const submit = { preventDefault() {} };
 function stateFixture() {
   const db = seed(Date.now());
-  db.accounts.parent.balance = 400;
+  db.accounts.savings.balance = 400;
   return parentView(db);
 }
 
-test("H1.5: Paid with defaults to Apple Cash, validates the selected source and guards form submit", async () => {
+test("H12: Paid with defaults to Apple Cash and only Spending money blocks a short balance", async () => {
   const h = harness("Child.jsx"), calls = [], state = stateFixture();
   const props = { state, start: "spend", close: noop, run: async (...args) => { calls.push(args); return {}; } };
   const render = () => h.render(h.exports.MoneySheet, props);
-  let tree = render();
-  assert.equal(byText(tree, "Apple Cash").props["aria-pressed"], true);
-  assert.equal(nodes(tree, (n) => n.type === "input" && n.props.type === "checkbox").length, 0);
+  let tree = render(); assert.equal(byText(tree, "Apple Cash").props["aria-pressed"], true);
   assert.match(text(tree), /You have\s+\$4.00/);
   nodes(tree, (n) => n.props.id === "money-amount")[0].props.onChange({ target: { value: "4.25" } });
-  tree = render();
-  assert.equal(byText(tree, "Record it").props.disabled, true);
-  assert.match(text(tree), /Your grown-up's funding is short for that. Ask them to add money!/);
-  await nodes(tree, (n) => n.type === "form")[0].props.onSubmit(submit);
-  assert.equal(calls.length, 0);
-  byText(tree, "Spending money").props.onClick();
-  tree = render();
-  assert.equal(byText(tree, "Record it").props.disabled, false);
-  assert.match(text(tree), /You have\s+\$10.00/);
-  assert.match(text(tree), /Buys over .* need your grown-up's OK first/);
-  nodes(tree, (n) => n.type === "input" && n.props.maxLength === 80)[0].props.onChange({ target: { value: "Book" } });
-  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
-  assert.equal(calls[0][0], "child/spend");
-  assert.equal(calls[0][2]({ held: true }), "That's a big buy. We asked your grown-up first.");
-  state.balances.spending = 400;
-  assert.equal(byText(render(), "Record it").props.disabled, true);
-  state.balances.parent = 425;
-  byText(render(), "Apple Cash").props.onClick();
+  nodes(render(), (n) => n.type === "input" && n.props.maxLength === 80)[0].props.onChange({ target: { value: "Book" } });
   assert.equal(byText(render(), "Record it").props.disabled, false);
+  assert.match(text(render()), /if Savings is short, the rest is added for you/);
   await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
-  assert.equal(calls[1][0], "child/wallet/spend");
-  assert.equal(calls[1][1].amount, 4.25);
+  assert.equal(calls[0][0], "child/wallet/spend"); assert.match(calls[0][1].clientId, /^[0-9a-f-]{36}$/);
+  byText(render(), "Spending money").props.onClick(); state.balances.spending = 400;
+  nodes(render(), (n) => n.type === "input" && n.props.maxLength === 80)[0].props.onChange({ target: { value: "Book" } });
+  assert.equal(byText(render(), "Record it").props.disabled, true);
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit); assert.equal(calls.length, 1);
 });
 
-test("H1.5: Home strip shows funding as Apple Cash money and opens each source; pill shows today and last spend", () => {
-  const state = stateFixture();
-  state.walletSpent = { today: 650 };
-  state.walletLastTransaction = { memo: "Lunch", amount: 425, ts: Date.now() };
-  const h = harness("Child.jsx"), opened = [];
-  const tree = h.render(h.exports.Home, { state, open: (...args) => opened.push(args) });
+test("H12: Home strip has two tappable balances and pill keeps today and last spend", () => {
+  const state = stateFixture(); state.walletSpent = { today: 650 }; state.walletLastTransaction = { memo: "Lunch", amount: 425, ts: Date.now() };
+  const h = harness("Child.jsx"), opened = [], tree = h.render(h.exports.Home, { state, open: (...args) => opened.push(args) });
   const strip = nodes(tree, (n) => n.props.className === "balances-strip")[0];
-  assert.match(text(strip), /Savings.*\$20.00.*Spending.*\$10.00.*Apple Cash money.*\$4.00.*set aside by your grown-up/);
-  const buttons = nodes(strip, (n) => n.type === "button");
-  assert.equal(buttons.length, 3);
-  buttons.forEach((button) => button.props.onClick());
-  assert.equal(JSON.stringify(opened), JSON.stringify([["money", {}], ["money", { start: "spend", wallet: false }], ["money", { start: "spend", wallet: true }]]));
+  assert.match(text(strip), /Savings.*\$4.00.*Spending.*\$10.00/); assert.doesNotMatch(text(strip), /Apple Cash money|set aside/);
+  const buttons = nodes(strip, (n) => n.type === "button"); assert.equal(buttons.length, 2); buttons.forEach((b) => b.props.onClick());
+  assert.equal(JSON.stringify(opened), JSON.stringify([["money", {}], ["money", { start: "spend", wallet: false }]]));
   assert.match(text(nodes(tree, (n) => n.props.className === "wallet-pill")[0]), /Apple Cash.*\$6.50.*today.*Lunch.*\$4.25/);
 });
 
-test("H1.4: Overview renders four figures with funding coverage and body-font numbers that can wrap", async () => {
+test("H12: Overview renders four figures with Received this month and body-font numbers that can wrap", async () => {
   const h = harness("Parent.jsx"), state = stateFixture();
-  state.accounts.parent.balance = 54500;
+  state.receivedThisMonth = 54500;
   const tree = h.render(h.exports.Overview, { state });
   const figures = nodes(tree, (n) => n.type?.name === "Figure");
   assert.equal(figures.length, 4);
-  assert.deepEqual(Array.from(figures, (n) => n.props.label), ["Mia's savings", "Spending money", "Funding account", "Adventure points"]);
+  assert.deepEqual(Array.from(figures, (n) => n.props.label), ["Savings", "Spending", "Received this month", "Adventure points"]);
   assert.equal(figures[2].props.value, "$545.00");
-  assert.equal(figures[2].props.sub, "Covers allowance and Apple Cash");
+  assert.equal(figures[2].props.sub, "Sent by you and recorded by Mia");
   const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
   const numberRule = css.match(/\.p-figure b \{([^}]+)\}/)[1];
   for (const rule of [/font-family: var\(--body\)/, /font-variant-numeric: tabular-nums/, /min-width: 0/, /overflow-wrap: anywhere/, /line-height: 1.25/]) assert.match(numberRule, rule);
   assert.match(css, /\.parent \.p-figures \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 });
 
-test("H1.2/3: Inbox pending card wires Add money, Record now and Dismiss; Apple Cash activity shows pending and flags", async () => {
-  const h = harness("Parent.jsx"), state = stateFixture(), calls = [];
-  state.walletPending = [{ id: "receipt-one", amount: 1000, merchant: "shoukun", ts: Date.now() }];
-  state.notifications = []; state.approvals = [];
-  const tree = h.render(h.exports.Inbox, { state, pending: [], run: async (...args) => calls.push(args), onAddMoney: () => calls.push(["focus-funding"]), mobile: true });
-  assert.match(text(tree), /Mia.*Apple Cash spent\s+\$10.00\s+at\s+shoukun.*Waiting for funding/);
-  assert.equal(nodes(tree, (n) => n.props.className === "empty").length, 1, "only Notifications is empty");
-  await byText(tree, "Add money").props.onClick();
-  await byText(tree, "Record now").props.onClick();
-  await byText(tree, "Dismiss").props.onClick();
-  assert.equal(JSON.stringify(calls.map((call) => call[0])), JSON.stringify(["focus-funding", "parent/wallet/pending/receipt-one/record", "parent/wallet/pending/receipt-one/dismiss"]));
-  const busy = h.render(h.exports.Inbox, { state, pending: [], busy: true });
-  for (const label of ["Add money", "Record now", "Dismiss"]) assert.equal(byText(busy, label).props.disabled, true);
+test("H12: Inbox has no funding cards and Apple Cash activity keeps historical flags", () => {
+  const h = harness("Parent.jsx"), state = stateFixture(); state.notifications = []; state.approvals = [];
+  const tree = h.render(h.exports.Inbox, { state, pending: [], mobile: true });
+  assert.match(text(tree), /Nothing waiting/); assert.doesNotMatch(text(tree), /Add money|Record now|Dismiss|funding/);
   state.walletSpent = { week: 425, month: 625 };
   state.walletTransactions = [{ id: "posted", ts: Date.now(), memo: "Lunch", amount: 425, kind: "wallet_spend", status: "posted", overLimit: true, unusual: true }];
   const activity = h.render(h.exports.WalletLedger, { state });
-  assert.match(text(activity), /Apple Cash activity.*week:.*\$4.25.*month:.*\$6.25.*shoukun.*waiting for funding.*Lunch.*above purchase limit.*unusual spend/);
+  assert.match(text(activity), /Apple Cash activity.*week:.*\$4.25.*month:.*\$6.25.*Lunch.*above purchase limit.*unusual spend/);
   assert.equal(nodes(activity, (n) => n.type === "form").length, 0);
 });

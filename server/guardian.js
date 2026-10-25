@@ -6,7 +6,6 @@
 //   G2  paying parent-approved rewards and requests, exactly once
 //   G3  reconciling the ledger against obligations (catches double posts)
 //   G4  spending policy for child purchases (hold → parent)
-//   G5  funding-risk warnings before money runs short
 // Its permissions are deliberately narrow: it can only move money that a
 // parent schedule or a parent approval authorised, it can only reverse
 // postings that exceed an obligation, and anything outside that is escalated.
@@ -42,11 +41,15 @@ function obligations(db) {
   return list;
 }
 
+function payoutKey(a) {
+  return a.kind === "goal_purchase" ? `goal:${a.goalId}` : a.idempotencyKey || `approval:${a.id}`;
+}
+
 function payoutReady(db, a) {
   if (a.status !== "approved" || !needsPayout(a) || a.paidTxnId) return false;
-  const existing = db.transactions.find((t) => t.status === "posted" && t.idempotencyKey === (a.kind === "goal_purchase" ? `goal:${a.goalId}` : `approval:${a.id}`));
+  const existing = db.transactions.find((t) => t.status === "posted" && t.idempotencyKey === payoutKey(a));
   if (existing) return existing.amount === a.amount;
-  return a.escalatedAt == null || db.accounts[a.kind === "goal_purchase" ? "savings" : a.kind === "spend" ? "spending" : "parent"].balance >= a.amount;
+  return ["reward", "extra"].includes(a.kind) || a.escalatedAt == null || db.accounts[a.kind === "goal_purchase" ? "savings" : "spending"].balance >= a.amount;
 }
 
 function reconcileFindings(db) {
@@ -57,7 +60,7 @@ function reconcileFindings(db) {
     if (t.status !== "posted") continue;
     const ref = t.ref || (t.idempotencyKey?.startsWith("approval:") ? t.idempotencyKey.slice(9) : null);
     if (!ref) {
-      if (t.from === "parent" && !t.idempotencyKey) findings.push({ type: "unauthorised", txn: t });
+      if ((t.from === "parent" || t.from === "external" && ["allowance", "reward", "extra"].includes(t.kind)) && !t.idempotencyKey) findings.push({ type: "unauthorised", txn: t });
       continue;
     }
     const obligation = known.get(ref);
@@ -148,18 +151,8 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
       db.allowance.nextRun = Math.max(db.allowance.nextRun, db.allowance.lastPaidAt + db.allowance.cadenceDays * DAY);
       break;
     }
-    const required = unpaid.reduce((sum, leg) => sum + leg.amount, 0);
-    if (db.accounts.parent.balance < required) {
-      if (db.allowance.escalatedPeriod !== period) {
-        db.allowance.escalatedPeriod = period;
-        escalate(db, "topup", `Allowance of ${dollars(amount)} is due but the funding account only has ${dollars(db.accounts.parent.balance)}.`,
-          "Choose Add money in Allowance; the allowance will pay automatically on the next check.");
-        log("allowance_blocked", "Allowance is waiting for more funding. Asked you to choose Add money.", { policy: "G1", period });
-      }
-      break;
-    }
     const payouts = legs.map((leg) => {
-      const result = transfer(db, { from: "parent", to: leg.to, amount: leg.amount, kind: "allowance", memo: leg.memo, idempotencyKey: leg.key, ts: now });
+      const result = transfer(db, { from: "external", to: leg.to, amount: leg.amount, kind: "allowance", memo: leg.memo, idempotencyKey: leg.key, ts: now });
       tagRef(db, leg.key, period);
       return result;
     });
@@ -191,11 +184,11 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
     delete a.escalatedAt;
     const plan =
       a.kind === "goal_purchase" ? { from: "savings", to: "merchant", memo: `Goal: ${a.memo}` } :
-      a.kind === "reward" ? { from: "parent", to: db.allowance.rewardDestination, memo: `Reward: ${a.title.replace(/^.*completed /, "")}` } :
-      a.kind === "extra" ? { from: "parent", to: "spending", memo: `Extra allowance: ${a.reason}` } :
+      a.kind === "reward" ? { from: "external", to: db.allowance.rewardDestination, memo: `Reward: ${a.title.replace(/^.*completed /, "")}` } :
+      a.kind === "extra" ? { from: "external", to: "spending", memo: `Extra allowance: ${a.reason}` } :
       { from: "spending", to: "merchant", memo: a.memo };
     try {
-      const { txn, duplicate } = transfer(db, { ...plan, amount: a.amount, kind: a.kind === "spend" ? "spend" : a.kind, idempotencyKey: a.kind === "goal_purchase" ? `goal:${a.goalId}` : `approval:${a.id}`, ts: now });
+      const { txn, duplicate } = transfer(db, { ...plan, amount: a.amount, kind: a.kind === "spend" ? "spend" : a.kind, idempotencyKey: payoutKey(a), ts: now });
       txn.ref = a.id;
       a.paidTxnId = txn.id;
       for (const related of db.approvals) if (related.approvalId === a.id && ["topup", "child_funds"].includes(related.kind)) resolveEscalation(db, related);
@@ -225,7 +218,7 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
         } else if (a.kind === "spend") {
           escalate(db, "child_funds", `${db.child.name}'s spending money is short by ${dollars(a.amount - db.accounts.spending.balance)} for '${a.memo}'`, "Your child needs to save less or earn more, or you can decline the purchase.", { approvalId: a.id }, now);
         } else {
-          escalate(db, "topup", `Couldn't complete "${a.title}": ${e.message}.`, "Choose Add money in Allowance or decline the request.", { approvalId: a.id }, now);
+          escalate(db, "topup", `Couldn't complete "${a.title}": ${e.message}.`, "Review the request or decline it.", { approvalId: a.id }, now);
         }
       }
       log("obligation_blocked", `G2: Could not execute ${a.kind} (${e.code}). Escalated to parent; no partial transfer made.`, { policy: "G2", approvalId: a.id });
@@ -233,20 +226,6 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
   }
 
   actions.push(...reconcileNow(db, now, trigger));
-
-  // G5 — warn once per funding-shortfall episode, including approved unpaid items.
-  const appleCashPace = db.transactions.filter((t) => t.kind === "wallet_spend" && t.status === "posted" && t.ts > now - 7 * DAY && t.ts <= now).reduce((sum, t) => sum + t.amount, 0);
-  const upcoming = db.allowance.amount + appleCashPace + db.approvals.filter((a) => ["pending", "approved"].includes(a.status) && !a.paidTxnId && (a.kind === "reward" || a.kind === "extra")).reduce((s, a) => s + a.amount, 0);
-  const shortfall = upcoming - db.accounts.parent.balance;
-  if (shortfall <= 0) {
-    delete db.allowance.lowFundsWarnedAt;
-    delete db.allowance.lowFundsWarnedFor;
-  } else if (db.allowance.lowFundsWarnedAt == null) {
-    db.allowance.lowFundsWarnedAt = now;
-    db.allowance.lowFundsWarnedFor = shortfall;
-    notify(db, "parent", `Heads up: funding account (${dollars(db.accounts.parent.balance)}) is below upcoming commitments (${dollars(upcoming)}).`, "guardian");
-    log("low_funds_warning", `G5: Funding ${dollars(db.accounts.parent.balance)} < upcoming ${dollars(upcoming)}. Warned parent early.`, { policy: "G5" });
-  }
 
   checkMilestones(db);
   return actions;
@@ -292,10 +271,10 @@ export function spendPolicy(db, amount, memo, { alreadyPaid = false } = {}) {
  * so G3 has to catch it by reconciling against obligations.
  */
 export function injectDuplicatePosting(db, now = Date.now()) {
-  const target = [...db.transactions].reverse().find((t) => t.status === "posted" && t.ref && t.from === "parent");
+  const target = [...db.transactions].reverse().find((t) => t.status === "posted" && t.ref && ["allowance", "reward", "extra"].includes(t.kind));
   if (!target) return null;
   const dup = { ...target, id: uid("txn"), ts: now, idempotencyKey: `bank-replay:${uid("r")}`, memo: `${target.memo}`, injected: true };
-  db.accounts[target.from].balance -= target.amount;
+  if (db.accounts[target.from]) db.accounts[target.from].balance -= target.amount;
   db.accounts[target.to].balance += target.amount;
   db.transactions.push(dup);
   audit(db, "system", "fault_injected", `Simulated bank fault: duplicate posting of ${dollars(target.amount)}.`, { txnId: dup.id, ref: target.ref });

@@ -18,44 +18,34 @@ function rejectsUnchanged(db, fn, check = is400) {
   assert.deepEqual(db, before, "validation must finish before changing state");
 }
 
-test("topup oops returns 400 and leaves the balance unchanged", () => {
+test("Send money oops returns 400 and leaves the balance unchanged", () => {
   const db = fresh();
-  rejectsUnchanged(db, () => actions.topup(db, { amount: "oops" }));
+  rejectsUnchanged(db, () => actions.sendMoney(db, { clientId: "11111111-1111-4111-8111-111111111111", amount: "oops" }));
 });
 
-test("topup -300 returns 400 without moving money", () => {
+test("Send money -300 returns 400 without moving money", () => {
   const db = fresh();
-  rejectsUnchanged(db, () => actions.topup(db, { amount: -300 }));
+  rejectsUnchanged(db, () => actions.sendMoney(db, { clientId: "11111111-1111-4111-8111-111111111111", amount: -300 }));
 });
 
-test("topup 0 returns 400 instead of depositing $50", () => {
+test("Send money 0 returns 400 instead of depositing $50", () => {
   const db = fresh();
-  rejectsUnchanged(db, () => actions.topup(db, { amount: 0 }));
+  rejectsUnchanged(db, () => actions.sendMoney(db, { clientId: "11111111-1111-4111-8111-111111111111", amount: 0 }));
 });
 
-test("topup requires a finite amount within its deposit limit", () => {
+test("Send money requires a finite amount within its deposit limit", () => {
   const db = fresh();
   for (const amount of [undefined, null, "", " ", NaN, Infinity, -Infinity, "1e309", 1000.01, [], {}, true]) {
-    rejectsUnchanged(db, () => actions.topup(db, { amount }));
+    rejectsUnchanged(db, () => actions.sendMoney(db, { amount, clientId: "11111111-1111-4111-8111-111111111111" }));
   }
-  rejectsUnchanged(db, () => actions.topup(db, {}));
+  rejectsUnchanged(db, () => actions.sendMoney(db, {}));
 });
 
-test("topup converts dollars to cents and clears only parent-funded escalations", () => {
-  const db = fresh();
-  db.approvals.push({ id: "a", kind: "topup", status: "pending" });
-  db.approvals.push({ id: "r", kind: "reward", status: "approved", amount: 500, escalatedAt: 1 });
-  db.approvals.push({ id: "s", kind: "spend", status: "approved", amount: 500, memo: "Game", escalatedAt: 1 });
-  const before = db.accounts.parent.balance;
-  actions.topup(db, { amount: " 50 " });
-  assert.equal(db.accounts.parent.balance, before + 5000);
-  const byId = (id) => db.approvals.find((a) => a.id === id);
-  assert.equal(byId("a").status, "approved");
-  assert.equal(Object.hasOwn(byId("r"), "escalatedAt"), false, "parent-funded reward escalation is cleared");
-  assert.equal(byId("s").escalatedAt, 1, "child-funded spend escalation is left for the guardian to retry");
-  actions.topup(db, { amount: 0.01 });
-  actions.topup(db, { amount: 1000 });
-  assert.equal(db.accounts.parent.balance, before + 105001);
+test("Send money records cents without changing existing approval state", () => {
+  const db = fresh(); db.approvals.push({ id: "s", kind: "spend", status: "approved", amount: 500, memo: "Game", escalatedAt: 1 });
+  const before = db.accounts.savings.balance;
+  actions.sendMoney(db, { amount: " 50 ", clientId: "11111111-1111-4111-8111-111111111111" });
+  assert.equal(db.accounts.savings.balance, before + 5000); assert.equal(db.approvals.at(-1).escalatedAt, 1);
 });
 
 test("allowance savePct oops returns 400 and leaves all settings unchanged", () => {
@@ -145,7 +135,7 @@ test("valid child money actions preserve cent amounts and trimmed copy", () => {
   const db = fresh();
   actions.save(db, { amount: "1" });
   assert.equal(db.accounts.savings.balance, 2100);
-  actions.spend(db, { amount: "1.25", memo: " Book " });
+  actions.spend(db, { amount: "1.25", memo: " Book ", clientId: "11111111-1111-4111-8111-111111111111" });
   assert.equal(db.accounts.spending.balance, 775);
   assert.equal(db.transactions.at(-1).memo, "Book");
   const extra = actions.extra(db, { amount: "50", reason: " A book " });

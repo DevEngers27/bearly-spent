@@ -77,7 +77,7 @@ test("register normalizes email, hashes credentials, sets a private cookie and c
   assert.equal(session.token_hash, tokenHash(browser.cookie.slice(11)));
   assert.ok(!JSON.stringify(session).includes(browser.cookie.slice(11)));
   const d = readChild(result.body.activeChild.id);
-  assert.deepEqual(Object.values(d.accounts).map((a) => a.balance), [0, 0, 0]);
+  assert.deepEqual(Object.values(d.accounts).map((a) => a.balance), [0, 0]);
   for (const key of ["postcards", "adventures", "transactions", "friends", "approvals"]) assert.deepEqual(d[key], []);
   assert.equal(d.child.points, 0);
   assert.equal(d.child.bear.name, "Pip");
@@ -502,10 +502,10 @@ test("W2.9: demo-only mutations reject real families even on a demo-enabled serv
   const parent = device();
   const account = (await parent.call("POST", "/api/auth/register", form())).body;
   process.env.MQ_DEMO = "1";
-  for (const path of ["topup", "inject-fault", "allowance/run-now", "reset"]) {
+  for (const path of ["inject-fault", "allowance/run-now", "reset"]) {
     assert.equal((await parent.call("POST", `/api/parent/${path}`, { amount: 50 })).status, 404);
   }
-  assert.equal(readChild(account.activeChild.id).accounts.parent.balance, 0);
+  assert.equal(readChild(account.activeChild.id).accounts.savings.balance, 0);
 });
 
 
@@ -525,7 +525,7 @@ test("H6.4 register creates up to four independent children atomically and selec
   for (const child of result.body.children) {
     const d = readChild(child.id);
     assert.equal(d.child.bear.name, child.bearName);
-    assert.deepEqual(Object.values(d.accounts).map((account) => account.balance), [0, 0, 0]);
+    assert.deepEqual(Object.values(d.accounts).map((account) => account.balance), [0, 0]);
     assert.equal(d.settings.timezone, "America/Los_Angeles");
   }
   assert.equal(database().prepare("SELECT COUNT(*) AS n FROM sessions").get().n, 1);

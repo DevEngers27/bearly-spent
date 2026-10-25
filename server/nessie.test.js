@@ -26,16 +26,14 @@ test("Nessie mirror speaks the current sandbox schema: completed whole-dollar re
   try {
     stubNessie(calls);
     const db = seed(Date.now());
-    await mirrored(db, () => transfer(db, { from: "parent", to: "savings", amount: 275, kind: "funding_in", memo: "Allowance", idempotencyKey: "n1", ts: Date.UTC(2026, 9, 25) }));
+    await mirrored(db, () => transfer(db, { from: "external", to: "savings", amount: 275, kind: "allowance", memo: "Allowance", idempotencyKey: "n1", ts: Date.UTC(2026, 9, 25) }));
     assert.ok(calls.every((c) => c.key === "test-key"));
-    assert.deepEqual(calls.slice(0, 2).map((c) => c.path), ["/customers", "/customers"]);
-    assert.equal(calls.filter((c) => c.path.endsWith("/accounts")).length, 3);
-    const [out, dep] = calls.slice(-2);
-    assert.match(out.path, /\/accounts\/id_\d+\/transfers$/);
-    assert.deepEqual(out.body, { transaction_date: "2026-10-25", status: "completed", amount: 3, description: "Allowance ($2.75 to Kid savings)" });
+    assert.equal(calls[0].path, "/customers");
+    assert.equal(calls.filter((c) => c.path.endsWith("/accounts")).length, 2);
+    const dep = calls.at(-1);
     assert.match(dep.path, /\/accounts\/id_\d+\/deposits$/);
-    assert.deepEqual(dep.body, { medium: "balance", transaction_date: "2026-10-25", status: "completed", amount: 3, description: "Allowance ($2.75 from Parent funding)" });
-    assert.ok(!("payee_id" in out.body) && !("medium" in out.body));
+    assert.deepEqual(dep.body, { medium: "balance", transaction_date: "2026-10-25", status: "completed", amount: 3, description: "Allowance ($2.75 from Your grown-up)" });
+    assert.ok(!calls.some((c) => c.path.endsWith("/transfers")), "external credits have no funding-account withdrawal");
 
     const before = calls.length;
     await mirrored(db, () => transfer(db, { from: "spending", to: "merchant", amount: 125, kind: "spend", memo: "Stickers", idempotencyKey: "n2", ts: Date.UTC(2026, 9, 25) }));
@@ -56,7 +54,7 @@ test("Nessie failures never touch the local ledger and surface through the audit
     globalThis.fetch = async () => new Response(JSON.stringify({ message: "nope" }), { status: 400 });
     const db = seed(Date.now()), before = db.accounts.savings.balance;
     const outcome = new Promise((resolve) => setNessieAuditHook((kind, detail) => resolve({ kind, detail })));
-    transfer(db, { from: "parent", to: "savings", amount: 100, kind: "funding_in", memo: "x", idempotencyKey: "n3" });
+    transfer(db, { from: "external", to: "savings", amount: 100, kind: "allowance", memo: "x", idempotencyKey: "n3" });
     assert.equal(db.accounts.savings.balance, before + 100);
     const { kind, detail } = await outcome;
     assert.equal(kind, "nessie_error");
