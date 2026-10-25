@@ -106,7 +106,7 @@ export default function Child({ state, toast, onGrownUps, onSignOut, offline }) 
       </header>
 
       <main className="kid-main" id="main" key={tab}>
-        {tab === "home" && <Home {...ctx} />}
+        {tab === "home" && <Home {...ctx} talkOpen={talk.isOpen && !sheet && !reveal} />}
         {tab === "missions" && <Missions {...ctx} />}
         {tab === "map" && <MapScreen {...ctx} focus={mapFocus} clearFocus={() => setMapFocus(null)} />}
         {tab === "album" && <Album {...ctx} />}
@@ -122,7 +122,6 @@ export default function Child({ state, toast, onGrownUps, onSignOut, offline }) 
         ))}
       </nav>
 
-      {tab === "home" && talk.isOpen && !sheet && !reveal && <TalkBar {...ctx} />}
       {sheet && !reveal && <SheetRouter sheet={sheet} {...ctx} />}
       {reveal && <ReturnReveal key={latest.id} state={state} latest={latest} onSeen={() => { const next = [...seen, latest.id]; store.set("mq_seen_adv", JSON.stringify(next)); setSeen(next); }} onDone={() => setTab("album")} />}
     </div>
@@ -341,12 +340,12 @@ function SeenMissionButton({ state, run, busy, missionKey, children }) {
   return <button className="btn sage" disabled={busy} onClick={() => run("child/missions/seen", { key: missionKey })}>{children}</button>;
 }
 
-function Home({ state, setTab, open, run, busy, talk }) {
+function Home({ state, setTab, open, run, busy, talk, talkOpen = false }) {
   const now = useNow();
   const dismissRef = useRef(talk?.dismiss);
   dismissRef.current = talk?.dismiss;
   useEffect(() => {
-    const outside = (event) => { if (!event.target.closest?.(".scene")) dismissRef.current?.(); };
+    const outside = (event) => { if (!event.target.closest?.(".scene") && !event.target.closest?.(".talk-bar")) dismissRef.current?.(); };
     const escape = (event) => { if (event.key === "Escape") dismissRef.current?.(); };
     window.addEventListener("click", outside);
     window.addEventListener("keydown", escape);
@@ -405,9 +404,10 @@ function Home({ state, setTab, open, run, busy, talk }) {
         </div>
         {!away && <span className="tap-hint">Tap to talk</span>}
       </section>
+      {talkOpen && <TalkBar state={state} talk={talk} busy={busy} open={open} />}
 
       <div className="home-tools">
-        <button className="chip" onClick={() => talk?.open()}>Talk to {state.child.bear.name}</button>
+        {!talkOpen && <button className="chip" onClick={() => talk?.open()}>Talk to {state.child.bear.name}</button>}
         <button className="chip" onClick={() => open("dress")}><Icon name="hat" size={18} /> Dress up</button>
       </div>
       <button className="wallet-pill" onClick={() => open("money", { start: "spend", wallet: true })}>
@@ -1335,33 +1335,40 @@ function SpeechBubble({ text, thinking, staticText, countdownText, onClose, retr
   );
 }
 
+const media = (query) => typeof window !== "undefined" && typeof window.matchMedia === "function" && Boolean(window.matchMedia(query).matches);
+// On a phone, focusing the box pops the keyboard and iOS then scrolls the whole page to it, so only mice get the cursor for free.
+const finePointer = () => media("(hover: hover) and (pointer: fine)");
+
 function TalkBar({ state, talk, busy, open }) {
   const [text, setText] = useState("");
   const input = useRef(null);
+  const section = useRef(null);
   const closeRef = useRef(talk.close);
   closeRef.current = talk.close;
   useEffect(() => {
     const previous = document.activeElement;
-    input.current?.focus();
+    if (finePointer()) input.current?.focus({ preventScroll: true });
+    section.current?.scrollIntoView?.({ block: "nearest", behavior: media("(prefers-reduced-motion: reduce)") ? "auto" : "smooth" });
     const escape = (e) => { if (e.key === "Escape") closeRef.current(); };
     window.addEventListener("keydown", escape);
-    return () => { window.removeEventListener("keydown", escape); previous?.focus?.(); };
+    return () => { window.removeEventListener("keydown", escape); previous?.focus?.({ preventScroll: true }); };
   }, []);
   const send = async (msg) => {
+    const typing = document.activeElement === input.current;
     if (await talk.send(msg)) setText((current) => current === msg ? "" : current);
-    input.current?.focus();
+    if (typing || finePointer()) input.current?.focus({ preventScroll: true });
   };
   const goal = currentSavingsGoal(state);
   const price = Math.max(100, Math.round(state.balances.spending * 0.8 / 100) * 100);
   const suggestions = [`Can I buy a toy for ${moneyShort(price)}?`, ...(goal ? [`When can I save ${moneyShort(goal.target)} for ${goal.title}?`] : []), "What should I do with my allowance?"];
   return (
-    <section className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
+    <section ref={section} className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
       <div className="talk-links">
         <button className="link" onClick={() => open("chat")}>See our chat</button>
         <button className="round-btn small" onClick={talk.close} aria-label="Close talk bar"><Icon name="close" size={16} /></button>
       </div>
       <div className="chips scroll">{suggestions.map((s) => <button type="button" key={s} className="chip" disabled={busy} onClick={() => send(s)}>{s}</button>)}</div>
-      <button type="button" className="chip" disabled={busy} onClick={() => { setText("How do I "); input.current?.focus(); }}>How do I…?</button>
+      <button type="button" className="chip" disabled={busy} onClick={() => { setText("How do I "); input.current?.focus({ preventScroll: true }); }}>How do I…?</button>
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         <input ref={input} value={text} onChange={(e) => setText(e.target.value)} maxLength={500} placeholder={`Ask ${state.child.bear.name}…`} aria-label={`Message ${state.child.bear.name}`} />
         <button className="btn honey" disabled={busy || !text.trim()}>Send</button>
