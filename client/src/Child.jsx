@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, apiResponse, money, moneyShort, formatTime, postcardMetrics, useAction } from "./api.js";
+import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import MapView from "./MapView.jsx";
@@ -668,7 +668,7 @@ function MapScreen({ state, open, focus, clearFocus }) {
         <span><i className="lg open" /> A future adventure</span>
         <span><i className="lg visited" /> Visited</span>
         <span><i className="lg locked" /> Locked</span>
-        <span>{postcardMetrics(state).places} of {postcardMetrics(state).total} places</span>
+        <span>{postcardMetrics(state).places} of {postcardMetrics(state).total} {plural(postcardMetrics(state).total, "place")}</span>
       </div>
     </div>
   );
@@ -778,7 +778,7 @@ function Album({ state, open, goMap, run, busy, newCards = [], openCard }) {
           <div className="passport">
             <div>
               <span className="kicker">Collected</span>
-              <p className="hand big-text">{found} of {total} places · {cards} cards</p>
+              <p className="hand big-text">{found} of {total} {plural(total, "place")} · {cards} {plural(cards, "card")}</p>
             </div>
             <div className="stamp-strip" aria-label="Collected stamps">
               {Object.entries(places).filter(([id]) => counts[id]).map(([id, p]) => <Stamp key={id} stamp={p.stamp} name={p.name} image={p.image} size="sm" />)}

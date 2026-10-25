@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, money, formatTime, formatDateTime, postcardMetrics, useAction } from "./api.js";
+import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAction } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 
 const SECTIONS = [
@@ -165,7 +165,7 @@ function Overview({ state }) {
               <tr><td>Days with money tracked</td><td>{learned.tracked}</td></tr>
               <tr><td>Weekly budgets planned</td><td>{learned.budgetsDone}</td></tr>
               <tr><td>Adventures taken</td><td>{learned.adventures}</td></tr>
-              <tr><td>Postcards collected</td><td>{postcardMetrics(state).places} of {postcardMetrics(state).total} places ({postcardMetrics(state).cards} cards)</td></tr>
+              <tr><td>Postcards collected</td><td>{postcardMetrics(state).places} of {postcardMetrics(state).total} {plural(postcardMetrics(state).total, "place")} ({postcardMetrics(state).cards} {plural(postcardMetrics(state).cards, "card")})</td></tr>
             </tbody>
           </table>
         </section>

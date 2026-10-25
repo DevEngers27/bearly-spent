@@ -1318,27 +1318,42 @@ test("F36.3: spoiler-free reveal and reduced motion", () => {
   for (const revealDelay of [0, 2400]) {
     const h = harness("Child.jsx"), state = stateFixture();
     const props = { place: state.catalog.places.seattle, bearName: "Maple", to: "Mia", collectedAt: h.now, revealDelay };
+    const assertUnrevealed = (tree) => {
+      assert.equal(text(tree).includes(props.place.name), false);
+      assert.equal(text(tree).includes(props.place.story), false);
+      assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
+      assert.equal(nodes(tree, (n) => n.type === "h2" || ["story", "pc-story", "pc-place", "postmark"].includes(n.props.className)).length, 0);
+      assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "");
+      for (const face of ["front", "back"]) {
+        assert.equal(nodes(tree, (n) => n.props.className === `flip-face ${face}`)[0].props["aria-hidden"], true);
+      }
+    };
     let tree = h.render(h.exports.FlipPostcard, props); h.flush();
-    assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
-    assert.equal(nodes(tree, (n) => n.props.className === "postmark").length, 0);
-    assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "");
+    assertUnrevealed(tree);
     nodes(tree, (n) => n.props.role === "button")[0].props.onClick();
     tree = h.render(h.exports.FlipPostcard, props);
     assert.match(tree.props.className, /flipped/);
     h.timeouts[0](); // start the flip, still no readable spoiler
     tree = h.render(h.exports.FlipPostcard, props);
-    assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
+    assertUnrevealed(tree);
     h.timeouts[1](); // finish the flip
     tree = h.render(h.exports.FlipPostcard, props);
     assert.match(text(tree), /Seattle/);
     assert.match(text(tree), /hydrangeas/);
     assert.equal(nodes(tree, (n) => n.props.className === "postmark").length, 1);
+    assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "Maple at Seattle");
     const reduced = harness("Child.jsx"); reduced.window.matchMedia = () => ({ matches: true });
     tree = reduced.render(reduced.exports.FlipPostcard, props);
     assert.doesNotMatch(tree.props.className, /flipped/);
     assert.match(text(tree), /Seattle/);
     assert.match(text(tree), /hydrangeas/);
+    assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "Maple at Seattle");
   }
+  const h = harness("Child.jsx"), state = stateFixture();
+  state.postcards = [{ id: "return-card", defId: "seattle" }];
+  const tree = h.render(h.exports.ReturnReveal, { state, latest: { postcardIds: ["return-card"] }, onSeen: noop, onDone: noop });
+  assert.equal(tree.props.title, `${state.child.bear.name} is home!`);
+  assert.doesNotMatch(tree.props.title + text(tree), /Seattle|hydrangeas|Washington/);
 });
 
 test("F36.4: paper envelope body and flap", async () => {
@@ -1441,13 +1456,34 @@ test("D3: Album, Map and Overview use the same trip-place and card metrics", () 
   const state = stateFixture();
   state.postcards.push({ id: "trip", defId: "seattle", source: "trip" }, { id: "trade", defId: "san_francisco", source: "trade" });
   state.metrics = { postcards: { places: 2, cards: 4, total: 15 } };
-  for (const [file, name, expected] of [["Child.jsx", "Album", /2 of 15 places · 4 cards/], ["Child.jsx", "MapScreen", /2 of 15 places/], ["Parent.jsx", "Overview", /2 of 15 places \(\s*4 cards\)/]]) {
+  for (const [file, name, expected] of [["Child.jsx", "Album", /2 of 15 places · 4 cards/], ["Child.jsx", "MapScreen", /2 of 15 places/], ["Parent.jsx", "Overview", /2 of 15 places \(\s*4 cards\s*\)/]]) {
     const h = harness(file);
     assert.match(text(h.render(h.exports[name], { state })).replace(/\s+/g, " "), expected);
   }
   const old = harness("api.js");
   delete state.metrics;
   assert.deepEqual(JSON.parse(JSON.stringify(old.exports.postcardMetrics(state))), { places: 2, cards: 4, total: 15 });
+});
+
+test("W2b: postcard metrics pluralise cards and catalog places in Album, Map and Overview", () => {
+  const api = harness("api.js");
+  for (const word of ["card", "place"]) {
+    for (const n of [0, 1, 2]) assert.equal(api.exports.plural(n, word), n === 1 ? word : `${word}s`);
+  }
+  for (const [places, cards, total] of [[0, 0, 15], [1, 1, 15], [1, 1, 1], [2, 4, 15]]) {
+    const state = stateFixture();
+    state.metrics = { postcards: { places, cards, total } };
+    const placeWord = total === 1 ? "place" : "places", cardWord = cards === 1 ? "card" : "cards";
+    for (const [file, name, expected] of [
+      ["Child.jsx", "Album", `${places} of ${total} ${placeWord} · ${cards} ${cardWord}`],
+      ["Child.jsx", "MapScreen", `${places} of ${total} ${placeWord}`],
+      ["Parent.jsx", "Overview", `${places} of ${total} ${placeWord} (${cards} ${cardWord})`],
+    ]) {
+      const h = harness(file);
+      const rendered = text(h.render(h.exports[name], { state })).replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")");
+      assert.ok(rendered.includes(expected), `${name}: ${expected}`);
+    }
+  }
 });
 
 test("D4 / D12: handled notifications hide, and both inbox lists get warm empty states", () => {

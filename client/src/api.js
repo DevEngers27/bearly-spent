@@ -195,6 +195,7 @@ export function useLiveState(role, childId) {
 
 export const money = (c) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(c / 100);
 export const moneyShort = (c) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: c % 100 === 0 ? 0 : 2 }).format(c / 100);
+export const plural = (n, word) => n === 1 ? word : `${word}s`;
 export const formatDate = (ts, options = {}) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", ...options }).format(new Date(ts));
 export const formatTime = (ts, options = {}) => new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", ...options }).format(new Date(ts));
 export const formatDateTime = (ts, options = {}) => formatDate(ts, { hour: "numeric", minute: "2-digit", ...options });
