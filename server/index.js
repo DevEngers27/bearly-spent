@@ -14,6 +14,7 @@ import { dayKey, weekKey } from "./time.js";
 import * as auth from "./auth.js";
 import { takeLimit, withChat, openFamilyStream } from "./limits.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
+import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, TRIP, placeStatus } from "./catalog.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -150,7 +151,7 @@ export function childView(db, now = Date.now()) {
       trip: TRIP,
       greetings: game.isDemoChild(db) ? game.GREETINGS : game.GREETINGS.filter((g) => !/team challenge/i.test(g)),
     },
-    integrations: { buddy: buddyMode(), bank: nessieEnabled() ? "nessie" : "simulated" },
+    integrations: { buddy: buddyMode(), voice: voiceEnabled() ? "cartesia" : "browser", bank: nessieEnabled() ? "nessie" : "simulated" },
   };
 }
 
@@ -361,6 +362,24 @@ register("POST", "/api/child/mission/:id/done", "child", (req, ctx, res, now) =>
 register("POST", "/api/child/notifications/read", "child", (req, ctx, res, now) => {
   mutateChild(ctx.childId, (db) => { game.ensureDailyMissions(db, now); db.notifications.forEach((n) => { if (n.to === "child") n.read = true; }); });
 });
+// Read-aloud (Cartesia): the browser fetches a short-lived TTS token and calls Cartesia itself;
+// /api/buddy/speak is the server-side proxy it falls back to. Without CARTESIA_API_KEY both answer 404
+// and the client uses the browser's own speech synthesis.
+register("POST", "/api/buddy/speak", "child", async (req, ctx, res, now) => {
+  if (!readChild(ctx.childId).settings.buddyEnabled) throw new GameError("Chatting is switched off by your grown-up", 403);
+  const text = actions.speakText(null, req.body);
+  takeLimit("speak", ctx.childId, now);
+  if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
+  const audio = await synthesize(text);
+  res.set("Content-Type", "audio/mpeg").send(audio);
+  return SENT;
+});
+register("POST", "/api/voice/token", "child", async (req, ctx, res, now) => {
+  if (!readChild(ctx.childId).settings.buddyEnabled) throw new GameError("Chatting is switched off by your grown-up", 403);
+  takeLimit("voice", ctx.childId, now);
+  if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
+  return { token: await mintAccessToken(), version: CARTESIA_VERSION, request: voiceConfig() };
+});
 register("POST", "/api/buddy/chat", "child", (req, ctx, res, now) => actions.chat(readChild(ctx.childId), req.body,
   (text) => withChat(ctx.childId, () => chat(ctx.childId, text), now)));
 for (const action of ["approval", "goal", "mission", "allowance", "settings", "savingsGoal", "fundingAdd"]) {
@@ -419,7 +438,7 @@ export const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "Permissions-Policy": "camera=(), microphone=()",
-  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
+  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.cartesia.ai https://fonts.googleapis.com https://fonts.gstatic.com",
 };
 
 async function execute(entry, req, res, now) {

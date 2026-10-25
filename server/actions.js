@@ -83,6 +83,7 @@ export const actions = {
     return game.proposeTrade(db, friendId, give, get);
   }),
   greet: action((db, body, now) => game.sendGreeting(db, id(body.friendId), integer(body.index, { max: game.GREETINGS.length - 1 }), now)),
+  speakText: action((db, body) => str(body.text, { max: 500 })),
   chat: action((db, body, send = (text) => chat(childIdFor(db), text)) => {
     if (typeof body.text === "string" && !body.text.trim()) throw new game.GameError("Say something first!");
     const text = str(body.text, { max: 500 });

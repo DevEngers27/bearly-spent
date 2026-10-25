@@ -504,7 +504,9 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 }
 .msg { max-width: 85%; padding: 10px 14px; border-radius: 18px; position: relative; display: grid; gap: 6px; font-size: 16.5px; }
 .msg.user { align-self: flex-end; background: var(--sky-deep); color: #fff; border-bottom-right-radius: 6px; }
-.msg.assistant { align-self: flex-start; background: var(--paper-card); border: 2px solid var(--ink); border-bottom-left-radius: 6px; }
+.msg.assistant { align-self: flex-start; background: var(--paper-card); border: 2px solid var(--ink); border-bottom-left-radius: 6px; padding-right: 40px; }
+.speak { position: absolute; right: 6px; bottom: 6px; border: 0; background: none; font-size: 16px; opacity: 0.7; cursor: pointer; min-width: 32px; min-height: 32px; }
+.speak .icon { display: block; }
 .msg.auto { background: #FFF6DE; border-style: dashed; }
 .auto-tag { font-weight: 900; font-size: 12px; color: var(--bear); }
 .typing { flex-direction: row; display: flex; gap: 5px; padding: 14px 18px; }
@@ -657,7 +659,7 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 
 .offline-pill { border: 1px solid var(--ink); border-radius: 999px; padding: 4px 9px; background: #F7DDD7; font-size: 13px; font-weight: 800; }
 button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
-.pbtn:disabled, .chip:disabled, .swatch:disabled { opacity: 0.5; cursor: not-allowed; }
+.pbtn:disabled, .chip:disabled, .swatch:disabled, .speak:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Family entry and pairing keep the same paper-and-bear language as the game. */
 .auth-page { min-height: 100dvh; padding: 32px 16px; }

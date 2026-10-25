@@ -261,3 +261,11 @@ Socket-free coverage: `client/talk-inline.test.mjs`.
 - [ ] On an iPhone (Safari and the installed app): tap the bear, then tap the box. The page scrolls only enough to show the box above the keyboard; the tab bar must not fly up and the page must not jump to the bottom. Closing the keyboard leaves the bear and the bar in view.
 - [ ] On a laptop: the cursor is already in the box when the bar opens; Escape closes it and focus returns to the bear.
 - [ ] Tapping a chip on a phone sends it without opening the keyboard; typing a message and tapping Send keeps the cursor in the box.
+
+## 0.8.8 read-aloud
+
+Socket-free coverage: `client/c1.test.mjs` (speech chain, mute), `client/h9.test.mjs`, `server/h9.test.js`.
+
+- [ ] On an iPhone with Cartesia configured: tap Send in the talk bar and hear the reply without a second tap (the Send tap primes audio). Tap the sound button: it reads "Sound off", the reply stops, and the choice survives a reload. Tap Read aloud under a reply in Our chat.
+- [ ] Without CARTESIA_API_KEY the browser's own voice reads the reply; /api/voice/token answers 404.
+- [ ] Switching tabs or closing the talk bar stops a reply that is playing.
