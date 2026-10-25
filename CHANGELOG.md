@@ -11,6 +11,18 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.7] — 2026-10-25
+
+### Fixed
+- The "Tap to talk" pill on the bear's home is a real button now: tapping it
+  opens the talk bar, the same as tapping the bear. It steps aside while
+  the bar is open or the bear is away. The owner's report: the pill did
+  nothing.
+
+### Review trail
+- Fixed directly on `fix/tap-hint`, Gemini review, checked in the built
+  app at phone width. 371 server tests and 228 client tests.
+
 ## [0.8.6] — 2026-10-25
 
 ### Fixed
