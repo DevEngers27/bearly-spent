@@ -575,7 +575,6 @@ function Children({ state, me, refreshMe, run, busy }) {
       <button className="pbtn primary" disabled={busy}>Add child</button>
       <button type="button" className="pbtn" disabled={busy} onClick={() => setAdding(false)}>Cancel</button>
     </form>}
-    {state && <WalletLedger state={state} run={run} busy={busy} />}
     {me.children.map((summary) => {
       const link = links[summary.id];
       const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
@@ -617,6 +616,7 @@ function Children({ state, me, refreshMe, run, busy }) {
         <AppleCashTracking key={`${summary.id}:${shortcutVersions[summary.id] || 0}`} childId={summary.id} pinSet={me.family.pinSet} busy={busy} refreshKey={state} onUnlink={() => setShortcutVersions((current) => ({ ...current, [summary.id]: (current[summary.id] || 0) + 1 }))} />
       </section>;
     })}
+    {state && <WalletLedger state={state} run={run} busy={busy} />}
   </div>;
 }
 
