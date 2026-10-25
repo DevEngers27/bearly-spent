@@ -1,134 +1,167 @@
 # MoneyQuest
-### Save money. Grow your bear. Explore the world.
 
-MoneyQuest is a money game for kids aged 7–12 and the grown-ups who give them allowance. Kids complete money lessons and missions, save real (simulated) money that makes their bear, **Maple**, grow, and spend game points to send Maple to 15 real U.S. national parks and cities, each of which sends back an illustrated postcard. Parents set allowance and reward goals and approve anything that moves money. An autonomous **Ledger Guardian** runs the books, and **Money Buddy**, built on Claude, explains trade-offs using the child's real numbers.
+Save money. Grow Maple. Explore the world.
 
-> The full product spec is further down: [Product spec](#product-spec).
+MoneyQuest is a money-learning game for kids aged 7–12 and their parents, built for Cal Hacks. Kids learn, save simulated dollars, grow their bear **Maple**, and spend game points on surprise trips to collect **15 illustrated postcards** from U.S. cities and national parks. Parents manage each child's allowance, goals and approvals; the **Ledger Guardian** handles scheduled payouts and ledger checks, while **Money Buddy** uses Claude with a kid-safety guard to explain money choices through Maple.
 
----
+This README describes the **v0.4.0 release candidate**. See the [changelog](CHANGELOG.md), [API contract](server/API.md), and [original hackathon spec](#product-spec).
 
 ## Run it
 
-Requires Node 20.6+.
+Requires **Node ≥22.9** and npm. From the repository root:
 
 ```bash
 npm install
-npm run dev          # API on :8787 + web on :5173 → open http://localhost:5173
+npm run dev
 ```
 
-For the judging table, use a production build:
+Open **http://localhost:5173**. Vite serves the client on port 5173 and proxies API calls to Express on port 8787. Neither launch script enables demo mode automatically.
+
+For the seeded family, copy the optional environment template before launching:
 
 ```bash
-npm run build && npm start     # everything on http://localhost:8787
-npm test                       # 10 rule tests (payouts, reconciliation, privacy, unlocks)
-npm run reset                  # restore the demo family
+cp .env.example .env
 ```
 
-- Parent PIN: **1234**. Open `http://localhost:5173/?role=parent` in a second window. Both views update live.
-- Keys are optional. Copy `.env.example` to `.env` to enable Claude, Nessie or Cartesia. Without keys everything still works, using a simulated bank and an offline planner. No secrets are committed.
-- `ADVENTURE_SECONDS` (default 15) controls how long the bear is away on a trip.
-- **Install it as an app.** MoneyQuest is a PWA. On a phone, open the production URL and choose *Add to Home Screen* (iOS Safari) or *Install app* (Android Chrome). It launches full-screen with its own icon and caches the postcards for offline viewing. Installing needs HTTPS or `localhost`; for a phone on the same Wi-Fi, use a tunnel such as `npx localtunnel --port 8787`.
+The template sets `MQ_DEMO=1`. Welcome then shows **Try the demo family**, or you can sign in as **demo@moneyquest.test / demo-pass-1234**. The demo has Mia and Maple, $20 savings, $10 spending, $250 funding, 40 points and two Chicago postcards. There is **no default parent PIN**. Disable `MQ_DEMO` for a deployment without demo login and demo controls.
+
+API keys are optional: without them, the server uses the simulated bank, a rule-based Buddy and browser speech. This still needs a running local API; it does not make chat work without a network connection. Set optional Claude, Nessie and Cartesia keys in `.env`; see [.env.example](.env.example). `ADVENTURE_SECONDS` defaults to **60**.
+
+For a production build and a single app origin:
+
+```bash
+npm run build
+npm start
+```
+
+Open **http://localhost:8787**. Production cookies require HTTPS when `NODE_ENV=production`. For phone testing, the **phone** npm script builds the app, starts it and opens a **cloudflared** HTTPS tunnel; it needs internet access. Install the PWA with Add to Home Screen or Install app from HTTPS or localhost.
+
+Storage is **data/moneyquest.sqlite**, configurable with `MQ_DATA_DIR`. The first startup imports a legacy `data/db.json` once into the demo family and renames it `db.json.imported`; malformed input stops startup and stays untouched. Enable demo mode to access imported progress. On POSIX, SQLite and its sidecars are restricted to the owner's read/write access.
+
+To reset the seeded demo child from the command line, **stop the running API first**, then run:
+
+```bash
+npm run reset
+```
+
+The command enables demo mode for that invocation and resets the demo child only; other families remain stored. Restart afterward so the API reloads the document. While the API is running, use **Parent → Friends & privacy → Reset demo** instead; that route also cancels queued Buddy replans.
+
+## Accounts and family devices
+
+Choose **Create family** on Welcome. Enter the parent's name, email, password (at least eight characters), first child's name and age, and bear name. The browser supplies its time zone. New children start with zero balances, zero points, a starter wardrobe and an example bicycle savings goal; the seeded demo is separate.
+
+- **Link a kid device:** Parent → Children → Generate kid code. In a separate browser profile or on the child's device, choose **I have a kid code** and enter the six-character code. It works once, expires in 15 minutes, and a new code cancels earlier unused codes for that child. The paired device sees only its child and has no parent entry or Sign out control; parents can unlink it in Children → Devices.
+- **Use a shared device:** Parent → Security sets an optional 4–8 digit PIN. Kid mode and Lock clear this session's server unlock. Returning through Grown-ups requires the PIN; an unlock lasts 15 minutes. Five failed attempts lock that session for 15 minutes. Forgot PIN? verifies the parent's password and clears the family PIN. A PIN cannot turn a paired kid session into a parent session.
+- **Add siblings:** Children → Add child, then use the header switcher. Each child has their own funding, savings and spending accounts, allowance rules, goals, approvals, Buddy settings/history, game progress and postcards. The family identity, parent PIN and parent access are shared; funding is **per child**, not pooled. Time-zone game settings are also stored per child, despite the current “Family time zone” label.
+- **End access:** Sign out ends the current parent session. Security → **Sign out everywhere** asks for confirmation, then revokes every parent and kid session in the family, including the current device. Kid devices need new codes afterward. Other families stay signed in.
+
+Passwords and PINs are salted **scrypt** hashes. Sessions use **HttpOnly, SameSite=Lax** cookies (`Secure` in production/HTTPS); only token hashes are stored server-side. Parent sessions slide for 30 days, with a 90-day maximum; paired kid sessions last 180 days. Login, registration, pairing, PIN attempts, Buddy and voice have rate limits. Per-child retention caps are **200 chat messages, 500 diary entries, 2,000 audit entries, 5,000 transactions and 200 notifications per recipient**. Cached child state is stored on the device for offline reading, so use a trusted device and clear site data when retiring it.
 
 ## Two-minute demo
 
-1. **Parent → Goals & tasks.** Create "Complete five financial literacy challenges" for $5. It's prefilled.
-2. **Kid → Missions.** Pass the five money lessons. Then, on **Home**, tap **Save money** three times.
-3. **Parent → Approvals.** "Your child completed their goal! Would you like to approve the $5.00 reward?" Approve it. The Guardian pays it within two seconds, the bear grows, and a milestone unlocks the bow tie.
-4. **Kid → Map → San Francisco.** Maple walks the dotted trail across the map and comes back with the San Francisco postcard, plus the secret **Hawaiʻi Volcanoes** postcard, discovered because the child saved three times. Tap a card to turn it over and read the story, stamp and postmark.
-5. **Kid → Buddy.** "I want to buy a $50 game. Can I?" Claude checks the real balances, simulates the purchase against the bike goal, and saves an updated plan to Home.
-6. **Parent → Guardian log → Post a duplicate.** This simulates the bank double-posting the reward. Within one tick the Guardian finds two postings for one obligation, reverses the extra one, and records why.
-7. **Kid → Album → Friends.** Propose swapping a spare Chicago postcard for Maya's Seattle postcard. The swap goes to the parent for approval.
+Start with a fresh demo child; the full five-lesson walkthrough may take longer than two minutes.
+
+1. **Parent → Goals & tasks:** Create a $5 reward goal counting all five remaining money lessons **before** doing lessons. Only first passes after goal creation count. The count cannot exceed unpassed lessons; if some are already done, lower the count or choose tasks/saving actions.
+2. **Parent → Children:** Generate a kid code and link a second browser profile/device through **I have a kid code**. Keep the parent view open for live approvals. Alternatively, set a PIN in Security and use Kid mode on the shared device.
+3. **Kid → Missions:** Pass the five different lessons. **Parent → Approvals:** approve the $5 reward. With the demo's default reward destination, savings go from **$20 to $25**, unlocking the **bow tie**. In Kid → Home → Dress up → Neckwear, equip it. Replaying lessons gives no extra points or goal progress.
+4. **Kid → Home → Save money:** Choose **$2** and press **Save it** three times, waiting for each response. The amount stays filled in; savings become **$31**, spending **$4**. Each transfer counts as a saving action, but saving points are awarded once per local day.
+5. **Kid → Home:** Tap Maple or **Talk to Maple**, then ask “Can I buy a $50 game?” Buddy checks the current amounts and explains the trade-off; the offline helper also saves a plan card on Home. Chat retains recent messages, and parents can inspect the retained history in Buddy chats.
+6. **Kid → Home → Send Maple on a trip:** Spend **30 points**, with savings unchanged. The server draws an eligible surprise destination, preferring uncollected places; the map is a travel log, not a destination picker. After about 60 seconds, open the reveal, flip the card and choose **Add to album**. Hawaiʻi is a bonus on a San Francisco return after three saves; Arches is a bonus on a Zion return after three first-passed lessons. Both rules work, but this random trip need not visit either place.
+7. **Parent → Allowance:** Press **Fast-forward to payday** once; the demo's $10 allowance splits $5/$5. Pressing again immediately is refused without another payout. In **Guardian log**, choose **Post a duplicate** and watch the next check reverse it. In **Kid → Album → Friends**, propose a spare Chicago for Maya's Seattle; approve it as the parent. Traded postcards count as cards, not visited places or trip unlocks.
 
 ## How it's built
 
-| Piece | Where | What it does |
-|---|---|---|
-| API + autonomy loop | `server/index.js` | Express REST API, server-sent events for live sync, and a 2-second tick that brings the bear home and runs the Guardian |
-| Game & family rules | `server/domain.js`, `server/catalog.js` | Missions, lessons, goals, approvals, the 15 destinations and their unlock rules, cosmetics, friends and trades |
-| Ledger Guardian | `server/guardian.js` | The autonomous finance agent (see below) |
-| Money Buddy | `server/buddy.js` | Claude agent loop with four tools, personal-info redaction, and an offline fallback |
-| Bank | `server/bank.js` | Idempotent simulated ledger in cents, with an optional Nessie mirror |
-| Voice | `server/voice.js` | Optional Cartesia Sonic TTS (`sonic-3.6`, `Cartesia-Version: 2026-08-14`). The server mints a 60-second TTS-only access token; the browser calls `/tts/bytes` directly, with a server proxy as fallback. Without a key, the browser's speech synthesis is used |
-| Web app | `client/src` | React + Vite, installable as a PWA (`client/public/manifest.webmanifest`, `sw.js`). The bear (`Bear.jsx`) is layered from the illustrated PNGs in `client/public/bear` (4 poses, 22 accessories placed per item); the adventure map (`MapView.jsx`) is SVG with a hand-drawn wobble filter |
-| Art | `client/public/postcards`, `client/public/bear` | The 15 postcards (source: `bear_postcard_collection_15/`) and the bear poses and accessories (source: `bear_app_assets/`, with stray slivers from the sticker sheets removed and trimmed) |
-| Storage | `data/db.json` | A JSON file; delete it to reset |
+| Piece | Where | Current role |
+| --- | --- | --- |
+| API and timer | `server/index.js` | Express routes, family-scoped SSE, reconciliation around actions, and a two-second tick that mutates only children with due work |
+| Validated actions | `server/actions.js`, `server/validate.js` | Body/type/range checks; HTTP dollars become integer cents before domain actions |
+| Accounts | `server/auth.js` | Family registration, password login, cookie sessions, kid codes, PIN lock/unlock/reset and device revocation |
+| Storage | `server/db.js`, `server/store.js` | SQLite schema, one JSON game document per child, transactions/rollback, retention and legacy import |
+| Limits and calendar | `server/limits.js`, `server/time.js` | Process-local rate/concurrency/SSE limits; time-zone day keys and Monday–Sunday ISO weeks |
+| Game and catalog | `server/domain.js`, `server/catalog.js` | Lessons, goals, surprise draws, permanent milestones, wardrobe, practice friends and trades |
+| Ledger Guardian | `server/guardian.js`, `server/bank.js` | G1–G5 policies, cent-based idempotent simulated transfers and optional Nessie mirror |
+| Money Buddy and voice | `server/buddy.js`, `server/voice.js` | Four-tool Claude loop, redaction, output guard, rule-based fallback and optional Cartesia TTS |
+| Client | `client/src/App.jsx`, `Child.jsx`, `Parent.jsx`, `api.js` | React 18 account/child selection, talk on Home, parent console, cookie requests, SSE plus five-second polling |
+| Reveals and counts | `server/domain.js`, `server/index.js`, `client/src/Child.jsx` | Server `revealedAt` receipts across devices, local receipt retry, shared `metrics.postcards` for trip places versus all cards |
+| PWA and art | `client/public/sw.js`, `client/src/Bear.jsx`, `MapView.jsx`, `Postcard.jsx` | Built-shell cache, warmed art, layered bear poses, read-only map and illustrated flip cards |
 
 ### Ledger Guardian (Hyphenate: Autonomous Systems for Finance)
 
-**The seat it fills:** the family's allowance bookkeeper. It pays on schedule, pays approved rewards, reconciles the ledger, and knows when to ask.
+The Guardian is a rule-based autonomous bookkeeper. Its decisions carry policy references in the audit log.
 
-| Policy | Behaviour |
-|---|---|
-| G1 | Pays the weekly allowance on schedule, split between savings and spending by the parent's rule. If funding is short it escalates instead of overdrawing. |
-| G2 | Pays parent-approved rewards, purchases and extra allowance exactly once, using an idempotency key per approval. |
-| G3 | Reconciles every posting against an obligation. Duplicates are reversed automatically; postings with no matching approval are flagged for the parent and left alone. |
-| G4 | Holds purchases over the parent's limit for approval, and tells the parent about spending that's unusually large. |
-| G5 | Warns the parent a day ahead when funding won't cover upcoming commitments. |
-
-Its access is limited on purpose. It can only move money that a schedule or an approval authorises, and can only reverse postings that exceed an obligation. Every decision is written to the audit log with the policy that triggered it. The "Post a duplicate" button is the recovery moment for judges.
+| Policy | Implemented behavior |
+| --- | --- |
+| G1 | Pays scheduled allowance once per period, splits savings/spending, escalates insufficient parent funding and processes at most four overdue periods per pass. Recent-payment checks prevent a time-zone change from paying twice. |
+| G2 | Executes approved rewards, extra allowance and held purchases with stable idempotency keys. Insufficient funds escalate to the right account and retry when funded; approved unpaid requests can still be declined. Zero-dollar goals complete without a transfer. |
+| G3 | Checks referenced postings for duplicates and approval amount mismatches; also flags parent-originated postings with neither a reference nor an idempotency key. Reverses safe duplicates, otherwise asks for review once. Seed/idempotent unreferenced entries are not a universal external-bank audit, and allowance amounts are not independently reconstructed. |
+| G4 | Holds purchases above the parent's limit. Under-limit purchases can still produce an unusual-spend notice when at least three recent posted purchases exist and the new one exceeds three times their average and is at least $5. |
+| G5 | Compares funding with one allowance plus pending/approved unpaid rewards and extra allowance. Warns once per shortfall episode; sufficient funding clears the warning latch. Checks run during actions or due work, with no fixed one-day-ahead guarantee. |
 
 ### Money Buddy (Anthropic)
 
-- Model `claude-opus-5` with adaptive thinking at `low` effort to keep chat fast for kids, plus server-side refusal fallbacks (`fallbacks: "default"`).
-- Tools: `get_snapshot` and `simulate_purchase` are read-only. `update_savings_plan` writes the plan card on the kid's Home screen. `propose_mission` goes to the parent's approval queue. **No tool can move money.**
-- After every real money event (reward paid, purchase, allowance, reversal) the server asks Buddy to re-plan and leave the child a short note.
-- **Where it could go wrong, and what we do about it:**
-  - Kids overshare. Phone numbers, emails, addresses, card numbers and passwords are stripped on the server before the text reaches the model, and the child gets a gentle reminder.
-  - Wrong numbers. The system prompt requires tool calls before giving number-based advice, and all maths is done in code.
-  - Out-of-scope or unsafe topics. The prompt redirects to a trusted adult.
-  - Parents need to see what was said. The full transcript, including which tools were used and what was redacted, is in **Parent → Buddy chats**, and parents can switch Buddy off.
+The configured defaults are **claude-opus-5-5** with adaptive thinking at low effort and **claude-haiku-5-5** for the output guard. These are code defaults, not a claim that live provider access was verified.
+
+- **Tools:** `get_snapshot` and `simulate_purchase` only read/calculate. `update_savings_plan` saves the Home plan card. `propose_mission` queues a parent approval. No tool moves money or approves requests; calculations use the child's current ledger.
+- **Redaction:** Pattern-based filters cover U.S. phone numbers (including parenthesized formats), emails, dashed SSNs, supported street-address formats, 13–19 digit card-like numbers and explicitly labeled password/passcode/PIN values. They apply to chat, model-bound snapshots and transaction memos, tool text and replan prompts. They do not anonymize every identifier: the child's name, age and financial context can reach Claude, and unmatched personal details can slip through. Parents see which categories were removed, not the original removed values.
+- **Content rules:** Short, warm money/game replies; no violence, horror, sexual/romantic content, drugs, alcohol, gambling, self-harm, hate, political/religious debate, personal-data requests, links, paid app recommendations, real-money promises or specific stock/crypto advice. Safety concerns redirect to a trusted grown-up. The Haiku guard screens live chat replies and automatic notes; anything other than exact `OK`, including guard failure, produces a safe canned reply. It screens text replies, not tool writes.
+- **Parent oversight:** Buddy chats shows up to the **last 200 retained messages**, including tool names and redaction categories. The API supports an exclusive `before` cursor and the UI has Load older when a cursor exists; the first page currently holds up to the full retention cap, so paging normally adds nothing. This is not a permanent/full transcript. The kid Chat view shows the last 30. Parents can turn Buddy off per child.
+- **Without a key:** The rule-based helper uses current balances for affordability, goal timing, saving plans, needs/wants, points and allowance questions. It saves Home plans on plan requests, priced affordability questions and money-event replans. It needs the local API and does not call Claude or Haiku in keyless mode. Live-model errors fall back to it, with live-mode reply screening still applied. Replans are debounced per child and stale writes are cancelled after newer events, reset or disabling Buddy.
 
 ### What's real and what's simulated
 
-| Real | Simulated |
-|---|---|
-| Ledger logic, idempotency, reconciliation, approvals, audit log | Money. Accounts are a local ledger with no real funds. |
-| Claude calls (with `ANTHROPIC_API_KEY`) | Friends Maya, Sam and Zoe, and their side of swaps and team challenges |
-| Postcard unlock rules: 8 common places, 4 rare ones unlocked by habits, 1 seasonal (autumn), 2 secrets discovered on other trips. Deterministic, never random or paid | "Fast-forward to payday" and "Post a duplicate" are demo controls |
-| Nessie mirror and Cartesia voice when keys are set | Without keys: offline planner, simulated bank, browser speech |
+| Area | Implemented now | Boundary |
+| --- | --- | --- |
+| Accounts and ledger | SQLite persistence, scoped sessions, approvals, idempotency, reconciliation and audit | All dollars/funding are simulated; no real bank transfer or card feed |
+| Trips and postcards | 15 illustrated places: 8 common, 4 rare, 1 autumn seasonal, 2 secret bonuses; 30-point surprise draw | Destination selection is random; eligibility and secret bonus conditions are deterministic; no paid draws |
+| Friends | Practice friends, approval-gated linking and configurable trade approval | Friends' collections and team progress are simulated; no real multiplayer; friend views exclude balances, transactions and allowance |
+| Claude | Optional Messages/tool loop, redaction and Haiku output screening | Mock-tested; live-key service/model availability was not verified for this documentation pass |
+| Nessie | Optional asynchronous HTTPS sandbox mirror; local ledger remains authoritative; errors enter audit | Live sandbox unverified; best effort, not settlement or complete reconciliation; reversals are local only |
+| Cartesia | Optional 60-second TTS-only token, browser bytes request, then server proxy fallback (`sonic-3.6`, API version `2026-08-14`) | Mock coverage, no live-key verification; browser speech is the final fallback where supported |
+| Demo controls | Seeded balances, top-up, payday fast-forward, duplicate injection and reset | Available only to the demo family with `MQ_DEMO=1` |
 
-## Icons
+### Offline postcards and icons
 
-The app uses no emoji. Icons are hand-drawn SVGs in `client/src/Icons.jsx`, and a few use art from the bear pack (honey jar, picnic basket, magnifier, adventure map). Stamps and map pins use crops of each place's postcard.
+After an online visit to the **production build**, the service worker caches the shell and hashed assets and warms available postcard/bear art. A paired kid device with a matching cached identity and `mq_last_state` can reload offline and read its cached album; wait for cache warming before disconnecting. API responses stay out of Cache Storage. Offline actions, chat and voice are disabled; fresh state replaces the snapshot on reconnect. A first visit or missing snapshot shows a retry screen. Parent data is not restored as an offline parent session.
 
-To replace any icon with your own art, save a square transparent PNG as `client/public/icons/ui/<name>.png` and add the name to `CUSTOM` at the top of `Icons.jsx`:
-
-| Name | Where it appears |
-|---|---|
-| `home`, `star`, `mapNav`, `album`, `chat` | Bottom navigation |
-| `bell`, `lock` | Header: news and grown-ups |
-| `honey` | Savings amount, "Save" items |
-| `sparkle` | Adventure points, toasts, surprise badge |
-| `close`, `check` | Close buttons, finished missions |
-| `target`, `hourglass`, `map` | "Next up" suggestions |
-| `acorn` | Progress toward a parent goal |
-| `basket`, `abacus`, `magnifier`, `sprout`, `chart` | The five money lessons |
-| `honey`, `basket`, `balloon`, `heart` | Budget challenge: save, needs, fun, give |
-| `medal`, `heart` | Lesson passed, try again |
-| `bike` | Savings goal |
-| `backpack`, `paws` | Trip in progress, postcard signature |
-| `speaker` | Read a Buddy message aloud |
+The UI uses hand-drawn SVGs in `client/src/Icons.jsx` plus illustrated PNGs. Custom icons can go in `client/public/icons/ui/<name>.png` and be registered in `CUSTOM`. The bear renderer has 21 wearable/companion items; the 22nd item PNG is the scene mushroom. Backgrounds are separate catalog cosmetics.
 
 ## Known limitations
 
-- Single family, single child. The parent PIN and session are demo-grade, not production auth.
-- The Nessie mirror is best-effort, and it has **not been exercised against the live sandbox** because no key was available while building. The local ledger stays the source of truth, and Nessie errors appear in the audit log. The Cartesia requests follow the current docs and were checked against a mock, but not against a live key either.
-- The Claude integration was verified against a mock of the Messages API (request shape, tool loop, plan writes), not against a live key. Without `ANTHROPIC_API_KEY`, Money Buddy runs an offline helper that answers common questions (can I afford X, when do I reach my goal, make a plan, needs vs. wants, points, allowance, saving tips) from the child's real numbers.
-- Friends are simulated. Real-time multiplayer (e.g. SpacetimeDB) is the natural next step.
-- Spending is logged by the child. There's no card or bank feed.
+- Run **one API process per database**. Document caches, rate windows, chat locks and SSE lists are process-local; restarting resets rate windows. SSE allows four connections per family, closes the oldest fifth connection and drops backpressured streams. Parent updates include all siblings; clients filter by child ID.
+- Funding accounts are per child. New non-demo families have zero funding, and the current UI/API exposes top-ups only for the demo family, so a newly registered family cannot fund allowance/reward payouts through the app yet.
+- Spending is manually recorded, and the cash diary does not change balances. Savings cannot yet be withdrawn or used for an actual purchase; Buddy's savings-purchase simulation is hypothetical.
+- Friends and their team contributions are simulated. Team progress has no completion reward, and some aspirational milestone effects in the catalog are not rendered.
+- Browser speech and press-and-hold recognition depend on browser support and permissions. External integration badges reflect configuration, not a successful live connection.
+- Apple Cash tracking is coming in the next release.
+
+## Testing and review
+
+The original eight-way review combined independent reviews and browser reproductions, finding mismatches in money rules, privacy, accounts, offline behavior and this README. Follow-up batches used **Codex implementation → Gemini independent review → Claude verification and integration**. See [versioning and review conventions](docs/VERSIONING.md) and [CHANGELOG.md](CHANGELOG.md).
+
+```bash
+npm test
+node --test client/*.test.mjs
+```
+
+The release candidate has **215 passing server tests and 92 passing client checks**. The client checks use a socket-free VM/dispatcher harness; they do not establish browser cookie behavior or live integration availability. On Node 22.9–22.12, enable SQLite for tests by setting `NODE_OPTIONS=--experimental-sqlite` in your shell environment; launch/reset scripts already include the flag.
+
+For browser verification, follow [client/CHECKLIST.md](client/CHECKLIST.md) against a production app origin with DevTools and two separate profiles/devices. Cover family creation/linking/lock/revocation, trip/talk/reveal, offline caches and mobile layout. The checklist is a manual test plan, not a claim that every case has been rerun for this docs batch.
 
 ---
 
 <a id="product-spec"></a>
 
-# MoneyQuest
+## Original hackathon spec (October 2026)
+
+This is the original Cal Hacks product vision, including ideas and examples that are not implemented. The sections above describe the v0.4.0 release candidate.
+
 ### A Financial Adventure Where Your Money Grows With You
 
 ## 1. Project Overview
 
 **MoneyQuest** is a gamified financial education platform designed to help children learn how to earn, save, spend, and manage real money through a fun and interactive experience.
 
-Instead of making financial education feel like homework, MoneyQuest turns saving money into an adventure. Each child has a cute virtual companion called a **Money Blob**, which grows as their savings increase. By completing financial missions, tracking their money, and practicing responsible spending, children earn points they can use to send their Money Blob on virtual adventures, collect postcards, and interact with friends.
+Instead of making financial education feel like homework, MoneyQuest turns saving money into an adventure. Each child has a cute virtual companion called **Maple**, which grows as their savings increase. By completing financial missions, tracking their money, and practicing responsible spending, children earn points they can use to send Maple on virtual adventures, collect postcards, and interact with friends.
 
 MoneyQuest also connects children and parents through a shared financial management system. Parents can assign tasks, set allowances, review progress, and approve financial rewards. Children learn to make financial decisions while gaining more independence within boundaries set by their parents.
 
@@ -154,23 +187,23 @@ MoneyQuest combines real-world financial management with virtual pet mechanics, 
 
 ## 3. Core Features
 
-### Feature 1: Money Blob — Your Virtual Financial Companion
+### Feature 1: Maple — Your Virtual Financial Companion
 
-Every child receives their own Money Blob, a cute character that represents their financial growth.
+Every child receives a bear named Maple, a cute character that represents their financial growth.
 
-**The more money a child saves, the bigger their Money Blob grows.**
+**The more money a child saves, the bigger Maple grows.**
 
-Money Blobs can have different appearances, colors, expressions, and accessories, making each child's companion feel unique.
+Bears can have different appearances, colors, expressions, and accessories, making each child's companion feel unique.
 
 Key interactions include:
 
-- **Savings growth:** As children increase their savings, their Money Blob gradually grows.
+- **Savings growth:** As children increase their savings, Maple gradually grows.
 - **Visual progress:** Children can directly see their savings progress through their character.
 - **Customization:** Children can unlock outfits, hats, backgrounds, and accessories.
-- **Character reactions:** The Money Blob celebrates completed savings goals and encourages children when they experience financial setbacks.
+- **Character reactions:** Maple celebrates completed savings goals and encourages children when they experience financial setbacks.
 - **Growth milestones:** Reaching savings goals unlocks new character appearances or cosmetic upgrades.
 
-The Money Blob never shrinks as punishment for spending money on reasonable needs. Instead, its current size can reflect savings progress, while earned growth milestones remain permanently unlocked.
+Maple never shrinks as punishment for spending money on reasonable needs. Instead, its current size can reflect savings progress, while earned growth milestones remain permanently unlocked.
 
 This creates an emotional connection between children and their financial progress.
 
@@ -195,11 +228,11 @@ The system can also generate age-appropriate missions based on a child's financi
 
 Points are **virtual rewards, not real money**, and cannot be cashed out.
 
-### Feature 3: Money Blob Adventures and Postcard Collection
+### Feature 3: Maple Adventures and Postcard Collection
 
-One of MoneyQuest's main engagement features is the ability to send Money Blobs on virtual adventures.
+One of MoneyQuest's main engagement features is the ability to send bears on virtual adventures.
 
-Children can use points earned from missions and financial tracking to send their Money Blob to different destinations.
+Children can use points earned from missions and financial tracking to send Maple to different destinations.
 
 For example:
 
@@ -209,9 +242,9 @@ For example:
 - **Camping Trip:** 120 points
 - **Space Adventure:** 300 points
 
-After an adventure is completed, the Money Blob returns with a unique collectible postcard.
+After an adventure is completed, Maple returns with a unique collectible postcard.
 
-Each postcard includes an illustration of the destination, the Money Blob enjoying the experience, a short message about the adventure, and the date it was collected.
+Each postcard includes an illustration of the destination, Maple enjoying the experience, a short message about the adventure, and the date it was collected.
 
 Children can store these postcards in a personal digital collection album.
 
@@ -228,7 +261,7 @@ Postcards are divided into different collection categories:
 - **Secret:** Hidden postcards unlocked by discovering unusual destination combinations or completing special financial learning challenges.
 - **Seasonal:** Limited-themed postcards associated with holidays or educational events.
 
-For example, sending the Money Blob camping might occasionally unlock a hidden postcard featuring a secret forest village.
+For example, sending Maple camping might occasionally unlock a hidden postcard featuring a secret forest village.
 
 Another secret postcard could be unlocked by completing three savings-related missions and then visiting a special destination.
 
@@ -243,7 +276,7 @@ MoneyQuest includes a social feature where children can connect with approved fr
 Children can:
 
 - Add friends using invitation codes with parental controls.
-- Visit their friends' Money Blob profiles.
+- Visit their friends' bear profiles.
 - See which postcards their friends have collected.
 - Exchange eligible postcards.
 - Send prewritten positive messages or postcard greetings.
@@ -289,7 +322,6 @@ MoneyQuest is designed to help children understand and manage actual money, rath
 Potential future integrations include:
 
 - **Bank account connectivity:** Parents can connect eligible financial accounts to display balances and transaction histories.
-- **Apple Cash Family compatibility:** Families could use Apple Cash outside the app for spending and allowances, although direct account synchronization and transfers would require supported integration capabilities.
 - **Parent-approved transfers:** Rewards can eventually be deposited into a child's eligible financial account through an authorized provider.
 - **Real savings goals:** Children can save toward actual items, such as bicycles, toys, school trips, or gifts.
 
@@ -326,7 +358,7 @@ MoneyQuest separates real-world savings from virtual game rewards.
 
 | System | How it works | Purpose |
 |---|---|---|
-| **Real Savings** | Actual or simulated money saved toward personal goals | Grows the Money Blob and teaches financial responsibility |
+| **Real Savings** | Actual or simulated money saved toward personal goals | Grows Maple and teaches financial responsibility |
 | **Adventure Points** | Earned through missions, tracking, and learning activities | Used for adventures, cosmetic rewards, and collectible postcards |
 
 This distinction is important because spending virtual adventure points should never reduce a child's actual savings.
@@ -339,13 +371,13 @@ Children who have less money should still be able to enjoy the game, unlock adve
 
 **Child's experience**
 
-1. Create a Money Blob.
+1. Create a bear named Maple.
 2. Set a savings goal.
 3. Receive an allowance or record existing savings.
 4. Complete missions and track financial activities.
-5. Watch the Money Blob grow as savings increase.
+5. Watch Maple grow as savings increase.
 6. Earn adventure points.
-7. Send the Money Blob on trips.
+7. Send Maple on trips.
 8. Collect regular, rare, and hidden postcards.
 9. Exchange postcards with approved friends.
 10. Continue developing financial habits while unlocking new experiences.
@@ -372,7 +404,7 @@ Children who have less money should still be able to enjoy the game, unlock adve
 | **Anthropic** | Claude-powered age-appropriate financial guidance, adaptive missions, and financial reasoning |
 | **Meta — Bringing People Closer Together with AI** | Cooperative financial challenges and AI-supported family interactions, beyond basic friend lists |
 | **SpacetimeDB** | Real-time synchronization for social postcard exchange and shared challenges |
-| **Cartesia** | An interactive Money Blob voice companion, if voice becomes a core part of the experience |
+| **Cartesia** | An interactive Maple voice companion, if voice becomes a core part of the experience |
 
 These are potential track matches, not guaranteed eligibility. Each sponsor's required technology must be used meaningfully.
 
@@ -384,8 +416,8 @@ For Cal Hacks, the goal is to deliver a polished, working prototype instead of a
 
 **Must-have features:**
 
-1. A child dashboard featuring an animated Money Blob.
-2. A simulated savings account where savings growth changes the Money Blob's size.
+1. A child dashboard featuring an animated Maple.
+2. A simulated savings account where savings growth changes Maple's size.
 3. Financial missions and a working adventure-points system.
 4. A selection of virtual destinations.
 5. A collectible postcard album, including at least one hidden postcard.
@@ -396,7 +428,7 @@ For Cal Hacks, the goal is to deliver a polished, working prototype instead of a
 **Stretch goals:**
 
 - Friend invitation and postcard trading.
-- More Money Blob customization.
+- More Maple customization.
 - Real-time collaborative financial missions.
 - Voice interaction using Cartesia.
 - Broader financial account integrations.
@@ -407,9 +439,9 @@ A parent creates a $5 reward for completing a set of learning missions.
 
 The child completes those missions and earns adventure points. Their parent receives an approval notification and releases a simulated $5 allowance.
 
-The child's savings balance increases, causing their Money Blob to grow.
+The child's savings balance increases, causing Maple to grow.
 
-The child spends their adventure points to send the Money Blob on a beach vacation. When the Blob returns, it brings back a postcard—and unexpectedly discovers a hidden collectible.
+The child spends their adventure points to send Maple on a beach vacation. When Maple returns, it brings back a postcard—and unexpectedly discovers a hidden collectible.
 
 Finally, the child can view their collection and prepare a postcard exchange with a friend.
 
@@ -423,10 +455,10 @@ MoneyQuest aims to become more than a children's banking companion or financial 
 
 By combining a personal virtual character, real financial progress, missions, exploration, and collectible postcards, MoneyQuest gives children a reason to return to financial learning voluntarily.
 
-For children, it is a game about raising their Money Blob, exploring destinations, and collecting memories.
+For children, it is a game about raising Maple, exploring destinations, and collecting memories.
 
 For parents, it is a tool for teaching financial responsibility, managing allowances, and celebrating their child's progress.
 
 **Our vision is to make saving money feel rewarding, managing money feel approachable, and financial education become part of everyday childhood experiences.**
 
-**Tagline: Save money. Grow your Blob. Explore the world.**
+**Tagline: Save money. Grow Maple. Explore the world.**

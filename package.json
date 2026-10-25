@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MoneyQuest — save money, grow your Blob, explore the world.",
+  "description": "MoneyQuest — save money, grow Maple, explore the world.",
   "scripts": {
     "dev": "concurrently -n api,web -c magenta,cyan \"node --experimental-sqlite --env-file-if-exists=.env --watch server/index.js\" \"vite\"",
     "build": "vite build",
