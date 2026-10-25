@@ -628,3 +628,69 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .offline-pill { border: 1px solid var(--ink); border-radius: 999px; padding: 4px 9px; background: #F7DDD7; font-size: 13px; font-weight: 800; }
 button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .pbtn:disabled, .chip:disabled, .swatch:disabled, .speak:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Surprise trips: a wooden note, a paper envelope, and a place to talk. */
+.home-tools { display: flex; justify-content: center; gap: 12px; margin-top: -12px; }
+.trip-launch { min-height: 56px; font-size: 18px; display: flex; gap: 5px; justify-content: center; align-items: center; }
+.trip-caption { margin-top: -14px; }
+.trip-sign { position: relative; width: 64%; max-width: 260px; border: 0; padding: 0; background: none; margin-bottom: 3%; transform-origin: 50% 96%; animation: sign-sway 5s ease-in-out infinite; }
+.trip-sign svg { display: block; width: 100%; }
+.sign-title { font: 700 34px var(--hand); fill: var(--ink); }
+.sign-time { font: 800 20px var(--body); fill: var(--ink); }
+@keyframes sign-sway { 0%, 100% { transform: rotate(-1.5deg); } 50% { transform: rotate(1.5deg); } }
+.scene:has(.bear-bubble) { padding-top: 150px; min-height: 430px; }
+.bear-bubble { position: absolute; z-index: 4; top: 68px; left: 6%; width: 88%; padding: 15px 18px 30px; font-size: 14px; line-height: 1.45; max-height: 210px; overflow-y: auto; isolation: isolate; }
+.bear-bubble > svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+.bear-bubble > span:not(.sr-only) { display: block; min-height: 42px; }
+.thought-dots { position: absolute; top: -8%; right: -10%; display: flex; gap: 5px; background: var(--paper-card); padding: 10px; border: 2px solid var(--ink); border-radius: 50%; }
+.thought-dots i { width: 6px; height: 6px; background: var(--ink); border-radius: 50%; animation: thought-hop 1s ease-in-out infinite; }
+.thought-dots i:nth-child(2) { animation-delay: .15s; }
+.thought-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes thought-hop { 50% { transform: translateY(-4px); } }
+.kid-app:has(.talk-bar) { padding-bottom: 220px; }
+.talk-bar { position: fixed; z-index: 19; bottom: calc(78px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(520px, 100%); padding: 10px 14px 16px; background: var(--paper-card) var(--grain); border: 2px solid var(--ink); border-radius: 22px 24px 0 0; box-shadow: 0 -4px 18px #51473820; }
+.talk-links { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.talk-links > .link { margin-right: auto; }
+.talk-bar .chips { margin-bottom: 10px; }
+.talk-bar .chip { font-size: 12px; flex-shrink: 0; }
+.talk-bar .chat-input { align-items: center; }
+.talk-bar input { min-width: 0; width: 100%; }
+.talk-bar .btn { padding-inline: 14px; }
+.mic { touch-action: none; user-select: none; }
+.mic.listening { background: var(--rose); box-shadow: 0 0 0 4px var(--honey-soft); }
+.pin.open .pin-bg { fill: transparent; stroke: #9A917C; stroke-width: 2; stroke-dasharray: 4 4; }
+.pin.open .pin-ring { stroke: #9A917C; }
+.pin.open .map-label { opacity: .7; }
+.new-card-badge { position: absolute; z-index: 2; right: 8px; top: 8px; padding: 2px 9px; background: var(--honey); border: 2px solid var(--ink); border-radius: 10px 7px 11px 8px; font-weight: 900; transform: rotate(5deg); }
+.return-bg { background: #30291ee0; align-items: center; padding: 12px; }
+.sheet.return-dialog { width: min(520px, 100%); max-height: calc(100dvh - 24px); border-radius: 24px 20px 23px 18px; background: var(--paper-card) var(--grain); }
+.return-dialog .grabber { display: none; }
+.return-dialog .sheet-head { justify-content: center; }
+.return-dialog .sheet-body { display: grid; gap: 18px; }
+.return-parcel { position: relative; transform-origin: center; }
+.return-envelope { display: block; width: 78%; margin: 10px auto -120px; animation: envelope-arrive .7s ease-out both; }
+.return-card { position: relative; animation: postcard-arrive 1.1s cubic-bezier(.2, 1.35, .5, 1) both; animation-delay: var(--delay); text-align: center; }
+.return-card .flip { width: 100%; }
+.return-card .flip-inner { transition: transform .8s cubic-bezier(.2, 1.3, .5, 1); }
+.return-card h2 { font-size: 30px; margin-top: 14px; }
+.return-card .story { margin-top: 6px; text-align: left; }
+.return-card + .return-card { border-top: 2px dashed #B77E50; padding-top: 18px; }
+.surprise-title { font-size: 28px; margin-bottom: 14px; }
+.return-parcel.adding { animation: postcard-to-album .7s ease-in forwards; pointer-events: none; }
+.return-sparkles { position: absolute; inset: 0; pointer-events: none; }
+.return-sparkles i { position: absolute; width: 14px; height: 14px; background: var(--honey); clip-path: polygon(50% 0, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0 50%, 37% 37%); animation: return-twinkle 1.8s .7s both; }
+.return-sparkles i:nth-child(1) { left: -2%; top: 18%; }
+.return-sparkles i:nth-child(2) { right: -1%; top: 8%; animation-delay: 1s; }
+.return-sparkles i:nth-child(3) { left: 15%; top: -2%; animation-delay: 1.2s; }
+.return-sparkles i:nth-child(4) { right: 10%; top: 50%; animation-delay: 1.4s; }
+@keyframes envelope-arrive { from { opacity: 0; transform: translateY(90px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes postcard-arrive { from { opacity: 0; transform: translateY(90px) scale(.6) rotate(-8deg); } 70% { opacity: 1; transform: translateY(-8px) scale(1.02) rotate(2deg); } to { opacity: 1; transform: none; } }
+@keyframes return-twinkle { 0%, 100% { opacity: 0; transform: scale(0); } 45% { opacity: 1; transform: scale(1.2) rotate(45deg); } }
+@keyframes postcard-to-album { to { opacity: 0; transform: translate(var(--album-x, 80px), var(--album-y, 250px)) scale(.03) rotate(8deg); } }
+@media (max-width: 360px) { .talk-bar { padding-inline: 8px; } .talk-bar .chat-input { gap: 4px; } .talk-bar .round-btn { width: 36px; height: 36px; } }
+@media (prefers-reduced-motion: reduce) {
+  .return-card, .return-envelope, .return-parcel.adding { animation: none; opacity: 1; transform: none; }
+  .return-sparkles { display: none; }
+}
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

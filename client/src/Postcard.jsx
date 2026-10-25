@@ -1,6 +1,6 @@
 // Postcards from the bear's travels: album thumbnails, postage stamps, and a
 // flip card that shows the illustration on the front and the story on the back.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "./Icons.jsx";
 
 export const RARITY_LABEL = { common: "Common", rare: "Rare", secret: "Secret", seasonal: "Seasonal" };
@@ -22,7 +22,7 @@ export function Stamp({ stamp, name, image, size = "md" }) {
 }
 
 /** Album tile. Locked cards appear as a faded silhouette with a clue. */
-export function PostcardTile({ id, place, count, onOpen, tilt = 0 }) {
+export function PostcardTile({ id, place, count, onOpen, isNew = false, tilt = 0 }) {
   if (place.hidden) {
     return (
       <div className="pc-tile secret-tile" style={{ "--tilt": `${tilt}deg` }}>
@@ -39,20 +39,28 @@ export function PostcardTile({ id, place, count, onOpen, tilt = 0 }) {
     <button type="button" className={`pc-tile ${owned ? "owned" : "faded"} rarity-${place.rarity}`} style={{ "--tilt": `${tilt}deg` }} onClick={() => onOpen(id)}
       aria-label={`${place.name} postcard${owned ? "" : ", not collected yet"}`}>
       <span className="tape" aria-hidden="true" />
+      {isNew && <span className="new-card-badge">New</span>}
       <img className="pc-photo" src={place.image} alt="" loading="lazy" draggable="false" />
       <div className="pc-caption">
         <strong>{place.name}</strong>
         <span className={`rarity-chip ${place.rarity}`}>{RARITY_LABEL[place.rarity]}</span>
         {count > 1 && <span className="count-chip">×{count}</span>}
-        {!owned && <small>{place.lockReason || `${place.cost} pts on the map`}</small>}
+        {!owned && <small>{place.lockReason || "A future adventure"}</small>}
+        <small className="album-value" title="Postcard value. Every surprise trip costs 30 points.">Album value · {place.cost} pts</small>
       </div>
     </button>
   );
 }
 
 /** Two-sided postcard. Tap to flip between picture and story. */
-export function FlipPostcard({ id, place, bearName, to, collectedAt, startFlipped = false, surprise = false }) {
-  const [flipped, setFlipped] = useState(startFlipped);
+export function FlipPostcard({ id, place, bearName, to, collectedAt, startFlipped = false, surprise = false, revealDelay }) {
+  const [flipped, setFlipped] = useState(revealDelay !== undefined || startFlipped);
+  useEffect(() => {
+    if (revealDelay === undefined) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { setFlipped(false); return; }
+    const timer = setTimeout(() => setFlipped(false), revealDelay + 1200);
+    return () => clearTimeout(timer);
+  }, [revealDelay]);
   return (
     <div className={`flip ${flipped ? "flipped" : ""} ${surprise ? "surprise" : ""}`}>
       <div className="flip-inner" role="button" tabIndex="0" onClick={() => setFlipped((f) => !f)}

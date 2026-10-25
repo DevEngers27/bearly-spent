@@ -12,7 +12,7 @@ import { actions } from "./actions.js";
 import { dayKey, weekKey } from "./time.js";
 import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
-import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, placeStatus } from "./catalog.js";
+import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, TRIP, placeStatus } from "./catalog.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -93,13 +93,13 @@ function childView(db, now = Date.now()) {
     missions: db.missions,
     transactions: db.transactions.filter((t) => t.from !== "parent" || t.to !== "parent").slice(-30).reverse(),
     notifications: db.notifications.filter((n) => n.to === "child").slice(-20).reverse(),
-    adventures: db.adventures.slice(-10).reverse(),
+    adventures: db.adventures.slice(-10).reverse().map(({ destId, ...adventure }) => adventure.status === "away" ? adventure : { ...adventure, destId }),
     postcards: db.postcards,
     friends: db.friends.filter((f) => f.status !== "declined").map(game.friendView),
     trades: db.trades.slice(-10).reverse(),
     pendingRequests: db.approvals.filter((a) => a.status === "pending" && ["spend", "extra", "reward", "task", "friend", "trade"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.title })),
     plan: db.buddy.plan,
-    chat: db.buddy.chat.slice(-30),
+    chat: db.buddy.chat,
     settings: db.settings,
     catalog: {
       // Secrets stay out of the payload until discovered.
@@ -110,6 +110,7 @@ function childView(db, now = Date.now()) {
       cosmetics: COSMETICS.map((c) => ({ ...c, unlocked: game.cosmeticUnlocked(db, c) })),
       milestones: MILESTONES,
       points: POINTS,
+      trip: TRIP,
       greetings: game.GREETINGS,
     },
     integrations: { buddy: buddyMode(), voice: voiceEnabled() ? "cartesia" : "browser", bank: nessieEnabled() ? "nessie" : "simulated" },
@@ -119,6 +120,7 @@ function childView(db, now = Date.now()) {
 function parentView(db) {
   return {
     ...childView(db),
+    adventures: db.adventures.slice(-10).reverse(),
     family: { parentName: db.family.parentName },
     accounts: db.accounts,
     allowance: db.allowance,
@@ -164,7 +166,14 @@ app.post("/api/child/extra", route((req) => act((db) => actions.extra(db, req.bo
 app.post("/api/child/lesson", route((req) => act((db) => actions.lesson(db, req.body), "lesson")));
 app.post("/api/child/budget", route((req) => act((db) => actions.budget(db, req.body), "budget")));
 app.post("/api/child/mission/:id/done", route((req) => act((db) => actions.missionDone(db, req.params.id), "mission_done")));
-app.post("/api/child/adventure", route((req) => act((db) => actions.adventure(db, req.body), "adventure")));
+app.post("/api/child/trip", route((req) => {
+  const { destId, ...adventure } = act((db) => actions.trip(db, req.body), "trip");
+  return adventure;
+}));
+app.post("/api/child/adventure", route((req) => {
+  const { destId, ...adventure } = act((db) => actions.adventure(db, req.body), "adventure");
+  return adventure;
+}));
 app.post("/api/child/cosmetic/buy", route((req) => act((db) => actions.buyCosmetic(db, req.body), "cosmetic")));
 app.post("/api/child/cosmetic/equip", route((req) => act((db) => actions.equip(db, req.body), "equip")));
 app.post("/api/child/bear/name", route((req) => act((db) => actions.renameBear(db, req.body), "rename")));

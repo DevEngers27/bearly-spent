@@ -10,7 +10,7 @@ const TABS = [
   { id: "missions", label: "Missions", icon: "star" },
   { id: "map", label: "Map", icon: "mapNav" },
   { id: "album", label: "Album", icon: "album" },
-  { id: "buddy", label: "Buddy", icon: "chat" },
+  { id: "buddy", label: "Chat", icon: "chat" },
 ];
 
 function useNow(ms = 1000) {
@@ -37,11 +37,29 @@ export default function Child({ state, toast, onGrownUps, offline }) {
   const open = (type, props = {}) => setSheet({ type, ...props });
   const close = () => setSheet(null);
   const goMap = (placeId) => { setMapFocus(placeId || null); setTab("map"); close(); };
-  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap };
-  const [seen, setSeen] = useState(() => store.get("mq_seen_adv", ""));
-  const latest = state.adventures.find((a) => a.status === "returned");
-  const reveal = latest && latest.id !== seen && Date.now() - latest.returnedAt < 10 * 60000;
-  useEffect(() => { if (reveal) setSheet(null); }, [reveal]);
+  const talk = useMapleTalk({ state, run, busy, offline });
+  const startTalk = () => { close(); setTab("home"); talk.open(); };
+  const [seen, setSeen] = useState(() => {
+    const ids = storedList("mq_seen_adv");
+    const previous = state.adventures.find((a) => a.id === ids[0]);
+    // The old app remembered only its latest reveal. Older returns were seen too.
+    if (!store.get("mq_seen_adv", "[").startsWith("[") && previous) {
+      return state.adventures.filter((a) => a.status === "returned" && a.returnedAt <= previous.returnedAt).map((a) => a.id);
+    }
+    return ids;
+  });
+  const [openedCards, setOpenedCards] = useState(() => storedList("mq_opened_cards"));
+  const newCards = state.postcards.filter((p) => p.source === "trip" && !openedCards.includes(p.id));
+  const openCard = (id) => {
+    const next = [...new Set([...openedCards, ...state.postcards.filter((p) => p.defId === id).map((p) => p.id)])];
+    store.set("mq_opened_cards", JSON.stringify(next)); setOpenedCards(next);
+    open("postcard", { id });
+  };
+  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard };
+  const latest = [...state.adventures].reverse().find((a) => a.status === "returned" && !seen.includes(a.id));
+  const reveal = Boolean(latest);
+  const revealId = latest?.id;
+  useEffect(() => { if (revealId) { setSheet(null); talk.close(); } }, [revealId]);
   const unread = state.notifications.filter((n) => !n.read).length;
 
   return (
@@ -79,21 +97,22 @@ export default function Child({ state, toast, onGrownUps, offline }) {
 
       <nav className="kid-nav" aria-label="Sections">
         {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
+          <button key={t.id} data-nav-album={t.id === "album" ? "true" : undefined} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
             <Icon name={t.icon} size={24} art={false} />
             <span>{t.label}</span>
           </button>
         ))}
       </nav>
 
+      {tab === "home" && talk.isOpen && !sheet && !reveal && <TalkBar {...ctx} />}
       {sheet && !reveal && <SheetRouter sheet={sheet} {...ctx} />}
-      {reveal && <ReturnReveal state={state} latest={latest} onSeen={() => { store.set("mq_seen_adv", latest.id); setSeen(latest.id); }} onDone={() => setTab("album")} />}
+      {reveal && <ReturnReveal key={latest.id} state={state} latest={latest} onSeen={() => { const next = [...seen, latest.id]; store.set("mq_seen_adv", JSON.stringify(next)); setSeen(next); }} onDone={() => setTab("album")} />}
     </div>
   );
 }
 
 // ------------------------------------------------------------------ sheets
-function Sheet({ title, onClose, children, tall }) {
+function Sheet({ title, onClose, children, tall, fullscreen }) {
   const ref = useRef(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -119,12 +138,12 @@ function Sheet({ title, onClose, children, tall }) {
     };
   }, []);
   return (
-    <div className="sheet-bg" onClick={onClose}>
-      <section className={`sheet ${tall ? "tall" : ""}`} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} ref={ref} tabIndex="-1">
+    <div className={`sheet-bg ${fullscreen ? "return-bg" : ""}`} onClick={fullscreen ? undefined : onClose}>
+      <section className={`sheet ${tall ? "tall" : ""} ${fullscreen ? "return-dialog" : ""}`} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} ref={ref} tabIndex="-1">
         <div className="grabber" aria-hidden="true" />
         <div className="sheet-head">
           <h2>{title}</h2>
-          <button className="round-btn small" onClick={onClose} aria-label="Close"><Icon name="close" size={16} /></button>
+          {!fullscreen && <button className="round-btn small" onClick={onClose} aria-label="Close"><Icon name="close" size={16} /></button>}
         </div>
         <div className="sheet-body">{children}</div>
       </section>
@@ -135,6 +154,7 @@ function Sheet({ title, onClose, children, tall }) {
 function SheetRouter({ sheet, ...ctx }) {
   const { state, close } = ctx;
   switch (sheet.type) {
+    case "chat": return <Sheet title="Our chat" onClose={close} tall><Buddy {...ctx} transcriptOnly /></Sheet>;
     case "money": return <MoneySheet {...ctx} start={sheet.start} />;
     case "dress": return <DressSheet {...ctx} />;
     case "lesson": return <LessonSheet {...ctx} lesson={sheet.lesson} />;
@@ -182,22 +202,19 @@ function nextUp(state, now) {
   }
   const waiting = state.parentGoals.find((g) => g.status === "awaiting_approval");
   if (waiting) items.push({ id: "wait", icon: "hourglass", text: `Your grown-up is checking "${waiting.title}"` });
-  const openPlaces = Object.values(state.catalog.places).filter((p) => p.open && !p.hidden);
-  const cheapest = Math.min(...openPlaces.map((p) => p.cost));
-  if (!state.adventures.some((a) => a.status === "away") && state.child.points >= cheapest)
-    items.push({ id: "trip", icon: "map", text: `You have ${state.child.points} points. Pick a trip!`, cta: "Open map", tab: "map" });
   if (state.child.lastSaveDay !== today) items.push({ id: "save", icon: "honey", text: "Save a little today for +30 points", cta: "Save", tab: "save" });
   const lesson = state.catalog.lessons.find((l) => !state.child.lessonsDone.includes(l.id));
   if (lesson) items.push({ id: "lesson", icon: lesson.icon, text: `Try the "${lesson.title}" lesson`, cta: "Start", lesson });
   return items.slice(0, 2);
 }
 
-function Home({ state, setTab, open }) {
+function Home({ state, setTab, open, run, busy, talk }) {
   const now = useNow();
   const goal = state.goals[0];
   const away = state.adventures.find((a) => a.status === "away");
-  const dest = away && state.catalog.places[away.destId];
-  const mood = moodFor(state, now);
+  const mood = talk?.mood || moodFor(state, now);
+  const tripCost = state.catalog.trip?.cost ?? 30;
+  const short = tripCost - state.child.points;
   const scale = bearScale(state.balances.savings, goal?.target || 10000);
   const pct = goal ? Math.min(100, (state.balances.savings / goal.target) * 100) : 0;
   const stage = [...state.catalog.milestones].reverse().find((m) => state.child.milestonesUnlocked.includes(m.at));
@@ -209,29 +226,39 @@ function Home({ state, setTab, open }) {
       <section className={`scene bg-${state.child.bear.background}`} aria-label={`${state.child.bear.name}'s home`}>
         <SceneBackdrop scene={state.child.bear.background} />
         {away ? (
-          <>
-            <div className="away-note">
-              <span className="pin-tape" aria-hidden="true" />
-              <p className="hand">Gone to {dest.name}!</p>
-              <p>Back in {Math.max(0, Math.ceil((away.returnsAt - now) / 1000))}s</p>
-              <button className="btn ghost small" onClick={() => setTab("map")}>Watch on map</button>
-            </div>
-            <div className="walking-away" aria-hidden="true">
-              <BearFigure bear={state.child.bear} pose="back" size={92} />
-              <span className="paws"><Icon name="paws" size={28} /></span>
-            </div>
-          </>
+          <button className="trip-sign" onClick={() => talk?.open()} aria-label={`On a trip. ${countdown(away.returnsAt, now)}`}>
+            <svg viewBox="0 0 260 240" aria-hidden="true">
+              <g filter="url(#mq-wobble)">
+                <path d="M118 95 L140 94 L144 234 L115 234 Z" fill="#9C6A40" stroke="#514738" strokeWidth="3" />
+                <path d="M12 22 L247 17 L244 132 L14 138 Z" fill="#D8AD73" stroke="#514738" strokeWidth="3" />
+                <path d="M28 35 Q115 28 226 32 M29 121 Q130 115 226 118" fill="none" stroke="#B77E50" strokeWidth="2" />
+                <circle cx="26" cy="48" r="3" fill="#514738" /><circle cx="230" cy="109" r="3" fill="#514738" />
+              </g>
+              <text x="130" y="68" textAnchor="middle" className="sign-title">On a trip</text>
+              <text x="130" y="103" textAnchor="middle" className="sign-time">{countdown(away.returnsAt, now)}</text>
+            </svg>
+          </button>
         ) : (
-          <button className="bear-btn" style={{ "--scale": scale }} onClick={() => open("dress")} aria-label={`Dress up ${state.child.bear.name}`}>
+          <button className="bear-btn" style={{ "--scale": scale }} onClick={() => talk?.open()} aria-label={`Talk to ${state.child.bear.name}`}>
             <BearFigure bear={state.child.bear} mood={mood} size={196} />
           </button>
         )}
+        {talk?.bubble && <SpeechBubble text={away && talk.bubble.startsWith(`${state.child.bear.name} is on a trip!`) ? `${state.child.bear.name} is on a trip! ${countdown(away.returnsAt, now)}` : talk.bubble} thinking={mood === "thinking"} />}
         <div className="name-sticker">
           <strong>{state.child.bear.name}</strong>
           <span>{stage ? `${stage.label} bear` : "Little cub"}</span>
         </div>
-        {!away && <span className="tap-hint">Tap to dress up</span>}
+        {!away && <span className="tap-hint">Tap to talk</span>}
       </section>
+
+      <div className="home-tools">
+        <button className="chip" onClick={() => talk?.open()}>Talk to {state.child.bear.name}</button>
+        <button className="chip" onClick={() => open("dress")}><Icon name="hat" size={18} /> Dress up</button>
+      </div>
+      <button className="btn honey wide trip-launch" disabled={busy || Boolean(away) || short > 0} onClick={() => run("child/trip", {}, `${state.child.bear.name} packed a little bag!`)}>
+        {away ? "On a trip" : short > 0 ? `Earn ${short} more points` : <>Send {state.child.bear.name} on a trip · <Icon name="sparkle" size={19} art={false} />{tripCost}</>}
+      </button>
+      <p className="fine center trip-caption">A surprise postcard for your album. Points, never savings.</p>
 
       {goal ? <section className="paper-card jar-card">
         <div className="jar-row">
@@ -281,10 +308,10 @@ function Home({ state, setTab, open }) {
 
       <section className="paper-card note-card">
         <span className="tape" aria-hidden="true" />
-        <h3 className="hand">A note from Money Buddy</h3>
+        <h3 className="hand">A note from {state.child.bear.name}</h3>
         <p>{state.plan?.summary || "Ask me to help you make a saving plan!"}</p>
         {state.plan?.steps?.length > 0 && <ul className="steps">{state.plan.steps.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}</ul>}
-        <button className="link" onClick={() => setTab("buddy")}>Chat with Money Buddy</button>
+        <button className="link" onClick={() => talk?.open()}>Talk to {state.child.bear.name}</button>
       </section>
     </div>
   );
@@ -562,7 +589,7 @@ function BudgetSheet({ run, close, busy }) {
 // ------------------------------------------------------------------ map
 function MapScreen({ state, open, focus, clearFocus }) {
   const now = useNow(250);
-  const owned = useMemo(() => new Set(state.postcards.map((p) => p.defId)), [state.postcards]);
+  const owned = useMemo(() => new Set(state.postcards.filter((p) => p.source === "trip" || (!p.source && !p.from)).map((p) => p.defId)), [state.postcards]);
   const away = state.adventures.find((a) => a.status === "away");
   const frameRef = useRef(null);
   const interacting = useRef({ pointer: false, touch: false });
@@ -599,13 +626,13 @@ function MapScreen({ state, open, focus, clearFocus }) {
   return (
     <div className="page">
       <div className="row">
-        <h1 className="page-title">Adventure map</h1>
+        <h1 className="page-title">{state.child.bear.name}'s travels</h1>
         <span className="stat-stamp"><Icon name="sparkle" size={16} />{state.child.points} pts</span>
       </div>
-      <p className="lede">Tap a place to send {state.child.bear.name} on a trip. Trips cost points, never savings.</p>
+      <p className="lede">Every postcard holds a little story. Tap a pin to explore.</p>
       {away && (
         <div className="away-banner" role="status">
-          <Icon name="backpack" size={22} /> {state.child.bear.name} is {now - away.startedAt < (away.returnsAt - away.startedAt) / 2 ? "walking to" : "heading home from"} {places[away.destId].name} · {Math.max(0, Math.ceil((away.returnsAt - now) / 1000))}s
+          <Icon name="backpack" size={22} /> {state.child.bear.name} is on a surprise trip. {countdown(away.returnsAt, now)}
         </div>
       )}
       <p className="fine map-hint">Drag the map sideways to explore.</p>
@@ -620,7 +647,7 @@ function MapScreen({ state, open, focus, clearFocus }) {
         <MapView places={places} home={state.catalog.home} owned={owned} away={away} now={now} bear={state.child.bear} onSelect={(id) => open("place", { id })} />
       </div>
       <div className="legend">
-        <span><i className="lg open" /> Ready to visit</span>
+        <span><i className="lg open" /> A future adventure</span>
         <span><i className="lg visited" /> Visited</span>
         <span><i className="lg locked" /> Locked</span>
         <span>{Object.keys(places).filter((id) => owned.has(id)).length} of {Object.keys(places).length} places</span>
@@ -629,10 +656,10 @@ function MapScreen({ state, open, focus, clearFocus }) {
   );
 }
 
-function PlaceSheet({ id, state, run, close, open, busy }) {
+function PlaceSheet({ id, state, close, openCard }) {
   const p = state.catalog.places[id];
   const owned = state.postcards.some((c) => c.defId === id);
-  const away = state.adventures.find((a) => a.status === "away");
+  const visits = state.postcards.filter((c) => c.defId === id && c.source === "trip").length;
   if (p.hidden) {
     return (
       <Sheet title="A secret place" onClose={close}>
@@ -642,10 +669,6 @@ function PlaceSheet({ id, state, run, close, open, busy }) {
       </Sheet>
     );
   }
-  const short = p.cost - state.child.points;
-  const send = async () => {
-    if (await run("child/adventure", { destId: id }, `${state.child.bear.name} packed the backpack!`)) close();
-  };
   return (
     <Sheet title={p.name} onClose={close}>
       <div className={`place-photo ${owned ? "" : "faded"}`}>
@@ -655,17 +678,11 @@ function PlaceSheet({ id, state, run, close, open, busy }) {
       <div className="place-meta">
         <span>{p.state}</span>
         <span className={`rarity-chip ${p.rarity}`}>{RARITY_LABEL[p.rarity]}</span>
-        <span className="cost"><Icon name="sparkle" size={18} /> {p.cost}</span>
       </div>
-      {owned && <p className="story">{storyFor(p, state.child.bear.name)}</p>}
+      {owned && <><Stamp stamp={p.stamp} name={p.name} image={p.image} /><p className="story">{storyFor(p, state.child.bear.name)}</p><p className="fine">{visits ? `Visited ${visits} ${visits === 1 ? "time" : "times"}` : "A postcard from a friend. Maybe Maple will visit one day!"}</p></>}
+      {!owned && p.open && <p className="hand">{p.clue || `A little adventure in ${p.state}.`}</p>}
       {!p.open && <p className="lock-note"><Icon name="lock" size={20} /> {p.lockReason}{p.progress ? ` (${p.progress})` : ""}</p>}
-      {p.open && (
-        <button className="btn honey wide" disabled={busy || Boolean(away) || short > 0} onClick={send}>
-          {away ? `${state.child.bear.name} is already traveling` : short > 0 ? `Earn ${short} more points` : <>Send {state.child.bear.name} · <Icon name="sparkle" size={16} /> {p.cost}</>}
-        </button>
-      )}
-      {short > 0 && p.open && !away && <p className="fine">Missions and lessons earn points.</p>}
-      {owned && <button className="link" onClick={() => open("postcard", { id })}>See my postcard</button>}
+      {owned && <button className="link" onClick={() => openCard(id)}>See my postcard</button>}
     </Sheet>
   );
 }
@@ -673,24 +690,49 @@ function PlaceSheet({ id, state, run, close, open, busy }) {
 // ------------------------------------------------------------------ return reveal
 function ReturnReveal({ state, latest, onSeen, onDone }) {
   const cards = state.postcards.filter((p) => latest.postcardIds.includes(p.id));
-  const finish = (go) => {
-    onSeen();
-    if (go) onDone();
+  const [adding, setAdding] = useState(false);
+  const parcel = useRef(null);
+  const finishing = useRef(false);
+  const doneRef = useRef(null);
+  doneRef.current = () => { onSeen(); onDone(); };
+  useEffect(() => {
+    if (!adding) return;
+    const timer = setTimeout(() => doneRef.current(), window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 700);
+    return () => clearTimeout(timer);
+  }, [adding]);
+  const add = () => {
+    if (finishing.current) return;
+    finishing.current = true;
+    const target = document.querySelector('[data-nav-album="true"]')?.getBoundingClientRect();
+    const from = parcel.current?.getBoundingClientRect();
+    if (target && from) {
+      parcel.current.style.setProperty("--album-x", `${target.left + target.width / 2 - from.left - from.width / 2}px`);
+      parcel.current.style.setProperty("--album-y", `${target.top + target.height / 2 - from.top - from.height / 2}px`);
+    }
+    setAdding(true);
   };
   return (
-    <Sheet title={`${state.child.bear.name} is home!`} onClose={() => finish(false)} tall>
-      <div className="reveal-hero">
-        <BearFigure bear={state.child.bear} pose="threeQuarter" size={96} />
-        <p className="lede">{cards.length > 1 ? "A postcard… and a surprise! Tap each card to turn it over." : "A postcard arrived! Tap it to turn it over."}</p>
+    <Sheet title={`${state.child.bear.name} is home!`} onClose={add} fullscreen>
+      <p className="center">A little adventure, just for you.</p>
+      <div className={`return-parcel ${adding ? "adding" : ""}`} ref={parcel}>
+        <svg className="return-envelope" viewBox="0 0 320 190" aria-hidden="true"><g filter="url(#mq-wobble)">
+          <path d="M8 40 L160 3 L312 40 V181 H8 Z" fill="#E8CB9C" stroke="#514738" strokeWidth="3" />
+          <path d="M8 40 L160 130 L312 40 V181 H8 Z" fill="#F3E9D2" stroke="#514738" strokeWidth="3" />
+          <path d="M8 181 L122 105 M312 181 L200 105" stroke="#B77E50" strokeWidth="2" />
+        </g></svg>
+        <div className="return-sparkles" aria-hidden="true"><i /><i /><i /><i /></div>
+        <div className="reveal-stack">
+          {cards.map((c, i) => (
+            <div key={c.id} className="return-card" style={{ "--delay": `${i * 2400}ms` }}>
+              {i > 0 && <p className="hand surprise-title">…and a surprise!</p>}
+              <FlipPostcard id={c.defId} place={state.catalog.places[c.defId]} bearName={state.child.bear.name} to={state.child.name} collectedAt={c.collectedAt} surprise={i > 0} revealDelay={i * 2400} />
+              <h2 className="hand">{state.catalog.places[c.defId].name}</h2>
+              <p className="story">{storyFor(state.catalog.places[c.defId], state.child.bear.name)}</p>
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="reveal-stack">
-        {cards.map((c, i) => (
-          <div key={c.id} className="reveal-item" style={{ animationDelay: `${i * 500}ms` }}>
-            <FlipPostcard id={c.defId} place={state.catalog.places[c.defId]} bearName={state.child.bear.name} to={state.child.name} collectedAt={c.collectedAt} surprise={i > 0} />
-          </div>
-        ))}
-      </div>
-      <button className="btn honey wide" onClick={() => finish(true)}>Put in my album</button>
+      <button className="btn honey wide" disabled={adding} onClick={add}>Add to album</button>
     </Sheet>
   );
 }
@@ -698,7 +740,7 @@ function ReturnReveal({ state, latest, onSeen, onDone }) {
 // ------------------------------------------------------------------ album
 const GROUPS = [["common", "Cities & parks"], ["rare", "Rare finds"], ["seasonal", "Seasonal"], ["secret", "Secret places"]];
 
-function Album({ state, open, goMap, run, busy }) {
+function Album({ state, open, goMap, run, busy, newCards = [], openCard }) {
   const [view, setView] = useState("mine");
   const counts = useMemo(() => {
     const m = {};
@@ -735,8 +777,8 @@ function Album({ state, open, goMap, run, busy }) {
                 <h2 className="hand section-title">{label}</h2>
                 <div className="album-grid">
                   {ids.map((id, i) => (
-                    <PostcardTile key={id} id={id} place={places[id]} count={counts[id] || 0} tilt={[-1.5, 1, -0.5, 1.4, -1][i % 5]}
-                      onOpen={(pid) => (counts[pid] ? open("postcard", { id: pid }) : goMap(pid))} />
+                    <PostcardTile key={id} id={id} place={places[id]} count={counts[id] || 0} isNew={newCards.some((c) => c.defId === id)} tilt={[-1.5, 1, -0.5, 1.4, -1][i % 5]}
+                      onOpen={(pid) => (counts[pid] ? openCard(pid) : goMap(pid))} />
                   ))}
                 </div>
               </section>
@@ -868,74 +910,195 @@ async function playBlob(blob) {
 
 // Cartesia: get a short-lived token from our server, call Cartesia directly
 // from the browser; if that fails, use the server proxy; then browser speech.
-async function speak(text, mode) {
+async function speak(text, mode, allowed = () => true) {
+  if (!allowed()) return;
   const clean = text.replace(/[*_#]/g, "").slice(0, 600);
   if (mode === "cartesia") {
     try {
       const t = await fetch("/api/voice/token", { method: "POST" });
       if (t.ok) {
         const { token, version, request } = await t.json();
+        if (!allowed()) return;
         const res = await fetch("https://api.cartesia.ai/tts/bytes", {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Cartesia-Version": version, "Content-Type": "application/json" },
           body: JSON.stringify({ ...request, transcript: clean }),
         });
-        if (res.ok) return await playBlob(await res.blob());
+        if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
       }
     } catch {}
+    if (!allowed()) return;
     try {
       const res = await fetch("/api/buddy/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: clean }) });
-      if (res.ok) return await playBlob(await res.blob());
+      if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
     } catch {}
   }
-  speakBrowser(clean);
+  if (allowed()) speakBrowser(clean);
 }
 
-function Buddy({ state, run, busy, offline }) {
-  const [text, setText] = useState("");
-  const [voice, setVoice] = useState(false);
+function Buddy({ state, run, busy, offline, startTalk, transcriptOnly }) {
   const chatRef = useRef(null);
   const chat = state.chat;
-  // Scroll only the chat box (not the page) to the newest message.
   useEffect(() => {
     const el = chatRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [chat.length, busy]);
-  const goal = state.goals[0];
-  const send = async (msg) => {
-    if (!msg.trim() || busy) return;
-    setText("");
-    const r = await run("buddy/chat", { text: msg });
-    if (r && voice) run(() => speak(r.reply, state.integrations.voice));
-  };
-  const suggestions = [`Can I buy a $50 game?`, goal ? `When will I get my ${goal.title.toLowerCase()}?` : "Help me choose a savings goal", "Make me a saving plan", "What's a need vs. a want?"];
+  }, [chat.length]);
   return (
     <div className="page buddy">
-      <div className="row">
-        <h1 className="page-title">Money Buddy</h1>
-        <label className="toggle"><input type="checkbox" checked={voice} onChange={(e) => setVoice(e.target.checked)} /> Read aloud</label>
-      </div>
-      {!goal && <section className="paper-card"><h2 className="hand">Set a savings goal</h2><p>Ask your grown-up to help choose one.</p></section>}
-      {!state.settings.buddyEnabled && <p className="lock-note">Your grown-up turned Money Buddy off for now.</p>}
-      <div className="chat" aria-live="polite" ref={chatRef}>
-        {chat.length === 0 && <div className="msg assistant">Hi {state.child.name}! I'm Money Buddy. Ask me about saving, spending, or {goal ? `your ${goal.title.toLowerCase()}` : "a new savings goal"}.</div>}
+      {!transcriptOnly && <h1 className="page-title">Our chat</h1>}
+      {!state.goals[0] && <section className="paper-card"><h2 className="hand">Set a savings goal</h2><p>Ask your grown-up to help choose one.</p></section>}
+      <div className="chat" ref={chatRef}>
+        {chat.length === 0 && <p className="msg assistant">Our chats will be right here. What would you like to know?</p>}
         {chat.map((m) => (
           <div key={m.id} className={`msg ${m.role} ${m.auto ? "auto" : ""}`}>
-            {m.auto && <small className="auto-tag">Plan update</small>}
+            <small>{m.role === "user" ? "You" : state.child.bear.name}{m.auto ? " · Plan update" : ""}</small>
             {m.text.split("\n").filter(Boolean).map((line, i) => <p key={i}>{line}</p>)}
-            {m.role === "assistant" && <button className="speak" disabled={busy} onClick={() => run(() => speak(m.text, state.integrations.voice))} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
+            {m.role === "assistant" && <button className="speak" disabled={busy || offline} onClick={() => run(() => speak(m.text, state.integrations.voice))} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
           </div>
         ))}
-        {busy && !offline && <div className="msg assistant typing" aria-label="Money Buddy is thinking"><span /><span /><span /></div>}
       </div>
-      <div className="chips scroll">
-        {suggestions.map((s) => <button key={s} className="chip" onClick={() => send(s)} disabled={busy}>{s}</button>)}
+      <p className="fine">Money Buddy explains and plans. It can't move money, and your grown-up can read these chats.</p>
+      <p className="fine">Keep passwords, phone numbers and addresses private. We hide those details if you share them.</p>
+      <button className="btn honey" onClick={startTalk}>Talk to {state.child.bear.name}</button>
+    </div>
+  );
+}
+
+function storedList(key) {
+  const raw = store.get(key, "[]");
+  try { const value = JSON.parse(raw); return Array.isArray(value) ? value : []; }
+  catch { return raw ? [raw] : []; } // wave 1 stored just the latest adventure id
+}
+
+function countdown(returnsAt, now) {
+  const seconds = Math.max(0, Math.ceil((returnsAt - now) / 1000));
+  return seconds ? `Back in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : "Any second now…";
+}
+
+function stopSpeaking() {
+  currentAudio?.pause();
+  window.speechSynthesis?.cancel();
+}
+
+function useMapleTalk({ state, run, busy, offline }) {
+  const [isOpen, setOpen] = useState(false);
+  const [bubble, setBubble] = useState("");
+  const [mood, setMood] = useState(null);
+  const [muted, setMuted] = useState(() => store.get("mq_muted", "false") === "true");
+  const turn = useRef(0);
+  const inflight = useRef(false);
+  const latest = useRef(null);
+  const away = state.adventures.find((a) => a.status === "away");
+  latest.current = { offline, away, enabled: state.settings.buddyEnabled, muted };
+  const allowed = () => !latest.current.offline && !latest.current.away && latest.current.enabled;
+  const close = () => setOpen(false);
+  useEffect(() => {
+    if (!offline && !away && state.settings.buddyEnabled) return;
+    setOpen(false); setBubble(""); setMood(null); turn.current++; stopSpeaking();
+  }, [offline, away?.id, state.settings.buddyEnabled]);
+  useEffect(() => () => { turn.current++; stopSpeaking(); }, []);
+  const open = () => {
+    if (offline) { setBubble("I can't chat while we're offline, but your postcards are right here!"); setMood("resting"); return; }
+    if (away) { setBubble(`${state.child.bear.name} is on a trip! ${countdown(away.returnsAt, Date.now())}`); return; }
+    if (!state.settings.buddyEnabled) { setBubble("My grown-up switched chatting off for now."); setMood("resting"); return; }
+    setOpen(true);
+  };
+  const send = async (text) => {
+    if (!text.trim() || busy || inflight.current || !allowed()) return false;
+    inflight.current = true;
+    const id = ++turn.current;
+    stopSpeaking(); setMood("thinking"); setBubble("…");
+    try {
+      const result = await run("buddy/chat", { text: text.trim() });
+      if (id !== turn.current || !allowed()) return false;
+      if (!result) { setMood("resting"); setBubble("Let's try that again in a moment."); return false; }
+      setBubble(result.reply);
+      setMood(/Hmm|trusted grown-up|quick answer|ask.*again/i.test(result.reply) ? "resting" : "happy");
+      const maySpeak = () => id === turn.current && allowed() && !latest.current.muted;
+      if (maySpeak()) speak(result.reply, state.integrations.voice, maySpeak).catch(() => {});
+      return true;
+    } finally { inflight.current = false; }
+  };
+  const toggleMute = () => {
+    const next = !muted;
+    latest.current.muted = next;
+    setMuted(next); store.set("mq_muted", String(next));
+    if (next) stopSpeaking();
+  };
+  return { isOpen, bubble, mood, muted, open, close, send, toggleMute };
+}
+
+function SpeechBubble({ text, thinking }) {
+  const [shown, setShown] = useState("");
+  useEffect(() => {
+    if (thinking || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { setShown(text); return; }
+    setShown("");
+    let n = 0;
+    const timer = setInterval(() => {
+      n = Math.min(text.length, n + 4);
+      setShown(text.slice(0, n));
+      if (n === text.length) clearInterval(timer);
+    }, 18);
+    return () => clearInterval(timer);
+  }, [text, thinking]);
+  return (
+    <div className="bear-bubble" aria-live="polite" aria-atomic="true">
+      <svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true"><path d="M12 4 Q0 6 4 28 L4 70 Q4 82 22 82 H120 L139 97 L143 82 H278 Q296 82 296 65 V21 Q296 4 278 4 Z" fill="#FFFDF7" stroke="#514738" strokeWidth="2" filter="url(#mq-wobble)" /></svg>
+      <span className="sr-only">{text}</span><span aria-hidden="true">{shown || "\u00a0"}</span>
+    </div>
+  );
+}
+
+function TalkBar({ state, talk, busy, open }) {
+  const [text, setText] = useState("");
+  const [listening, setListening] = useState(false);
+  const input = useRef(null);
+  const recognition = useRef(null);
+  const closeRef = useRef(talk.close);
+  closeRef.current = talk.close;
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  useEffect(() => {
+    const previous = document.activeElement;
+    input.current?.focus();
+    const escape = (e) => { if (e.key === "Escape") closeRef.current(); };
+    window.addEventListener("keydown", escape);
+    return () => { recognition.current?.abort(); window.removeEventListener("keydown", escape); previous?.focus?.(); };
+  }, []);
+  useEffect(() => { if (busy) { recognition.current?.abort(); setListening(false); } }, [busy]);
+  const send = async (msg) => {
+    if (await talk.send(msg)) setText((current) => current === msg ? "" : current);
+    input.current?.focus();
+  };
+  const stop = () => { recognition.current?.stop(); setListening(false); };
+  const listen = () => {
+    if (!Recognition || busy || recognition.current) return;
+    const session = new Recognition();
+    recognition.current = session;
+    session.lang = "en-US";
+    session.interimResults = true;
+    session.onresult = (event) => setText(Array.from(event.results).map((r) => r[0].transcript).join(" ").slice(0, 500));
+    session.onerror = session.onend = () => { recognition.current = null; setListening(false); };
+    try { session.start(); setListening(true); } catch { recognition.current = null; setListening(false); }
+  };
+  const suggestions = ["Can I buy a $15 toy?", "When will I get my bike?", "Make me a saving plan"];
+  return (
+    <section className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
+      <div className="talk-links">
+        <button className="link" onClick={() => open("chat")}>See our chat</button>
+        <button className="round-btn small" aria-label={`${talk.muted ? "Unmute" : "Mute"} ${state.child.bear.name}`} aria-pressed={talk.muted} onClick={talk.toggleMute}><Icon name="speaker" size={18} />{talk.muted && <span aria-hidden="true">/</span>}</button>
+        <button className="round-btn small" onClick={talk.close} aria-label="Close talk bar"><Icon name="close" size={16} /></button>
       </div>
+      <div className="chips scroll">{suggestions.map((s) => <button type="button" key={s} className="chip" disabled={busy} onClick={() => send(s)}>{s}</button>)}</div>
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(text); }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask Money Buddy…" maxLength={500} aria-label="Message Money Buddy" />
+        <input ref={input} value={text} onChange={(e) => setText(e.target.value)} maxLength={500} placeholder={`Ask ${state.child.bear.name}…`} aria-label={`Message ${state.child.bear.name}`} />
+        {Recognition && <button type="button" className={`round-btn mic ${listening ? "listening" : ""}`} disabled={busy} aria-label="Hold to talk" aria-pressed={listening}
+          onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); listen(); }} onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop} onBlur={stop}
+          onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); if (!e.repeat) listen(); } }} onKeyUp={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); stop(); } }}>
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" fill="#E4AD58" stroke="currentColor" strokeWidth="2" /><path d="M6 10v2a6 6 0 0 0 12 0v-2M12 18v3M8 21h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+        </button>}
         <button className="btn honey" disabled={busy || !text.trim()}>Send</button>
       </form>
-      <p className="fine">Money Buddy explains and plans. It can't move money, and your grown-up can read these chats.{state.integrations.buddy === "offline" ? " (Offline mode)" : ""}</p>
-    </div>
+      {listening && <p className="fine" role="status">Listening… let go when you're done.</p>}
+    </section>
   );
 }

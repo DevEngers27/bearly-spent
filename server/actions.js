@@ -36,6 +36,7 @@ export const actions = {
     return game.completeLesson(db, lessonId, body.answers);
   }),
   missionDone: (db, missionId) => game.childMarkMissionDone(db, id(missionId)),
+  trip: action((db) => game.startTrip(db)),
   adventure: action((db, body) => game.startAdventure(db, id(body.destId))),
   buyCosmetic: action((db, body) => game.buyCosmetic(db, id(body.id))),
   equip: action((db, body) => game.equip(db, id(body.kind), body.value === null ? null : id(body.value))),
