@@ -1,9 +1,10 @@
 # Apple Cash tracking
 
 MoneyQuest records Apple Cash activity; it does not connect to an Apple Cash API,
-send money or read the actual Wallet balance. Apple Cash money comes from your
-grown-up's funding: allowance and recorded Apple Cash purchases use the same
-funding account. Add money in Allowance to record funds set aside for your child.
+send money or read the actual Wallet balance. Apple Cash purchases come out of the
+child's Savings. If Savings is short, the missing amount is added automatically
+as money received from the grown-up, who gets a note. Allowance is recorded
+straight into Savings and Spending on schedule.
 Use only the Apple Cash card in your automation, not every card in Wallet.
 
 ## Create the child's Shortcut token
@@ -87,57 +88,33 @@ A successful phone ping checks the token and connection. Check the next real
 purchase against the ledger to verify the transaction automation too.
 401 means revoked/expired credentials; generate a new token and update the phone.
 
-## Funding and manual purchases
+## Savings and manual purchases
 
-Use **Allowance → Add money** to record money set aside for your child. Funding
-covers both allowance and Apple Cash purchases. There is no separate Apple Cash
-account or Send via Apple Cash form; the former send route returns HTTP 410.
-Check the actual balance and payments in Wallet yourself.
+Use **Allowance → Send money** to record money you gave your child. It credits
+Savings immediately and notifies the child. The kid can record the same payment
+in **My money → Received**; coordinate so only one person records each payment.
+These forms accept $0.01–$500 and an optional note up to 60 characters.
 
 The child can use **My money → Spent → Paid with → Apple Cash** (the default) to
-record a purchase manually, or choose **Spending money** for that pot. The sheet
-shows the selected source's available amount and disables Record when short.
+record a purchase manually, or choose **Spending money** for that account. Apple
+Cash may exceed Savings: the shortfall is added just before the full purchase,
+leaving Savings at $0.00. Spending money purchases still require enough Spending.
 Avoid manually logging any purchase the automation already recorded: manual
-entries have no shared external ID and cannot be automatically matched.
+entries cannot be automatically matched to a Shortcut entry. Manual Spent,
+Received and Send money forms generate a UUID `clientId` on opening and reuse it
+on retries. The kid is warned about the same kind and amount within two minutes.
 Apple Cash entries are tagged in Recent, parent Transactions and Apple Cash activity.
 
-A covered purchase records `parent → merchant`, kind `wallet_spend`. Purchases
-above the purchase limit notify the parent and still record, because they already
-happened; G4 also flags unusual purchases. Short funding never posts a transfer
-or makes funding negative. Instead, the server keeps a pending receipt (latest
-20) and notifies the parent once. Inbox has **Add money**, **Record now**, and
-**Dismiss**. After adding funds, Record now posts exactly once; retrying the
-original Shortcut ID returns the same transaction. Dismiss is audited and that
-external ID will not post on later retries. Apple Cash activity lists pending
-receipts as **waiting for funding**, plus weekly/monthly spending totals.
+Every purchase records `savings → merchant`, kind `wallet_spend`. A shortfall posts
+a `received` credit first, source `auto_cover`, note “Added to cover an Apple Cash
+purchase”. The parent gets one cover notice per purchase. Purchases above the
+limit still record and notify; G4 also flags unusual spending. No approval hold.
 
-| HTTP | Meaning | What to do |
-| --- | --- | --- |
-| 200 | Recorded; `duplicate:true` means already recorded. A dismissed receipt returns `status:"dismissed"` without a debit. | Finish; do not submit a new ID. |
-| 409 | `{error,reason:"funding_short",shortBy}`; shortBy is cents; receipt saved, no debit. | Ask the parent to Add money and Record now, or retry the original body and external ID after funding. |
-| 429 | Quota used; `Retry-After` header and `retryAfterSeconds` give the wait. | Keep the purchase and original ID; retry after the delay. |
+| HTTP response | Meaning |
+| --- | --- |
+| 200 `{recorded:true,covered:N,...}` | Recorded, including retries. `covered` is the shortfall added in cents (0 when Savings covered it). Reuse the original external ID on retry. |
+| 429 `{error,retryAfterSeconds}` | Wait for `Retry-After`, then retry the original body and external ID. No purchase posted for this rejected request. |
 
-The original receipt details win if a retry changes its payload. Receipt keys
-survive retention and restart; purchases older than the pending list cap can
-still be retried with their original external ID once funded. Old sent-money
-history is labeled **Sent via Apple Cash (before 0.7)**. Migration moves positive
-legacy Apple Cash balances to funding, drops negative tracked balances, and audits
-the change.
-
-## Token API
-
-- `GET /api/child/wallet/token?child=...`: unlocked parent **with a configured
-  PIN**; returns `{token:null,id,expiresAt,lastPing,connected}` for an active Shortcut, or null ID/time.
-  GET never creates or rotates a credential. `lastPing` is a timestamp or null;
-  `connected` requires a ping since the active token was issued. Rotation starts
-  disconnected until the next phone test.
-- `POST /api/child/wallet/token?child=...` with `{}`: same authorization;
-  atomically revokes prior Shortcut sessions and returns `{token,id,expiresAt,lastPing,connected}`.
-  This is the only response that exposes the raw token. Store only the hash.
-- `POST /api/child/wallet/ping` with `{}`: ordinary child authorization, including
-  a child's Bearer token. Tests credentials and records connection time only.
-- `POST /api/child/wallet/spend`: ordinary child authorization; body above.
-
-Parents may select children with `?child=`. A child token always stays bound to
-its own child. These tracking routes work for real families and are not demo
-controls. Demo-only top-up/reset/fault routes retain their existing gates.
+The old funding top-up, Apple Cash send and pending record/dismiss routes return
+410. Existing waiting receipts are recorded automatically from Savings during
+migration. Historical transactions keep their original labels.

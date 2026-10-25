@@ -23,12 +23,12 @@ export function transfer(db, { from, to, amount, kind, memo, idempotencyKey, ts 
     if (existing) return { txn: existing, duplicate: true };
   }
   const src = db.accounts[from];
-  if (!src) throw new BankError("bad_account", `Unknown account ${from}`);
-  if (src.balance < amount) throw new BankError("insufficient_funds", `${src.label} has insufficient funds`);
+  if (!src && from !== "external") throw new BankError("bad_account", `Unknown account ${from}`);
+  if (src && src.balance < amount) throw new BankError("insufficient_funds", `${src.label} has insufficient funds`);
   const dst = to === "merchant" ? null : db.accounts[to];
   if (to !== "merchant" && !dst) throw new BankError("bad_account", `Unknown account ${to}`);
 
-  src.balance -= amount;
+  if (src) src.balance -= amount;
   if (dst) dst.balance += amount;
   const txn = { id: uid("txn"), ts, from, to, amount, kind, memo, idempotencyKey: idempotencyKey || null, status: "posted" };
   db.transactions.push(txn);
@@ -45,7 +45,7 @@ export function reverse(db, txnId, reason) {
     if (dst.balance < t.amount) throw new BankError("insufficient_funds", "Not enough left to reverse");
     dst.balance -= t.amount;
   }
-  db.accounts[t.from].balance += t.amount;
+  if (db.accounts[t.from]) db.accounts[t.from].balance += t.amount;
   t.status = "reversed";
   t.reversedReason = reason;
   return t;
@@ -89,12 +89,10 @@ async function ensureNessieAccounts(db) {
 async function createNessieAccounts(db) {
   if (db.nessie?.accounts) return db.nessie.accounts;
   const address = { street_number: "1", street_name: "Lyon St", city: "San Francisco", state: "CA", zip: "94123" };
-  const parent = await nessie("/customers", { first_name: db.family.parentName, last_name: "Family", address });
   const child = await nessie("/customers", { first_name: db.child.name, last_name: "Family", address });
   const mk = (cust, nickname, type, balance) =>
     nessie(`/customers/${cust._id}/accounts`, { type, nickname, rewards: 0, balance: Math.round(balance / 100) });
   const accts = {
-    parent: (await mk(parent, "Parent funding", "Checking", db.accounts.parent.balance))._id,
     savings: (await mk(child, "Kid savings", "Savings", db.accounts.savings.balance))._id,
     spending: (await mk(child, "Kid spending", "Checking", db.accounts.spending.balance))._id,
   };
@@ -105,7 +103,7 @@ async function createNessieAccounts(db) {
 // The sandbox stores whole-dollar amounts and its transfer records carry no payee, so an
 // internal move is mirrored as a completed transfer on the source account plus a completed
 // deposit on the destination; the exact amount travels in the description.
-const NICKNAME = { parent: "Parent funding", savings: "Kid savings", spending: "Kid spending" };
+const NICKNAME = { external: "Your grown-up", savings: "Kid savings", spending: "Kid spending" };
 function nessieMirror(db, txn) {
   if (!nessieEnabled()) return;
   (async () => {
@@ -116,7 +114,7 @@ function nessieMirror(db, txn) {
     if (txn.to === "merchant") {
       await nessie(`/accounts/${accts[txn.from]}/withdrawals`, { medium: "balance", ...base, description: `${txn.memo} (${exact})` });
     } else {
-      await nessie(`/accounts/${accts[txn.from]}/transfers`, { ...base, description: `${txn.memo} (${exact} to ${NICKNAME[txn.to] || txn.to})` });
+      if (txn.from !== "external") await nessie(`/accounts/${accts[txn.from]}/transfers`, { ...base, description: `${txn.memo} (${exact} to ${NICKNAME[txn.to] || txn.to})` });
       await nessie(`/accounts/${accts[txn.to]}/deposits`, { medium: "balance", ...base, description: `${txn.memo} (${exact} from ${NICKNAME[txn.from] || txn.from})` });
     }
     auditHook("nessie_mirrored", `Mirrored ${txn.kind} of ${exact} to Nessie sandbox`, { txnId: txn.id }, db);

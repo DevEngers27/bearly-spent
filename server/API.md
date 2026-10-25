@@ -100,7 +100,7 @@ A paired child receives only its own summary in `children` and no `user` field; 
 | `POST /api/auth/email` | Parent | `{email,password}` | `{ok:true}`. Current password required (401 on mismatch); same email normalization/uniqueness as registration. Shares login limits: 10/15 minutes/IP, 5/15 minutes/current normalized email. |
 | `POST /api/auth/password` | Parent | `{currentPassword,newPassword}` | `{ok:true}`. Current password required; new password uses registration rules (8–1024 untrimmed characters). Revokes other parent sessions for this user, retaining the current session and paired kid devices. Same shared limits as email changes. |
 | `POST /api/parent/family` | Parent | `{displayName}`; trimmed, <=40 characters; empty string clears it | `{ok:true}`. Stored on `families.display_name`, returned as `me.family.displayName`. |
-| `POST /api/parent/children` | Parent | `{name, age, bearName}`; age 7–12 | New `ChildSummary`. Separate funding account and game document. |
+| `POST /api/parent/children` | Parent | `{name, age, bearName}`; age 7–12 | New `ChildSummary`. Separate Savings/Spending accounts and game document. |
 | `POST /api/parent/children/:id/profile` | Parent | `{name,age,bearName}`; names <=24 characters with a letter/number, age 7–12 | Updated `ChildSummary`. Unknown/other-family child: 404. Audits changes and notifies the kid; savings/spending labels reflect the new name. |
 | `POST /api/parent/children/:id/link` | Parent | No fields | `{code, expiresAt}`. Six uppercase characters without vowels/ambiguous characters; expires in 15 minutes, single use. 5 generation attempts/15 minutes/child; excess returns 429 with `Let's take a little break. Try again soon!`. Each new code cancels older unused codes for that child. Known used/expired/cancelled codes remain as tombstones for specific error copy; other children's codes are untouched. |
 | `POST /api/auth/link` | Public | `{code}` (case-insensitive) | `Me` + child cookie, bound to that child. Unknown codes return 400 `{error,reason:"unknown"}`; known used/expired/cancelled codes return 400 `{error,reason:"used_or_expired"}`. Extra guessing protection: 10 attempts/15 minutes/IP. |
@@ -112,7 +112,7 @@ A paired child receives only its own summary in `children` and no `user` field; 
 | `GET /api/parent/children/:id/devices` | Parent | No fields | Array of active paired child devices: `{id,created_at,last_seen,name}`. Times in Unix milliseconds; `name` is a short user-agent description. IDs are separate opaque digests, not session tokens or stored credential hashes. |
 | `DELETE /api/parent/children/:id/devices/:sessionId` | Parent | No fields | `{ok:true}`; revokes only that child's device within this family. Unknown child/device: 404. Requires PIN unlock when set. |
 
-New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Each child currently has its own funding account; shared family funding is a follow-up. Families record funds through Allowance → Add money (`POST /api/parent/funding/add`); configuring allowance alone does not fund it. The simulated `DIRECTORY` friend codes remain available only to the demo family. Real families use the G3 friend-code flow below; friend views never contain money.
+New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Accounts are Savings and Spending only. Parents configure allowance, which is credited directly on schedule, and record money given to the child through Allowance → Send money (`POST /api/parent/money/send`). The simulated `DIRECTORY` friend codes remain available only to the demo family. Real families use the G3 friend-code flow below; friend views never contain money.
 
 PIN is an optional quick switch **inside a parent-authenticated device**, not a way to obtain a parent session on a paired child device. If a PIN is already set, changing it requires an unlocked parent session. A new password login starts locked until `/api/parent/unlock`. Child routes remain available from that parent session.
 
@@ -155,7 +155,7 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 `ParentState` extends `ChildState` and overrides/adds:
 
 - `adventures` includes `destId` while away; parent notification refs are deduplicated.
-- `family: {parentName}`, `accounts: {parent, savings, spending}` (each `{id,label,balance}`), full `allowance` including cadence, destination and schedule bookkeeping.
+- `family: {parentName}`, `accounts: {savings, spending}` (each `{id,label,balance}`), full `allowance` including cadence, destination and schedule bookkeeping.
 - All `approvals`, newest first; `{id,kind,status,createdAt,title,detail,...kindSpecificFields}`. Approval IDs belong to the selected child's document.
 - Latest 30 parent `notifications`, 60 `transactions`, 120 `audit` entries (all newest first), latest 20 `tracking` entries (newest first), and unfiltered `friends`.
 - `chat`: up to 200 retained messages, oldest first, exclusively before `?before=` if supplied. `chatNextBefore` is the first returned message's ID if more earlier retained messages exist, otherwise null. Retention is 200 total, so paging cannot recover pruned messages.
@@ -178,7 +178,7 @@ All routes below have **Child** auth and support parent `?child=` selection. Unl
 | Method and route | JSON request | Response / additional validation |
 | --- | --- | --- |
 | `POST /api/child/save` | `{amount}` | `{ok:true}`; $1–$10,000, cannot exceed spending balance. |
-| `POST /api/child/spend` | `{amount,memo}` | `{held:false}` or `{held:true,reason}` pending parent approval; $0.01–$10,000, cannot exceed spending balance. |
+| `POST /api/child/spend` | `{amount,memo,clientId}` | Required UUID clientId stored as idempotencyKey (including eventual approved postings); retries return the existing result without another posting/approval. `{held:false}` or `{held:true,reason}` pending parent approval; $0.01–$10,000, cannot exceed spending balance. |
 | `POST /api/child/journal` | `{direction,amount,note}` | `{bonus:boolean}`; direction `received`, `spent` or `saved`; $0–$10,000. Records learning activity, does not move funds. |
 | `POST /api/child/extra` | `{amount,reason}` | Created extra-allowance approval record; $1–$50. |
 | `POST /api/child/lesson` | `{lessonId,answers:[integer,...],attempt?}` | `{passed,correct,total:4,firstTime?}`; four valid choices in the order selected by `pickLessonIndexes(childId, lessonId, lessonAttempts[lessonId])` from `shared/lessonPick.js`. The sheet sends its pinned zero-based `attempt`; a stale value is refused with 400 without grading, so another device cannot change the subset being graded. Older callers may omit it. Pass at 3 of 4. Every graded try (failed, first pass or review) increments the stored counter; invalid submissions do not. First passes award +20 once; reviews award no points or goal/team/mission progress. |
@@ -214,61 +214,63 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | `POST /api/parent/goal/:id/cancel` | No fields | Cancelled active goal; kindly notifies the child and writes audit. |
 | `POST /api/parent/mission` | `{title,points?}` | Mission `{id,title,points,status,createdBy,createdAt}`; integer 5–100 points (default catalog parent points). |
 | `POST /api/parent/allowance` | Partial `{amount?,savePct?,spendLimit?,rewardDestination?}` | `{ok:true}`; amount $0–$100, savePct integer 0–100, spendLimit $0–$10,000, destination `spending` or `savings`. |
-| `POST /api/parent/funding/add` | `{amount,note?:string}` | `{ok:true}`; $1–$1,000, optional trimmed note up to 120 characters. Any family; PIN unlock required when set. Records a `funding_in` transaction (`external` → `parent`) for the selected child's funding account, with memo from note or `Added by <parentName>`. Audits `Recorded $X added to <childName>'s funding — real money stays with you`. No child notification; funding entries/notes stay in parent state. Clears parent-funded escalations so allowance/rewards can pay on the next Guardian pass (including the post-action pass). No route-specific rate limit; normal body limits apply. |
+| `POST /api/parent/funding/add` | Retired | HTTP 410; use `POST /api/parent/money/send`. |
 | `POST /api/parent/settings` | Partial `{requireTradeApproval?,buddyEnabled?,coopChallenge?,timezone?}` | `{ok:true}`; strict booleans; timezone must be a valid IANA name. Disabling Buddy cancels this child's queued/in-flight replans. |
 | `POST /api/parent/savings-goal` | Deprecated | HTTP 410; use `/api/parent/goals` and `/api/parent/goals/:id`. |
 
-## Apple Cash tracking (H1)
+## Money received and Apple Cash tracking (H12)
 
-There is one funding account (`accounts.parent`, label `Funding account`), plus
-savings and spending. Allowance and Apple Cash purchases both draw from funding.
-These routes record money already paid outside MoneyQuest; no Apple payment or
-Nessie instruction is made. No account may go negative.
+`accounts = {savings,spending}`. There is no funding or separate Apple Cash
+account. Allowance, approved rewards and extra allowance are external credits
+straight into the child's accounts under the configured split/destination.
+Apple Cash is a record of purchases already paid outside MoneyQuest.
 
 | Method and route | Auth | Request / response |
 | --- | --- | --- |
-| `POST /api/parent/wallet/send` | Parent | Retired: HTTP 410. Use `POST /api/parent/funding/add` instead. |
-| `POST /api/child/wallet/spend` | Child | `{amount,merchant,at?,external_id?}` records `parent → merchant`, `kind:wallet_spend`; HTTP 200 returns the transaction plus `duplicate`. Amount $0.01–$10,000; merchant <=120 chars; date ISO 8601 with zone or Unix milliseconds; external ID <=64 chars. Over-limit purchases record and notify without an approval hold; G4 unusual-spend notices also apply. |
-| `POST /api/parent/wallet/pending/:id/record` | Parent | `{}` posts the saved receipt if funding covers it. Returns the transaction plus `duplicate`; repeating a successful record or the original external ID cannot debit twice. HTTP 409 if still short. |
-| `POST /api/parent/wallet/pending/:id/dismiss` | Parent | `{}` removes the pending receipt and audits the dismissal. External-ID retries return the dismissed receipt without a debit. |
-| `GET /api/child/wallet/token` | Parent + configured, unlocked PIN | `{token:null,id,expiresAt,lastPing,connected}` for the selected child's active Shortcut, null ID/time if absent; no mutation. |
-| `POST /api/child/wallet/token` | Parent + configured, unlocked PIN | `{}` rotates/revokes only that child's Shortcut sessions; returns `{token,id,expiresAt,lastPing,connected}`. Raw token is shown only in this response; hashes only in storage. |
-| `POST /api/child/wallet/ping` | Child | `{}` returns `{ok:true,childId,at}` and records the connection time without a transaction. |
+| `POST /api/child/money/received` | Child | `{amount,note?,clientId}`; $0.01–$500, optional trimmed note ≤60 chars, required UUID clientId. Credits Savings with `kind:received`, `source:kid_form`, `idempotencyKey:clientId`. Returns transaction plus `{recorded:true,duplicate}`. Parent notified once: “Mia recorded $20.00 received from you” plus note. No approval. |
+| `POST /api/parent/money/send` | Parent | Same fields/limits and response. Credits Savings with `kind:received`, `source:parent`, memo `Received from your grown-up`; child notified once: “Your grown-up sent you $20.00!”. No real money is transferred. |
+| `POST /api/child/wallet/spend` | Child | `{amount,merchant,at?,external_id?,clientId?}`; $0.01–$10,000, merchant ≤120 chars, date ISO 8601 with zone or Unix milliseconds; external ID ≤64 chars or manual UUID clientId. Records `savings → merchant`, `kind:wallet_spend`. HTTP 200 returns transaction plus `{recorded:true,covered:N,duplicate}`; covered is cents automatically added (0 if none). Over-limit/unusual purchases still record and notify via G4 without an approval hold. |
+| `POST /api/parent/wallet/send` | Parent | Retired: HTTP 410; use `POST /api/parent/money/send`. |
+| `POST /api/parent/wallet/pending/:id/record` | Parent | Retired: HTTP 410; Apple Cash purchases now record automatically from Savings. |
+| `POST /api/parent/wallet/pending/:id/dismiss` | Parent | Retired: HTTP 410; no waiting receipts. |
+| `GET /api/child/wallet/token` | Parent + configured, unlocked PIN | `{token:null,id,expiresAt,lastPing,connected}` for selected child's active Shortcut; no mutation. |
+| `POST /api/child/wallet/token` | Parent + configured, unlocked PIN | `{}` rotates/revokes only this child's Shortcut sessions; returns `{token,id,expiresAt,lastPing,connected}`. Raw token only in this response; hash only in storage. |
+| `POST /api/child/wallet/ping` | Child | `{}` returns `{ok:true,childId,at}` and records connection time only. |
 
-Short funding returns HTTP **409** with
-`{error:"Your grown-up's funding is short for that. Ask them to add money!",reason:"funding_short",shortBy:N}`
-(`N` is cents). No transfer posts. The receipt is saved in `walletPending` (newest
-20 retained) and the parent is notified once per receipt. Use Inbox → Add money,
-then Record now, or retry the original Shortcut body and external ID after funding.
-The first receipt's amount, merchant and time win on retries. Receipt keys survive
-rolling ledger/pending retention and restarts. Receipts older than the pending cap
-can still be retried with their original external ID after funding is added.
-Manual purchases without an external ID cannot be matched to a Shortcut entry.
+When Savings is short, a `received` credit (`source:auto_cover`, note/memo
+`Added to cover an Apple Cash purchase`) posts immediately before the full spend,
+covering exactly the shortfall and leaving Savings at zero. The parent gets one
+cover notification saying the amount and merchant. No approval or waiting state.
+Retries return HTTP 200 with the original result and never repeat a debit,
+credit, notice or points. Shortcut keys (`wallet:<external_id>`) and manual UUID
+keys persist beyond rolling ledger retention and restarts. Manual Spent uses
+clientId for Apple Cash and Spending money, including held spending approvals.
+The client warns before another identical kind/amount within two minutes;
+Record again starts another receipt. A manual entry cannot match a Shortcut ID.
 
-Ping and spend each allow **60/hour per selected child and authenticated session**,
-in independent windows starting at the first request. Invalid authenticated
-payloads, short-funded attempts and retries count. HTTP **429** returns
-`{error:"Let's take a little break. Try again soon!",retryAfterSeconds:N}` with
-`Retry-After: N`. Keep the original body and external ID and retry after the delay.
-A rejected rate-limited request changes no receipt or balance. Limits reset on
-API restart. Token kind `shortcut`, child binding, fixed 180-day lifetime, PIN
-requirements, rotation, Devices → Unlink and family-wide logout are unchanged.
-All routes honor `?child=`; child credentials cannot select a sibling.
+Received and Send money share a **60/hour per selected child and authenticated
+session** quota. Ping and Apple Cash spend have independent 60/hour quotas.
+Invalid authenticated attempts and retries count. HTTP 429 includes
+`{error:"Let's take a little break. Try again soon!",retryAfterSeconds:N}` and
+`Retry-After: N`. Rate-limited requests change no money. Limits reset on restart.
+Validation failures return GameError 400. Parent PIN unlock, tenancy, `?child=`,
+Shortcut session kind, rotation, fixed 180-day lifetime and unlink are unchanged.
 
-Child state has `balances.{parent,savings,spending}`, `walletLastTransaction`
-(latest posted Apple Cash purchase by purchase time), and `walletSpent` totals in
-cents (`today`, ISO `week`, calendar `month`, in the family time zone). Parent
-state has the same fields, the three `accounts`, up to 60 `walletTransactions`
-(newest recorded first, purchases only), `walletPending`, and `walletLastPing`.
-Purchases include merchant, purchase time `ts`, `recordedAt`, optional external ID,
-and `overLimit` / `unusual` flags. Pending receipts show as waiting for funding.
-G5 considers the next allowance, unpaid reward/extra commitments and the last
-seven days of Apple Cash spending. `hasDueWork` is unchanged.
+Child state exposes `balances.{savings,spending}`, `walletLastTransaction` and
+`walletSpent` cents totals (`today`, ISO `week`, calendar `month`, family time
+zone). Parent state adds only those two `accounts`, `receivedThisMonth` (all
+posted received credits, including automatic covers, by family calendar month),
+up to 60 `walletTransactions` and `walletLastPing`. There is no walletPending.
+G1 funding checks/blocked logs and G5 low-funds notices are retired; hasDueWork
+otherwise retains its existing behavior.
 
-Migration moves a positive legacy wallet balance into funding with an audit,
-drops negative tracked debt with an audit, and deletes `accounts.wallet`.
-Old `wallet_in` rows remain as `Sent via Apple Cash (before 0.7)`; historical
-purchases remain intact. See [Shortcut setup](../docs/apple-cash-shortcut.md).
+The idempotent moneyVersion 9 migration moves positive funding into Savings,
+auditing `Moved $X of funding into Savings (0.9)`. Zero/negative funding is
+dropped with an audit; the account is removed. Pre-0.7 tracked wallet funds are
+likewise moved into Savings. Pending legacy receipts post against Savings using
+the shortfall rule, with one parent migration/cover notice each, then are cleared.
+Old wallet_spend rows retain their original labels; wallet_in remains labeled
+`Sent via Apple Cash (before 0.7)`. See [Shortcut setup](../docs/apple-cash-shortcut.md).
 
 ## Demo controls
 
@@ -280,9 +282,9 @@ purchases remain intact. See [Shortcut setup](../docs/apple-cash-shortcut.md).
 | `POST /api/parent/reset` | Parent, demo enabled, demo family only | No fields | `{ok:true}`; resets only the selected demo child, cancels its replans, adds a starting plan and `demo_reset` audit. |
 | `POST /api/parent/inject-fault` | Parent, demo enabled, demo family only | No fields | `{injected:transactionId}`; duplicate in selected child's ledger, corrected by next Guardian tick; `demo_fault` audit. |
 | `POST /api/parent/allowance/run-now` | Parent, demo enabled, demo family only | No fields | `{ok:true}`; fast-forward selected child's allowance while preserving overdue periods; rejects an already-paid current day; `demo_allowance_run` audit. |
-| `POST /api/parent/topup` | Parent, demo enabled, demo family only | `{amount}` | **Demo-only**; `{ok:true}`; $0.01–$1,000 to selected child's simulated parent funding account; `demo_topup` audit. Real families receive 404; use `POST /api/parent/funding/add` to record money set aside. |
+| `POST /api/parent/topup` | Parent | Any | Retired: HTTP 410; use `POST /api/parent/money/send`. |
 
-All four demo controls require demo mode and the demo family; real families receive 404 even when demo mode is enabled. These controls are not real bank deposits. `npm run reset` explicitly enables demo mode for that command and resets only the demo child in SQLite; it does not delete any family's database. Stop the API before using the CLI reset and restart afterward: a running process caches documents and can write its old copy back. Use `POST /api/parent/reset` for a live demo reset, which also cancels queued/in-flight Buddy work for the selected child.
+The three active demo controls require demo mode and the demo family; real families receive 404 even when demo mode is enabled. These controls are not real bank deposits. `npm run reset` explicitly enables demo mode for that command and resets only the demo child in SQLite; it does not delete any family's database. Stop the API before using the CLI reset and restart afterward: a running process caches documents and can write its old copy back. Use `POST /api/parent/reset` for a live demo reset, which also cancels queued/in-flight Buddy work for the selected child.
 
 On first startup an existing `MQ_DATA_DIR/db.json` is imported as the demo child/family before optional demo-account creation, then renamed `db.json.imported`. The legacy plaintext PIN is discarded. Malformed legacy files stop initialization and are left untouched. Import does not overwrite an already-existing demo family. When demo mode is disabled, imported progress remains stored and demo login is unavailable; enable demo mode to access that legacy demo family.
 

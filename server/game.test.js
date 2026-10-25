@@ -40,10 +40,10 @@ test("declined reward moves no money", () => {
   game.createParentGoal(db, { title: "Five lessons", type: "lessons", count: 5, reward: 5 });
   passAllLessons(db);
   const a = db.approvals.find((x) => x.kind === "reward");
-  const total = db.accounts.parent.balance + db.accounts.savings.balance;
+  const total = db.accounts.savings.balance + db.accounts.spending.balance;
   game.decide(db, a.id, false);
   runGuardian(db);
-  assert.equal(db.accounts.parent.balance + db.accounts.savings.balance, total);
+  assert.equal(db.accounts.savings.balance + db.accounts.spending.balance, total);
 });
 
 test("guardian reverses a duplicate bank posting", () => {
@@ -72,17 +72,13 @@ test("purchases over the limit are held for a parent", () => {
   assert.equal(db.accounts.spending.balance, 2500);
 });
 
-test("allowance never overdraws; escalates instead", () => {
-  const db = fresh();
-  db.accounts.parent.balance = 100;
-  db.allowance.nextRun = Date.now() - 1;
-  runGuardian(db);
-  assert.equal(db.accounts.parent.balance, 100);
-  assert.ok(db.approvals.some((a) => a.kind === "topup"));
-  db.accounts.parent.balance = 5000;
-  runGuardian(db);
-  assert.equal(db.accounts.parent.balance, 4000);
-  assert.ok(db.allowance.nextRun > Date.now());
+test("H12 allowance pays directly without a funding gate", () => {
+  const db = fresh(), now = Date.now(), before = structuredClone(db.accounts);
+  db.allowance.nextRun = now; runGuardian(db, now);
+  assert.equal(db.accounts.savings.balance, before.savings.balance + 500);
+  assert.equal(db.accounts.spending.balance, before.spending.balance + 500);
+  assert.ok(!db.approvals.some((a) => a.kind === "topup"));
+  assert.ok(db.allowance.nextRun > now);
 });
 
 test("San Francisco after 3 saves discovers secret Hawaiʻi; points not money", () => {

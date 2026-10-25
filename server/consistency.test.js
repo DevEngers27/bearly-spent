@@ -74,34 +74,19 @@ test("D4: decisions read all matching reminders and duplicate approval refs appe
   assert.equal(db.notifications.find((n) => n.ref === approval.id).read, true);
 });
 
-test("D4: allowance and resolved funding escalations notify parents once", () => {
-  const now = Date.now(), db = seed(now);
-  db.accounts.parent.balance = 0;
-  db.allowance.nextRun = now;
+test("D4/H12: allowance notifies each audience once without funding escalations", () => {
+  const now = Date.now(), db = seed(now); db.allowance.nextRun = now;
   runGuardian(db, now);
-  const topup = db.approvals.find((a) => a.kind === "topup");
-  actions.topup(db, { amount: 50 });
-  runGuardian(db, now);
-  assert.equal(db.notifications.find((n) => n.ref === topup.id).read, true);
-  assert.ok(db.notifications.some((n) => n.to === "parent" && n.text === "Allowance paid: $5 to savings, $5 to spending"));
-  assert.ok(db.notifications.some((n) => n.ref === `resolved:${topup.id}`));
-  const count = db.notifications.length;
-  runGuardian(db, now + 1000);
-  assert.equal(db.notifications.length, count);
+  assert.equal(db.notifications.filter((n) => n.to === "parent" && n.text === "Allowance paid: $5 to savings, $5 to spending").length, 1);
+  const count = db.notifications.length; runGuardian(db, now + 1000); assert.equal(db.notifications.length, count);
+  assert.ok(!db.approvals.some((a) => a.kind === "topup"));
 });
 
-test("D4: automatic payout resolves escalation and reads its reminder", () => {
-  const now = Date.now(), db = seed(now);
-  const a = game.requestExtraAllowance(db, { amount: 500, reason: "Books" });
-  game.decide(db, a.id, true);
-  db.accounts.parent.balance = 0;
-  runGuardian(db, now);
-  const escalation = db.approvals.find((x) => x.approvalId === a.id);
-  db.accounts.parent.balance = 5000;
-  runGuardian(db, now + 1000);
-  assert.equal(escalation.status, "resolved");
-  assert.equal(db.notifications.find((n) => n.ref === escalation.id).read, true);
-  assert.ok(db.notifications.some((n) => n.ref === `resolved:${escalation.id}`));
+test("D4/H12: approved extra allowance pays directly and reads its original reminder", () => {
+  const now = Date.now(), db = seed(now), a = game.requestExtraAllowance(db, { amount: 500, reason: "Books" });
+  game.decide(db, a.id, true); runGuardian(db, now);
+  assert.ok(a.paidTxnId); assert.equal(db.notifications.find((n) => n.ref === a.id).read, true);
+  assert.ok(!db.approvals.some((x) => x.approvalId === a.id));
 });
 
 test("D5: allowance and duplicate audit sentences keep raw ids in data", () => {
@@ -144,15 +129,15 @@ for (const legacy of [false, true]) test(`D11: ${legacy ? "legacy backfill" : "t
   assert.equal(db.allowance.lastPaidAt, now);
   if (legacy) delete db.allowance.lastPaidAt;
   actions.settings(db, { timezone: "America/Los_Angeles" });
-  const before = db.accounts.parent.balance, sameEvening = now + 3600000;
+  const before = db.accounts.savings.balance, sameEvening = now + 3600000;
   assert.throws(() => game.requestAllowanceRun(db, sameEvening), game.GameError);
   assert.equal(db.allowance.lastPaidAt, now);
   db.allowance.nextRun = sameEvening;
   runGuardian(db, sameEvening);
-  assert.equal(db.accounts.parent.balance, before);
+  assert.equal(db.accounts.savings.balance, before);
   game.requestAllowanceRun(db, now + 7 * DAY);
   runGuardian(db, now + 7 * DAY);
-  assert.equal(db.accounts.parent.balance, before - 1000);
+  assert.equal(db.accounts.savings.balance, before + 500);
   assert.equal(db.allowance.lastPaidAt, now + 7 * DAY);
 });
 

@@ -22,14 +22,12 @@ const SECTIONS = [
   ["security", "Security"],
 ];
 
-const KIND_LABEL = { goal_purchase: "Goal purchase", child_funds: "Child funds", reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", friend_request: "Friend request", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review", wallet_pending: "Apple Cash" };
+const KIND_LABEL = { goal_purchase: "Goal purchase", child_funds: "Child funds", reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", friend_request: "Friend request", trade: "Trade", mission_proposal: "Buddy suggestion", review: "Review" };
 const BROWSER_TIMEZONE = Intl.DateTimeFormat("en-US").resolvedOptions().timeZone || "UTC";
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
 export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignOutAll, offline }) {
   const { mobile, sec, opened, tab, selectSection, selectTab, backToMore } = useParentNavigation();
-  const [fundingFocus, setFundingFocus] = useState(0);
-  const onAddMoney = () => { selectSection("allowance"); setFundingFocus((current) => current + 1); };
   const [run, pendingAction] = useAction(toast, offline);
   const busy = pendingAction || offline;
   const timezoneAttempted = useRef(false);
@@ -43,11 +41,11 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
     run("parent/settings", { timezone: BROWSER_TIMEZONE });
   }, [state.settings.timezone, run]);
   const pending = state.approvals.filter((a) => a.status === "pending" || (a.kind === "goal_purchase" && a.status === "approved" && !a.paidTxnId));
-  const pendingCount = pending.length + (state.walletPending?.length || 0);
-  const ctx = { state, run, busy, demo: me?.demo === true, onAddMoney, mobile };
+  const pendingCount = pending.length;
+  const ctx = { state, run, busy, demo: me?.demo === true, mobile };
   const main = useRef(null);
   useEffect(() => {
-    if (!mobile || sec === "allowance") return; // Allowance manages its own focus (Add money)
+    if (!mobile) return;
     window.scrollTo({ top: 0 });
     main.current?.focus({ preventScroll: true });
   }, [mobile, sec]);
@@ -87,7 +85,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
         {sec === "inbox" && <Inbox {...ctx} pending={pending} />}
         {sec === "overview" && <Overview {...ctx} />}
         {opened.includes("goals") && <div hidden={sec !== "goals"}><Goals {...ctx} /></div>}
-        {opened.includes("allowance") && <div hidden={sec !== "allowance"}><Allowance key={JSON.stringify([state.allowance.amount, state.allowance.savePct, state.allowance.spendLimit, state.allowance.rewardDestination])} {...ctx} fundingFocus={fundingFocus} /></div>}
+        {opened.includes("allowance") && <div hidden={sec !== "allowance"}><Allowance key={JSON.stringify([state.allowance.amount, state.allowance.savePct, state.allowance.spendLimit, state.allowance.rewardDestination])} {...ctx} /></div>}
         {sec === "activity" && <Activity {...ctx} />}
         {sec === "guardian" && <Guardian {...ctx} />}
         {sec === "buddy" && <BuddyLog {...ctx} />}
@@ -154,25 +152,15 @@ function Integrations({ state }) {
   );
 }
 
-function Inbox({ state, run, demo, pending, busy, onAddMoney, mobile }) {
+function Inbox({ state, run, pending, busy, mobile }) {
   const notifications = state.notifications.filter((n) => !n.read);
-  const receipts = state.walletPending || [];
-  const pendingCount = pending.length + receipts.length;
+  const pendingCount = pending.length;
   const decided = state.approvals.filter((a) => a.status !== "pending").slice(0, 8);
   return (
     <div className="p-stack">
       <h1>Approvals{mobile && pendingCount > 0 && <span className="badge">{pendingCount}</span>}</h1>
       {pendingCount === 0 && <p className="empty">Nothing waiting — nice!</p>}
       <ul className="approval-list">
-        {receipts.map((receipt) => <li key={receipt.id} className="approval k-wallet_pending">
-          <span className="kind-tag">{KIND_LABEL.wallet_pending}</span>
-          <div className="approval-body"><strong>{state.child.name}'s Apple Cash spent {money(receipt.amount)} at {receipt.merchant}</strong><p>Waiting for funding · {formatDateTime(receipt.ts)}</p><p>Add money, then record it.</p></div>
-          <div className="approval-actions">
-            <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>
-            <button disabled={busy} className="pbtn" onClick={() => run(`parent/wallet/pending/${receipt.id}/record`, {}, "Apple Cash purchase recorded")}>Record now</button>
-            <button disabled={busy} className="pbtn" onClick={() => run(`parent/wallet/pending/${receipt.id}/dismiss`, {}, "Receipt dismissed")}>Dismiss</button>
-          </div>
-        </li>)}
         {pending.map((a) => (
           <li key={a.id} className={`approval k-${a.kind}`}>
             <span className="kind-tag">{KIND_LABEL[a.kind] || a.kind}</span>
@@ -182,10 +170,8 @@ function Inbox({ state, run, demo, pending, busy, onAddMoney, mobile }) {
               {a.amount != null && <p className="amt">{money(a.amount)}</p>}
             </div>
             <div className="approval-actions">
-              {a.kind === "topup" || a.kind === "review" ? (
+              {a.kind === "review" ? (
                 <>
-                  {a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>}
-                  {demo && a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={() => run("parent/topup", { amount: 50 }, "Added $50 to funding")}>Add $50</button>}
                   <button disabled={busy} className="pbtn" onClick={() => run(`parent/approval/${a.id}`, { approve: true }, "Marked as handled")}>Mark handled</button>
                 </>
               ) : (
@@ -227,22 +213,18 @@ function Inbox({ state, run, demo, pending, busy, onAddMoney, mobile }) {
   );
 }
 
-function Overview({ state, onAddMoney, busy }) {
+function Overview({ state }) {
   const goal = currentSavingsGoal(state);
   const learned = state.child.stats;
   return (
     <div className="p-stack">
       <h1>Overview</h1>
       <div className="p-figures">
-        <Figure label={`${state.child.name}'s savings`} value={money(state.accounts.savings.balance)} sub={goal ? `${Math.round((state.accounts.savings.balance / goal.target) * 100)}% of ${goal.title}` : "Set a savings goal"} />
-        <Figure label="Spending money" value={money(state.accounts.spending.balance)} />
-        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Covers allowance and Apple Cash" />
+        <Figure label="Savings" value={money(state.accounts.savings.balance)} sub={goal ? `${Math.round((state.accounts.savings.balance / goal.target) * 100)}% of ${goal.title}` : "Set a savings goal"} />
+        <Figure label="Spending" value={money(state.accounts.spending.balance)} />
+        <Figure label="Received this month" value={money(state.receivedThisMonth ?? 0)} sub={`Sent by you and recorded by ${state.child.name}`} />
         <Figure label="Adventure points" value={state.child.points} sub="Game points, not money" />
       </div>
-      {state.accounts.parent.balance === 0 && state.allowance.amount > 0 && <section className="p-card">
-        <p>{`Add money to the funding record so ${state.child.bear.name}'s allowance can be paid`}</p>
-        <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>
-      </section>}
       {!goal && <section className="p-card"><h2>Set a savings goal</h2><p>Choose something to save for in Goals & tasks.</p></section>}
       <div className="p-two">
         <section>
@@ -366,18 +348,21 @@ function SavingsGoal({ state, goal, create = false, run, busy }) {
   );
 }
 
-function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
+function Allowance({ state, run, demo, busy }) {
   const a = state.allowance;
   const [f, setF] = useState({ amount: a.amount / 100, savePct: a.savePct, spendLimit: a.spendLimit / 100, rewardDestination: a.rewardDestination });
-  const [funding, setFunding] = useState({ amount: "", note: "" });
-  const fundingAmount = useRef(null);
-  useEffect(() => {
-    if (fundingFocus > 0) fundingAmount.current?.focus();
-  }, [fundingFocus]);
-  const addMoney = async (event) => {
+  const newReceiptId = () => globalThis.crypto?.randomUUID?.() || "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (Number(c) ^ Math.floor(Math.random() * 16) >> Number(c) / 4).toString(16));
+  const [sending, setSending] = useState(() => ({ amount: "", note: "", clientId: newReceiptId() }));
+  const inflight = useRef(false);
+  const invalid = !Number.isFinite(Number(sending.amount)) || Number(sending.amount) <= 0 || Number(sending.amount) > 500 || sending.note.trim().length > 60;
+  const sendMoney = async (event) => {
     event.preventDefault();
-    const result = await run("parent/funding/add", funding, "Money recorded — real money stays with you");
-    if (result) setFunding({ amount: "", note: "" });
+    if (busy || invalid || inflight.current) return;
+    inflight.current = true;
+    try {
+      const result = await run("parent/money/send", sending, "Money recorded in Savings");
+      if (result) setSending({ amount: "", note: "", clientId: newReceiptId() });
+    } finally { inflight.current = false; }
   };
   return (
     <div className="p-stack">
@@ -395,16 +380,14 @@ function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
         <button disabled={busy} className="pbtn primary">Save rules</button>
       </form>
       <section className="p-card">
-        <h2>Funding account</h2>
-        <p>{money(state.accounts.parent.balance)} recorded as set aside</p>
-        <p className="p-muted" id="funding-explanation">This is a record of money you have set aside; MoneyQuest never moves real money.</p>
-        <form className="pform" onSubmit={addMoney} aria-label="Add money" aria-describedby="funding-explanation">
-          <label>Amount ($)<input ref={fundingAmount} type="number" inputMode="decimal" required min="1" max="1000" step="0.01" disabled={busy} value={funding.amount} onChange={(e) => setFunding({ ...funding, amount: e.target.value })} /></label>
-          <label>Note (optional)<input maxLength={120} disabled={busy} value={funding.note} onChange={(e) => setFunding({ ...funding, note: e.target.value })} /></label>
-          <button disabled={busy} className="pbtn primary">Add money</button>
+        <h2>Send money</h2>
+        <p className="p-muted" id="send-explanation">Record money you gave your child. It goes straight into Savings. MoneyQuest never moves real money.</p>
+        <form className="pform" onSubmit={sendMoney} aria-label="Send money" aria-describedby="send-explanation">
+          <label>Amount ($)<input type="number" inputMode="decimal" required min="0.01" max="500" step="0.01" disabled={busy} value={sending.amount} onChange={(e) => setSending({ ...sending, amount: e.target.value })} /></label>
+          <label>Note<input maxLength={60} disabled={busy} value={sending.note} onChange={(e) => setSending({ ...sending, note: e.target.value })} /></label>
+          <button disabled={busy || invalid} className="pbtn primary">Send money</button>
         </form>
         {demo && <div className="row">
-          <button disabled={busy} className="pbtn" onClick={() => run("parent/topup", { amount: 50 }, "Added $50")}>Add $50</button>
           <button disabled={busy} className="pbtn" onClick={() => run("parent/allowance/run-now", {}, "Fast-forwarded to payday")}>Fast-forward to payday</button>
         </div>}
         {demo && <p className="p-muted">Fast-forward is a demo control: it moves the schedule to now so you can watch the Guardian pay.</p>}
@@ -414,7 +397,7 @@ function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
 }
 
 function Activity({ state }) {
-  const label = { external: "Set aside", outside: "From you", parent: "Funding", savings: "Savings", spending: "Spending", wallet: "Apple Cash", merchant: "Store" };
+  const label = { external: "Your grown-up", outside: "From you", parent: "Funding (before 0.9)", savings: "Savings", spending: "Spending", wallet: "Apple Cash", merchant: "Store" };
   return (
     <div className="p-stack">
       <h1>Transactions</h1>
@@ -425,7 +408,7 @@ function Activity({ state }) {
           {state.transactions.map((t) => (
             <tr key={t.id} className={t.status !== "posted" ? "struck" : t.flagged ? "flag" : ""}>
               <td data-label="When"><span className="p-cell-value">{formatDateTime(t.ts)}</span></td>
-              <td data-label="What"><span className="p-cell-value">{t.kind === "wallet_in" ? "Sent via Apple Cash (before 0.7)" : t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</span></td>
+              <td data-label="What"><span className="p-cell-value">{t.kind === "wallet_in" ? "Sent via Apple Cash (before 0.7)" : t.kind === "received" && t.source !== "auto_cover" ? "Received from your grown-up" : t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</span></td>
               <td data-label="From → to"><span className="p-cell-value">{label[t.from]} → {label[t.to]}</span></td>
               <td data-label="Amount" className="num"><span className="p-cell-value">{money(t.amount)}</span></td>
               <td data-label="Status"><span className="p-cell-value">{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}{t.uncovered ? " · uncovered" : ""}</span></td>
@@ -460,7 +443,6 @@ function Guardian({ state, run, demo, busy }) {
         <div><b>G2</b> Pays approved rewards and requests exactly once</div>
         <div><b>G3</b> Reconciles the ledger and undoes double postings</div>
         <div><b>G4</b> Holds purchases over your limit and flags unusual spending</div>
-        <div><b>G5</b> Warns you before funding runs short</div>
       </div>
       {demo && <section className="p-card demo">
         <h2>Try it: simulate a bank glitch</h2>
@@ -664,14 +646,10 @@ function Children({ state, me, refreshMe, run, busy }) {
 }
 
 function WalletLedger({ state }) {
-  const rows = [
-    ...(state.walletPending || []).map((r) => ({ ...r, memo: r.merchant, status: "waiting for funding" })),
-    ...(state.walletTransactions || []).filter((t) => t.kind === "wallet_spend"),
-  ];
+  const rows = (state.walletTransactions || []).filter((t) => t.kind === "wallet_spend");
   return <section className="p-card p-stack">
     <h2>Apple Cash activity</h2>
-    <p>{state.child.name}'s funding account: <strong>{money(state.accounts.parent.balance)}</strong></p>
-    <p className="p-muted">Apple Cash money comes from your grown-up's funding. Check actual purchases in Wallet.</p>
+    <p className="p-muted">Apple Cash purchases come out of Savings. Any shortfall is added automatically and you get a note. Check actual purchases in Wallet.</p>
     <p>Apple Cash spent this week: <strong>{money(state.walletSpent?.week ?? 0)}</strong> · This month: <strong>{money(state.walletSpent?.month ?? 0)}</strong></p>
     {state.walletLastPing && <p>Last connection test: {formatDateTime(state.walletLastPing)}</p>}
     <table className="ptable" role="table"><thead><tr><th>When</th><th>What</th><th>Amount</th><th>Status</th></tr></thead><tbody>

@@ -97,18 +97,13 @@ test("G2.1: mobile renders exactly five illustrated tabs, the actionable Inbox b
   assert.equal(nodes(h.tree(), (n) => n.props.className === "badge").length, 0);
 });
 
-test("G2.1: Add money's selectSection(allowance) maps Inbox and Home to Money › Allowance", () => {
-  const h = parent();
-  component(h.tree(), "Inbox").props.onAddMoney();
-  let tree = h.tree();
+test("G2.1/H12 Money tab opens Allowance with Send money", () => {
+  const h = parent(); button(nav(h.tree(), "Parent tabs"), "Money").props.onClick();
+  const tree = h.tree();
   assert.equal(button(nav(tree, "Parent tabs"), "Money").props["aria-current"], "page");
   assert.equal(button(nav(tree, "Money sections"), "Allowance").props["aria-current"], "page");
-  assert.equal(component(tree, "Allowance").props.fundingFocus, 1);
-  button(nav(tree, "Parent tabs"), "Home").props.onClick();
-  component(h.tree(), "Overview").props.onAddMoney();
-  tree = h.tree();
-  assert.equal(component(tree, "Allowance").props.fundingFocus, 2);
-  assert.equal(button(nav(tree, "Money sections"), "Allowance").props["aria-current"], "page");
+  assert.ok(component(tree, "Allowance"));
+  assert.equal(component(tree, "Allowance").props.onAddMoney, undefined);
 });
 
 test("G2.1: Money remembers its segment in store, retains opened form keys, and rejects stale storage", () => {

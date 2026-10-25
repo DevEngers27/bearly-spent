@@ -115,7 +115,7 @@ export function childView(db, now = Date.now()) {
     budgetDoneThisWeek: db.child.lastBudgetWeek === week,
     child: db.child,
     profile,
-    balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance, parent: db.accounts.parent.balance },
+    balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance },
     walletSpent: walletSummary(db, now),
     walletLastTransaction: db.transactions.filter((t) => t.kind === "wallet_spend" && t.status === "posted").sort((a, b) => b.ts - a.ts)[0] || null,
     currentGoalId: db.child.currentGoalId,
@@ -168,8 +168,8 @@ export function parentView(db, before, now = Date.now()) {
     family: { parentName: db.family.parentName },
     chat,
     chatNextBefore: end > chat.length ? chat[0]?.id : null,
-    accounts: Object.fromEntries(["parent", "savings", "spending"].map((key) => [key, {
-      ...db.accounts[key], ...(["savings", "spending"].includes(key) ? { label: `${db.child.name}'s ${key}` } : {}),
+    accounts: Object.fromEntries(["savings", "spending"].map((key) => [key, {
+      ...db.accounts[key], label: `${db.child.name}'s ${key}`,
     }])),
     allowance: db.allowance,
     approvals: game.socialApprovalsView(db).slice().reverse(),
@@ -179,7 +179,7 @@ export function parentView(db, before, now = Date.now()) {
     audit: db.audit.slice(-120).reverse(),
     tracking: db.tracking.slice(-20).reverse(),
     walletTransactions: db.transactions.filter((t) => t.kind === "wallet_spend").slice(-60).reverse(),
-    walletPending: (db.walletPending || []).slice().reverse(),
+    receivedThisMonth: db.transactions.filter((t) => t.kind === "received" && t.status === "posted" && t.ts <= now && dayKey(t.ts, db.settings.timezone).slice(0, 7) === dayKey(now, db.settings.timezone).slice(0, 7)).reduce((sum, t) => sum + t.amount, 0),
     walletLastPing: db.walletLastPing || null,
     friends: game.socialFriendsView(db),
   };
@@ -259,16 +259,18 @@ register("POST", "/api/child/wallet/ping", "child", (req, ctx, res, now) => {
 register("POST", "/api/child/wallet/spend", "child", (req, ctx, res, now) => {
   takeLimit("walletSpend", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
   const result = runChildAction(ctx.childId, (db) => actions.walletSpend(db, req.body, now), "walletSpend", now);
-  if (result.reason === "funding_short") res.status(409);
   return result;
 });
 register("POST", "/api/parent/wallet/send", "parent", () => game.parentWalletSend());
-register("POST", "/api/parent/wallet/pending/:id/record", "parent", (req, ctx, res, now) => {
-  const result = runChildAction(ctx.childId, (db) => actions.walletRecord(db, req.body, req.params.id, now), "wallet_record", now);
-  if (result.reason === "funding_short") res.status(409);
-  return result;
-});
-register("POST", "/api/parent/wallet/pending/:id/dismiss", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.walletDismiss(db, req.body, req.params.id), "wallet_dismiss", now));
+register("POST", "/api/parent/funding/add", "parent", () => game.parentWalletSend());
+register("POST", "/api/parent/wallet/pending/:id/record", "parent", () => game.recordWalletPending());
+register("POST", "/api/parent/wallet/pending/:id/dismiss", "parent", () => game.dismissWalletPending());
+for (const [path, role, action] of [["/api/child/money/received", "child", "received"], ["/api/parent/money/send", "parent", "sendMoney"]]) {
+  register("POST", path, role, (req, ctx, res, now) => {
+    takeLimit("money", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
+    return runChildAction(ctx.childId, (db) => actions[action](db, req.body, now), action, now);
+  });
+}
 
 export function stream(req, context, res) {
   res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-store, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
@@ -363,8 +365,8 @@ register("POST", "/api/child/notifications/read", "child", (req, ctx, res, now) 
 });
 register("POST", "/api/buddy/chat", "child", (req, ctx, res, now) => actions.chat(readChild(ctx.childId), req.body,
   (text) => withChat(ctx.childId, () => chat(ctx.childId, text), now)));
-for (const action of ["approval", "goal", "mission", "allowance", "settings", "savingsGoal", "fundingAdd"]) {
-  const path = action === "fundingAdd" ? "funding/add" : action === "savingsGoal" ? "savings-goal" : action === "approval" ? "approval/:id" : action;
+for (const action of ["approval", "goal", "mission", "allowance", "settings", "savingsGoal"]) {
+  const path = action === "savingsGoal" ? "savings-goal" : action === "approval" ? "approval/:id" : action;
   register("POST", `/api/parent/${path}`, "parent", (req, ctx, res, now) => {
     if (action === "approval") {
       const a = readChild(ctx.childId).approvals.find((a) => a.id === req.params.id);
@@ -388,13 +390,7 @@ register("POST", "/api/parent/allowance/run-now", "parent", (req, ctx, res, now)
   demoControl(ctx);
   return runChildAction(ctx.childId, (db) => demoRunNow(db, now), "demo_fast_forward", now);
 });
-register("POST", "/api/parent/topup", "parent", (req, ctx, res, now) => {
-  demoControl(ctx);
-  return runChildAction(ctx.childId, (db) => {
-    actions.topup(db, req.body);
-    game.audit(db, "parent", "demo_topup", "Demo control: simulated funding deposit");
-  }, "demo_topup", now);
-});
+register("POST", "/api/parent/topup", "parent", () => game.parentWalletSend());
 register("POST", "/api/parent/inject-fault", "parent", (req, ctx) => {
   demoControl(ctx);
   return mutateChild(ctx.childId, (db) => {

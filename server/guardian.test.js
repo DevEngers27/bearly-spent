@@ -80,7 +80,6 @@ test("M3 a duplicate period skips even when parent funds are empty", () => {
   db.allowance.savePct = 100;
   db.allowance.nextRun = now;
   runGuardian(db, now);
-  db.accounts.parent.balance = 0;
   db.allowance.nextRun = now;
   runGuardian(db, now);
   assert.equal(db.approvals.filter((a) => a.kind === "topup").length, 0);
@@ -94,9 +93,9 @@ test("M19 run-now preserves overdue allowance periods", () => {
   db.allowance.nextRun = overdue;
   routeMutation("/api/parent/allowance/run-now")(db);
   assert.equal(db.allowance.nextRun, overdue);
-  const before = db.accounts.parent.balance;
+  const before = db.accounts.savings.balance + db.accounts.spending.balance;
   runGuardian(db, now);
-  assert.equal(before - db.accounts.parent.balance, 3 * db.allowance.amount);
+  assert.equal(db.accounts.savings.balance + db.accounts.spending.balance - before, 3 * db.allowance.amount);
   assert.equal(db.allowance.nextRun, overdue + 3 * 7 * DAY);
 });
 
@@ -105,18 +104,18 @@ test("M25 catch-up pays at most four periods per pass and summarizes each back-p
   const now = Date.now();
   const first = now - 9 * 7 * DAY;
   db.allowance.nextRun = first;
-  const before = db.accounts.parent.balance;
+  const before = db.accounts.savings.balance + db.accounts.spending.balance;
   runGuardian(db, now);
-  assert.equal(before - db.accounts.parent.balance, 4000);
+  assert.equal(db.accounts.savings.balance + db.accounts.spending.balance - before, 4000);
   assert.equal(db.allowance.nextRun, first + 4 * 7 * DAY);
   assert.equal(hasDueWork(db, now), true);
   const summaries = () => db.notifications.filter((n) => n.to === "parent" && n.text.startsWith("Back-paid"));
   assert.equal(summaries().length, 1);
   assert.equal(summaries()[0].text, `Back-paid 4 weeks of allowance (${dayKey(first, db.settings.timezone)} → ${dayKey(first + 3 * 7 * DAY, db.settings.timezone)})`);
   runGuardian(db, now + 2000);
-  assert.equal(before - db.accounts.parent.balance, 8000);
+  assert.equal(db.accounts.savings.balance + db.accounts.spending.balance - before, 8000);
   runGuardian(db, now + 4000);
-  assert.equal(before - db.accounts.parent.balance, 10000);
+  assert.equal(db.accounts.savings.balance + db.accounts.spending.balance - before, 10000);
   assert.equal(summaries().length, 3);
   assert.equal(hasDueWork(db, now + 4000), false);
 });
@@ -144,33 +143,24 @@ test("M4 child funds escalation retries automatically when spending money recove
   assert.equal(hasDueWork(db, now + DAY), false);
 });
 
-test("M4 parent-funded reward and extra escalations retry without a topup-route reset", () => {
+test("M4/H12 approved rewards and extras pay without funding and do not escalate", () => {
   for (const kind of ["reward", "extra"]) {
-    const db = fresh();
-    const now = Date.now();
+    const db = fresh(), now = Date.now();
     const a = kind === "reward" ? approvedReward(db) : game.requestExtraAllowance(db, { amount: 500, reason: "Book" });
     if (kind === "extra") game.decide(db, a.id, true);
-    db.accounts.parent.balance = 100;
-    runGuardian(db, now);
-    const escalation = db.approvals.find((x) => x.kind === "topup");
-    assert.equal(escalation.approvalId, a.id);
+    assert.equal(hasDueWork(db, now), true); runGuardian(db, now);
+    assert.ok(a.paidTxnId); assert.equal(a.escalatedAt, undefined);
+    assert.ok(!db.approvals.some((x) => x.kind === "topup"));
     assert.equal(hasDueWork(db, now), false);
-    db.accounts.parent.balance = 2000;
-    assert.equal(hasDueWork(db, now + 2000), true);
-    runGuardian(db, now + 2000);
-    assert.ok(a.paidTxnId);
-    assert.equal(a.escalatedAt, undefined);
-    assert.equal(escalation.status, "resolved");
   }
 });
 
 test("M4 approved unpaid obligations can be declined and resolve related escalations", () => {
-  for (const kind of ["reward", "extra", "spend"]) {
+  for (const kind of ["spend"]) {
     const db = fresh();
     const now = Date.now();
     const a = kind === "reward" ? approvedReward(db) : kind === "spend" ? approvedSpend(db) : game.requestExtraAllowance(db, { amount: 500, reason: "Book" });
     if (kind === "extra") game.decide(db, a.id, true);
-    if (kind !== "spend") db.accounts.parent.balance = 0;
     runGuardian(db, now);
     const related = db.approvals.find((x) => x.approvalId === a.id);
     assert.ok(related);
@@ -193,22 +183,12 @@ test("M4 paid approvals still cannot be declined", () => {
   assert.equal(a.status, "approved");
 });
 
-test("M4 parent topup only clears parent-funded payout escalation markers", () => {
-  const db = fresh();
-  const spend = approvedSpend(db);
-  const reward = approvedReward(db);
-  const extra = game.requestExtraAllowance(db, { amount: 500, reason: "Book" });
-  game.decide(db, extra.id, true);
-  db.accounts.parent.balance = 0;
-  runGuardian(db, Date.now());
-  const spendingEscalation = spend.escalatedAt;
-  routeMutation("/api/parent/topup", { amount: 50 })(db);
-  assert.equal(spend.escalatedAt, spendingEscalation);
-  assert.equal(reward.escalatedAt, undefined);
-  assert.equal(extra.escalatedAt, undefined);
-  runGuardian(db, Date.now());
-  assert.ok(reward.paidTxnId && extra.paidTxnId);
-  assert.equal(spend.paidTxnId, undefined);
+test("M4/H12 sending money to Savings leaves Spending shortages waiting", () => {
+  const db = fresh(), spend = approvedSpend(db), reward = approvedReward(db);
+  runGuardian(db); const spendingEscalation = spend.escalatedAt;
+  actions.sendMoney(db, { amount: 50, clientId: "11111111-1111-4111-8111-111111111111" });
+  assert.equal(spend.escalatedAt, spendingEscalation); assert.ok(reward.paidTxnId);
+  runGuardian(db); assert.equal(spend.paidTxnId, undefined);
   assert.equal(db.approvals.filter((a) => a.kind === "child_funds").length, 1);
 });
 
@@ -251,7 +231,7 @@ test("M10 unreversible duplicate is escalated once and stops due work", () => {
 test("M18 approving an unauthorised posting acknowledges it without recurring reviews", () => {
   const db = fresh();
   const now = Date.now();
-  const { txn } = transfer(db, { from: "parent", to: "spending", amount: 100, kind: "extra", memo: "Unknown" });
+  const { txn } = transfer(db, { from: "external", to: "spending", amount: 100, kind: "extra", memo: "Unknown" });
   txn.ref = "unknown-approval";
   assert.equal(hasDueWork(db, now), true);
   runGuardian(db, now);
@@ -268,7 +248,7 @@ test("M18 approving an unauthorised posting acknowledges it without recurring re
 test("M18 declining review retains its flag and stops recurring work", () => {
   const db = fresh();
   const now = Date.now();
-  const { txn } = transfer(db, { from: "parent", to: "spending", amount: 100, kind: "extra", memo: "Unknown" });
+  const { txn } = transfer(db, { from: "external", to: "spending", amount: 100, kind: "extra", memo: "Unknown" });
   runGuardian(db, now);
   const review = db.approvals.find((a) => a.kind === "review");
   game.decide(db, review.id, false);
@@ -285,7 +265,7 @@ test("M9 amount mismatch is reviewed once and cannot mark a reward paid", () => 
     const db = fresh();
     const now = Date.now();
     const a = approvedReward(db);
-    const { txn } = transfer(db, { from: "parent", to: "savings", amount, kind: "reward", memo: "Wrong amount", idempotencyKey: `approval:${a.id}` });
+    const { txn } = transfer(db, { from: "external", to: "savings", amount, kind: "reward", memo: "Wrong amount", idempotencyKey: `approval:${a.id}` });
     txn.ref = a.id;
     runGuardian(db, now);
     assert.equal(a.paidTxnId, undefined);
@@ -305,7 +285,7 @@ test("M9 amount mismatch is reviewed once and cannot mark a reward paid", () => 
 test("M9 approval idempotency postings without ref still have their amounts checked", () => {
   const db = fresh();
   const a = approvedReward(db);
-  const { txn } = transfer(db, { from: "parent", to: "savings", amount: 100, kind: "reward", memo: "Wrong amount", idempotencyKey: `approval:${a.id}` });
+  const { txn } = transfer(db, { from: "external", to: "savings", amount: 100, kind: "reward", memo: "Wrong amount", idempotencyKey: `approval:${a.id}` });
   runGuardian(db, Date.now());
   assert.equal(a.paidTxnId, undefined);
   assert.equal(txn.flagged, true);
@@ -315,7 +295,7 @@ test("M9 approval idempotency postings without ref still have their amounts chec
 test("M9 unexplained parent postings are reviewed while child moves are left alone", () => {
   const db = fresh();
   const now = Date.now();
-  const { txn } = transfer(db, { from: "parent", to: "spending", amount: 100, kind: "extra", memo: "Unknown" });
+  const { txn } = transfer(db, { from: "external", to: "spending", amount: 100, kind: "extra", memo: "Unknown" });
   game.childSave(db, 100, now);
   game.childSpend(db, { amount: 100, memo: "Snack" }, spendPolicy, now);
   game.journal(db, { direction: "received", amount: 100, note: "Gift" }, now);
@@ -330,53 +310,28 @@ test("M9 unexplained parent postings are reviewed while child moves are left alo
   assert.equal(hasDueWork(db, now + 2000), false);
 });
 
-test("M11 approved unpaid rewards and extras count toward funding warnings", () => {
-  const db = fresh();
-  const now = Date.now();
-  const reward = approvedReward(db, 2000);
-  const extra = game.requestExtraAllowance(db, { amount: 2000, reason: "Books" });
-  game.decide(db, extra.id, true);
-  db.accounts.parent.balance = 1500;
-  runGuardian(db, now);
-  assert.equal(reward.paidTxnId, undefined);
-  assert.equal(extra.paidTxnId, undefined);
-  assert.ok(db.notifications.some((n) => n.text.includes("upcoming commitments ($50.00)")));
-  assert.equal(db.allowance.lowFundsWarnedAt, now);
-  assert.equal(db.allowance.lowFundsWarnedFor, 3500);
-  runGuardian(db, now + DAY);
-  assert.equal(db.audit.filter((a) => a.action === "low_funds_warning").length, 1);
-});
-
-test("M11 funding warnings reset after topup and warn for another same-day shortfall", () => {
-  const db = fresh();
-  const now = Date.now();
-  const pending = game.requestExtraAllowance(db, { amount: 1000, reason: "Books" });
-  db.accounts.parent.balance = 1500;
-  runGuardian(db, now);
-  runGuardian(db, now + 2000);
-  assert.equal(db.audit.filter((a) => a.action === "low_funds_warning").length, 1);
-  routeMutation("/api/parent/topup", { amount: 5 })(db);
-  runGuardian(db, now + 4000);
+test("M11/H12 rewards and extras credit directly without low-funds warnings", () => {
+  const db = fresh(), now = Date.now(), reward = approvedReward(db, 2000);
+  const extra = game.requestExtraAllowance(db, { amount: 2000, reason: "Books" }); game.decide(db, extra.id, true);
+  runGuardian(db, now); assert.ok(reward.paidTxnId); assert.ok(extra.paidTxnId);
   assert.equal(db.allowance.lowFundsWarnedAt, undefined);
-  assert.equal(db.allowance.lowFundsWarnedFor, undefined);
-  game.decide(db, pending.id, true);
-  game.requestExtraAllowance(db, { amount: 500, reason: "Pencils" });
-  runGuardian(db, now + 6000);
-  assert.equal(db.audit.filter((a) => a.action === "low_funds_warning").length, 2);
-  assert.equal(db.allowance.lowFundsWarnedAt, now + 6000);
-  assert.equal(db.allowance.lowFundsWarnedFor, 500);
+  assert.ok(!db.audit.some((a) => a.action === "low_funds_warning"));
 });
 
-test("M11 a changing shortfall stays one episode until funding recovers", () => {
-  const db = fresh();
-  const now = Date.now();
-  db.accounts.parent.balance = 500;
-  runGuardian(db, now);
-  game.requestExtraAllowance(db, { amount: 500, reason: "Books" });
-  runGuardian(db, now + 2000);
-  db.accounts.parent.balance = 400;
-  runGuardian(db, now + DAY);
-  assert.equal(db.audit.filter((a) => a.action === "low_funds_warning").length, 1);
+test("M11/H12 pending extra requests generate no low-funds episode", () => {
+  const db = fresh(), now = Date.now(), pending = game.requestExtraAllowance(db, { amount: 1000, reason: "Books" });
+  for (let i = 0; i < 3; i++) runGuardian(db, now + i * 2000);
+  assert.equal(pending.status, "pending"); assert.equal(pending.paidTxnId, undefined);
+  assert.equal(db.allowance.lowFundsWarnedAt, undefined);
+  assert.ok(!db.notifications.some((n) => /funding account|upcoming commitments/.test(n.text)));
+});
+
+test("M11/H12 repeated Apple Cash covers do not revive funding warnings", () => {
+  const db = fresh(); db.accounts.savings.balance = 0;
+  for (let i = 0; i < 3; i++) { game.childWalletSpend(db, { amount: 100, merchant: "Shop" }, spendPolicy); runGuardian(db); }
+  assert.equal(db.accounts.savings.balance, 0);
+  assert.equal(db.notifications.filter((n) => /to cover an Apple Cash purchase/.test(n.text)).length, 3);
+  assert.ok(!db.audit.some((a) => a.action === "low_funds_warning"));
 });
 
 test("M23 act reverses duplicates before a child save can unlock phantom milestones", () => {
@@ -407,7 +362,7 @@ test("M24 throwing mutations restore the database without version or subscriber 
   const failure = new Error("stop halfway");
   try {
     assert.throws(() => mutate((d) => {
-      d.accounts.parent.balance = 0;
+      d.accounts.savings.balance = 0;
       d.approvals.push({ id: "partial" });
       d.version += 100;
       d.temporary = true;

@@ -111,17 +111,17 @@ test("all game, Buddy, stream and parent routes require a session", async () => 
   }
 });
 
-test("parent child selection keeps funding accounts, settings and mutations separate", async () => {
+test("parent child selection keeps Savings accounts, settings and mutations separate", async () => {
   const a = await family("a");
   const other = await a.browser.call("POST", "/api/parent/children", { name: "Sibling", age: 12, bearName: "Bear" });
   const id = other.body.id;
   assert.equal(listChildren(a.familyId).length, 2);
-  assert.notEqual(readChild(id).accounts.parent.id, readChild(a.id).accounts.parent.id);
+  assert.notEqual(readChild(id).accounts.savings.id, readChild(a.id).accounts.savings.id);
   process.env.MQ_DEMO = "1";
-  assert.equal((await a.browser.call("POST", `/api/parent/topup?child=${id}`, { amount: 50 })).status, 404);
-  mutateChild(id, (d) => { d.accounts.parent.balance = 5000; });
-  assert.equal(readChild(id).accounts.parent.balance, 5000);
-  assert.equal(readChild(a.id).accounts.parent.balance, 0);
+  assert.equal((await a.browser.call("POST", `/api/parent/topup?child=${id}`, { amount: 50 })).status, 410);
+  mutateChild(id, (d) => { d.accounts.savings.balance = 5000; });
+  assert.equal(readChild(id).accounts.savings.balance, 5000);
+  assert.equal(readChild(a.id).accounts.savings.balance, 0);
   assert.equal((await a.browser.call("GET", `/api/auth/me?child=${id}`)).body.activeChild.id, id);
   await a.browser.call("POST", `/api/parent/settings?child=${id}`, { buddyEnabled: false });
   assert.equal(readChild(a.id).settings.buddyEnabled, true);
@@ -177,7 +177,7 @@ test("tick selects only due children and processes allowance and adventure work 
   const a = await family("a"), b = await family("b"), idle = await family("idle");
   const now = Date.now();
   for (const account of [a, b]) mutateChild(account.id, (d) => {
-    d.accounts.parent.balance = 5000;
+    d.accounts.savings.balance = 5000;
     d.allowance.amount = 1000;
     d.allowance.nextRun = now;
     d.adventures.push({ id: "trip", destId: "chicago", status: "away", returnsAt: now - 1, postcardIds: [] });
@@ -186,8 +186,7 @@ test("tick selects only due children and processes allowance and adventure work 
   assert.deepEqual(new Set(childrenWithDueWork(now)), new Set([a.id, b.id]));
   assert.deepEqual(new Set(tick(now)), new Set([a.id, b.id]));
   for (const { id } of [a, b]) {
-    assert.equal(readChild(id).accounts.parent.balance, 4000);
-    assert.equal(readChild(id).accounts.savings.balance, 500);
+    assert.equal(readChild(id).accounts.savings.balance, 5500);
     assert.equal(readChild(id).accounts.spending.balance, 500);
     assert.equal(readChild(id).adventures[0].status, "returned");
     assert.equal(readChild(id).postcards.length, 1);
@@ -201,7 +200,7 @@ test("failed SQLite mutations restore held document references, disk, version an
   const held = readChild(a.id), before = structuredClone(held);
   let events = 0;
   const off = subscribe(a.familyId, () => { events++; });
-  assert.throws(() => mutateChild(a.id, (d) => { d.accounts.parent.balance = 9000; delete d.child; throw new Error("abort"); }), /abort/);
+  assert.throws(() => mutateChild(a.id, (d) => { d.accounts.savings.balance = 9000; delete d.child; throw new Error("abort"); }), /abort/);
   assert.deepEqual(held, before);
   assert.deepEqual(JSON.parse(database().prepare("SELECT doc FROM children WHERE id = ?").get(a.id).doc), before);
   assert.equal(events, 0);
@@ -378,8 +377,8 @@ test("Nessie mirror account caches and asynchronous audit hooks retain each chil
     });
     for (const i of [0, 0, 1]) transfer(docs[i], { from: "spending", to: "merchant", amount: 100, kind: "spend", memo: "book" });
     await done;
-    assert.equal(requests.filter((r) => r.url.includes("/customers?" )).length, 4);
-    assert.equal(requests.filter((r) => /customers\\/[^/]+\\/accounts\\?/.test(r.url)).length, 6);
+    assert.equal(requests.filter((r) => r.url.includes("/customers?" )).length, 2);
+    assert.equal(requests.filter((r) => /customers\\/[^/]+\\/accounts\\?/.test(r.url)).length, 4);
     const withdrawals = requests.filter((r) => r.url.includes("/withdrawals"));
     assert.equal(withdrawals.length, 3);
     assert.equal(withdrawals[0].url, withdrawals[1].url);

@@ -34,17 +34,6 @@ export function audit(db, actor, action, detail, data = {}) {
   if (db.audit.length > 2000) db.audit.splice(0, db.audit.length - 2000);
 }
 
-export function recordFunding(db, amount, note) {
-  const txn = {
-    id: uid("txn"), ts: Date.now(), from: "external", to: "parent", amount,
-    kind: "funding_in", memo: note || `Added by ${db.family.parentName}`,
-    idempotencyKey: null, status: "posted",
-  };
-  db.accounts.parent.balance += amount;
-  db.transactions.push(txn);
-  audit(db, "parent", "funding_added", `Recorded ${dollars(amount)} added to ${db.child.name}'s funding — real money stays with you`, { txnId: txn.id, amount });
-}
-
 export function notify(db, to, text, kind = "info", ref = null) {
   if (ref && db.notifications.some((n) => n.to === to && n.ref === ref)) return;
   db.notifications.push({ id: uid("ntf"), ts: Date.now(), to, text, kind, ref, read: false });
@@ -483,70 +472,124 @@ export function childSave(db, amountCents, now = Date.now()) {
   moneyMoved(db, `${db.child.name} saved ${dollars(amountCents)}`);
 }
 
-/**
- * Child records a purchase. The guardian's spending policy decides whether it
- * posts immediately or is held for a parent.
- */
-export function childSpend(db, { amount, memo }, policy, now = Date.now()) {
+// Manual receipts outlive rolling transaction retention, so a late retry stays safe.
+function manualResult(db, clientId) {
+  if (!clientId) return null;
+  return db.moneyReceipts?.[clientId] || db.walletReceipts?.[clientId] || db.transactions.find((t) => t.idempotencyKey === clientId) || db.approvals.find((a) => a.idempotencyKey === clientId);
+}
+
+function rememberMoney(db, clientId, result) {
+  if (clientId) (db.moneyReceipts ||= {})[clientId] = { ...result };
+  return result;
+}
+
+export function moneyClientId(value) {
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new GameError("Use a valid receipt ID");
+  return value;
+}
+
+export function receivedMoney(db, input, now = Date.now()) {
+  const { amount, note = "", clientId, source } = object(input);
+  moneyClientId(clientId);
+  if (!Number.isInteger(amount) || amount < 1 || amount > 50000) throw new GameError("Enter an amount from $0.01 to $500");
+  if (typeof note !== "string" || note.trim().length > 60) throw new GameError("Keep your note to 60 letters");
+  if (!["kid_form", "parent"].includes(source)) throw new GameError("Choose who recorded the money");
+  const previous = manualResult(db, clientId);
+  if (previous) return { ...previous, duplicate: true };
+  const { txn } = transfer(db, { from: "external", to: "savings", amount, kind: "received", memo: "Received from your grown-up", idempotencyKey: clientId, ts: now });
+  Object.assign(txn, { source, note: note.trim() });
+  if (source === "kid_form") notify(db, "parent", `${db.child.name} recorded ${dollars(amount)} received from you${txn.note ? ` · ${txn.note}` : ""}`, "money", txn.id);
+  else notify(db, "child", `Your grown-up sent you ${dollars(amount)}!`, "money", txn.id);
+  audit(db, source === "parent" ? "parent" : "child", "received", `Recorded ${dollars(amount)} received from your grown-up`, { txnId: txn.id, source });
+  if (source === "kid_form") dailyTrackingBonus(db, now);
+  moneyMoved(db, "Money received into savings");
+  return rememberMoney(db, clientId, { ...txn, recorded: true, duplicate: false });
+}
+
+export function childSpend(db, { amount, memo, clientId }, policy, now = Date.now()) {
+  if (clientId !== undefined) moneyClientId(clientId);
   if (!Number.isInteger(amount) || !(amount >= 1 && amount <= 1000000)) throw new GameError("Enter how much you spent");
   if (typeof memo !== "string" || !memo.trim() || memo.trim().length > 120) throw new GameError("What did you buy?");
+  const previous = manualResult(db, clientId);
+  if (previous) return { ...previous, duplicate: true };
   if (db.accounts.spending.balance < amount) throw new GameError("That's more than your spending money");
   const verdict = policy(db, amount, memo);
   if (verdict.hold) {
-    const approval = { id: uid("apr"), kind: "spend", status: "pending", createdAt: now, amount, memo: memo.trim(),
+    const approval = { id: uid("apr"), kind: "spend", status: "pending", createdAt: now, amount, memo: memo.trim(), idempotencyKey: clientId || null,
       title: `${db.child.name} wants to buy "${memo.trim()}" for ${dollars(amount)}`, detail: verdict.reason };
     db.approvals.push(approval);
     notify(db, "parent", `Purchase needs your OK: ${memo.trim()} (${dollars(amount)})`, "approval", approval.id);
     audit(db, "guardian", "spend_held", verdict.reason, { approvalId: approval.id, policy: verdict.policy });
     dailyTrackingBonus(db, now);
-    return { held: true, reason: verdict.reason };
+    return rememberMoney(db, clientId, { held: true, reason: verdict.reason });
   }
-  transfer(db, { from: "spending", to: "merchant", amount, kind: "spend", memo: memo.trim(), ts: now });
+  const { txn } = transfer(db, { from: "spending", to: "merchant", amount, kind: "spend", memo: memo.trim(), idempotencyKey: clientId, ts: now });
   dailyTrackingBonus(db, now);
   audit(db, "child", "spent", `Spent ${dollars(amount)} on ${memo.trim()}`);
   moneyMoved(db, `${db.child.name} spent ${dollars(amount)} on ${memo.trim()}`);
-  return { held: false };
+  return rememberMoney(db, clientId, { ...txn, held: false, duplicate: false });
 }
 
-// Apple Cash receipts describe purchases already paid outside the app. Funding
-// covers the record; short receipts wait for a parent deposit without a debit.
 export function parentWalletSend() {
-  throw new GameError("Use Add money in Allowance to fund Apple Cash", 410);
+  throw new GameError("Use Send money in Allowance instead", 410);
 }
 
-const FUNDING_SHORT = "Your grown-up's funding is short for that. Ask them to add money!";
-function fundingShort(db, receipt) {
-  return { error: FUNDING_SHORT, reason: "funding_short", shortBy: receipt.amount - db.accounts.parent.balance };
+export function recordWalletPending() {
+  throw new GameError("Apple Cash purchases are recorded automatically from Savings; there are no waiting receipts", 410);
 }
 
-function postWalletReceipt(db, receipt, policy, now, actor = "child") {
-  if (db.accounts.parent.balance < receipt.amount) return fundingShort(db, receipt);
+export function dismissWalletPending() {
+  return recordWalletPending();
+}
+
+// Apple Cash purchases already happened outside the app. Record them in full;
+// a grown-up's automatic credit covers only the missing savings.
+export function postWalletReceipt(db, receipt, policy, now = Date.now(), actor = "child") {
+  const previous = db.walletReceipts?.[receipt.idempotencyKey] || db.moneyReceipts?.[receipt.idempotencyKey] || db.transactions.find((t) => t.idempotencyKey === receipt.idempotencyKey);
+  if (previous && previous.status !== "waiting") return { ...previous, recorded: true, covered: previous.covered || 0, duplicate: true };
+  if (previous?.status === "waiting") receipt = previous;
+  const noticeIds = new Set(db.notifications.map((n) => n.id));
   const verdict = policy(db, receipt.amount, receipt.merchant, { alreadyPaid: true });
+  const covered = Math.max(0, receipt.amount - db.accounts.savings.balance);
+  if (covered) {
+    const { txn: credit } = transfer(db, { from: "external", to: "savings", amount: covered, kind: "received", memo: "Added to cover an Apple Cash purchase", idempotencyKey: `cover:${receipt.idempotencyKey}`, ts: now });
+    Object.assign(credit, { source: "auto_cover", note: "Added to cover an Apple Cash purchase" });
+  }
+  if (covered || actor === "system") {
+    // Keep the cover/migration and G4 information in one parent notification.
+    const policyNotices = db.notifications.filter((n) => !noticeIds.has(n.id) && n.to === "parent");
+    const policyIds = new Set(policyNotices.map((n) => n.id));
+    db.notifications = db.notifications.filter((n) => !policyIds.has(n.id));
+    const text = covered
+      ? `Added ${dollars(covered)} to ${db.child.name}'s savings to cover an Apple Cash purchase at ${receipt.merchant}`
+      : `Recorded ${db.child.name}'s Apple Cash purchase of ${dollars(receipt.amount)} at ${receipt.merchant} from Savings`;
+    notify(db, "parent", `${text}${policyNotices.length ? `. ${policyNotices.map((n) => n.text).join(" ")}` : ""}`, "money", `${covered ? "cover" : "migrated"}:${receipt.idempotencyKey}`);
+  }
+  // Local receipt only: do not mirror an already completed Apple Cash purchase.
   const txn = {
-    id: uid("txn"), pendingId: receipt.id, ts: receipt.ts, recordedAt: now, from: "parent", to: "merchant",
+    id: uid("txn"), ts: receipt.ts, recordedAt: now, from: "savings", to: "merchant",
     amount: receipt.amount, kind: "wallet_spend", memo: receipt.merchant, merchant: receipt.merchant,
-    idempotencyKey: receipt.idempotencyKey, status: "posted",
+    idempotencyKey: receipt.idempotencyKey, status: "posted", covered,
     overLimit: !!verdict.overLimit, unusual: !!verdict.unusual,
   };
   if (receipt.external_id !== undefined) txn.external_id = receipt.external_id;
-  // These receipts are local records, not instructions to the bank mirror.
-  db.accounts.parent.balance -= txn.amount;
+  db.accounts.savings.balance -= txn.amount;
   db.transactions.push(txn);
   (db.walletReceipts ||= {})[receipt.idempotencyKey] = { ...txn };
-  db.walletPending = (db.walletPending || []).filter((p) => p.id !== receipt.id);
-  for (const n of db.notifications) if (n.ref === receipt.id) n.read = true;
-  dailyTrackingBonus(db, now);
-  audit(db, actor, "wallet_spend", `Recorded ${dollars(txn.amount)} paid with Apple Cash at ${txn.merchant}`, { txnId: txn.id, pendingId: receipt.id });
-  moneyMoved(db, "Apple Cash purchase recorded");
-  return { ...txn, duplicate: false };
+  if (receipt.id) for (const n of db.notifications) if (n.ref === receipt.id) n.read = true;
+  if (actor !== "system") dailyTrackingBonus(db, now);
+  audit(db, actor, "wallet_spend", `Recorded ${dollars(txn.amount)} paid with Apple Cash at ${txn.merchant}`, { txnId: txn.id, covered });
+  if (actor !== "system") moneyMoved(db, "Apple Cash purchase recorded");
+  return { ...txn, recorded: true, duplicate: false };
 }
 
-export function childWalletSpend(db, { amount, merchant, at, external_id }, policy, now = Date.now()) {
+export function childWalletSpend(db, { amount, merchant, at, external_id, clientId }, policy, now = Date.now()) {
   if (!Number.isInteger(amount) || amount < 1 || amount > 1000000) throw new GameError("Enter how much you spent");
   if (typeof merchant !== "string" || !merchant.trim() || merchant.trim().length > 120) throw new GameError("Where did you spend it?");
   merchant = merchant.trim();
   if (external_id !== undefined && (typeof external_id !== "string" || !external_id.trim() || external_id.trim().length > 64)) throw new GameError("Use a short transaction ID");
-  const key = external_id === undefined ? null : `wallet:${external_id.trim()}`;
+  if (clientId !== undefined) moneyClientId(clientId);
+  const key = external_id !== undefined ? `wallet:${external_id.trim()}` : clientId || uid("wallet");
   let ts = now;
   if (at !== undefined) {
     if (typeof at === "number") ts = at;
@@ -554,44 +597,7 @@ export function childWalletSpend(db, { amount, merchant, at, external_id }, poli
     else throw new GameError("Use an ISO date with a time zone or a timestamp");
     if (!Number.isSafeInteger(ts) || ts < 0 || !Number.isFinite(new Date(ts).getTime())) throw new GameError("Use a valid transaction date");
   }
-  // Durable receipts preserve idempotency beyond rolling ledger/pending retention.
-  const existing = key && (db.walletReceipts?.[key] || db.transactions.find((t) => t.idempotencyKey === key));
-  if (existing && existing.status !== "waiting") return { ...existing, duplicate: true };
-  const receipt = existing || {
-    id: uid("wpend"), ts, createdAt: now, amount, merchant, status: "waiting",
-    idempotencyKey: key || uid("wallet"), ...(key ? { external_id: external_id.trim() } : {}),
-  };
-  if (db.accounts.parent.balance >= receipt.amount) return postWalletReceipt(db, receipt, policy, now);
-  if (!existing) {
-    (db.walletReceipts ||= {})[receipt.idempotencyKey] = receipt;
-    (db.walletPending ||= []).push(receipt);
-    if (db.walletPending.length > 20) db.walletPending.splice(0, db.walletPending.length - 20);
-    notify(db, "parent", `${db.child.name}'s Apple Cash spent ${dollars(amount)} at ${merchant} but funding only has ${dollars(db.accounts.parent.balance)} — add money, then record it.`, "guardian", receipt.id);
-    audit(db, "child", "wallet_pending", `Apple Cash purchase of ${dollars(amount)} at ${merchant} is waiting for funding`, { pendingId: receipt.id });
-  }
-  return fundingShort(db, receipt);
-}
-
-export function recordWalletPending(db, pendingId, policy, now = Date.now()) {
-  pendingId = id(pendingId);
-  const receipt = db.walletPending?.find((p) => p.id === pendingId);
-  if (!receipt) {
-    const original = Object.values(db.walletReceipts || {}).find((r) => r.pendingId === pendingId);
-    if (original) return { ...original, duplicate: true };
-    throw new GameError("That receipt is no longer waiting", 404);
-  }
-  return postWalletReceipt(db, receipt, policy, now, "parent");
-}
-
-export function dismissWalletPending(db, pendingId) {
-  pendingId = id(pendingId);
-  const receipt = db.walletPending?.find((p) => p.id === pendingId);
-  if (!receipt) throw new GameError("That receipt is no longer waiting", 404);
-  db.walletReceipts[receipt.idempotencyKey] = { ...receipt, status: "dismissed" };
-  db.walletPending = db.walletPending.filter((p) => p.id !== pendingId);
-  for (const n of db.notifications) if (n.ref === pendingId) n.read = true;
-  audit(db, "parent", "wallet_pending_dismissed", `Dismissed Apple Cash receipt of ${dollars(receipt.amount)} at ${receipt.merchant}`, { pendingId });
-  return { ok: true };
+  return postWalletReceipt(db, { ts, amount, merchant, idempotencyKey: key, ...(external_id !== undefined ? { external_id: external_id.trim() } : {}) }, policy, now);
 }
 
 export function journal(db, { direction, amount, note, prices }, now = Date.now()) {
@@ -689,10 +695,6 @@ export function decide(db, approvalId, approve, note = "") {
     }
     case "mission_proposal":
       if (approve) createParentMission(db, { title: a.missionTitle, points: a.points, by: "buddy+parent" });
-      break;
-    case "topup":
-      a.handled = true;
-      notify(db, "parent", `Funding request handled: ${a.title}`, "info", `resolved:${a.id}`);
       break;
   }
   return a;
