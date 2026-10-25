@@ -112,7 +112,7 @@ export default function MapView({ places, home, owned, away, now, bear, selected
           if (p.lon == null) return null;
           const [x, y] = HAWAII_AT;
           return (
-            <g key={id} className="pin secret" transform={`translate(${x} ${y})`} onClick={() => onSelect(id)} role="button" tabIndex="0" aria-label="Undiscovered place" onKeyDown={(e) => e.key === "Enter" && onSelect(id)}>
+            <g key={id} className="pin secret" transform={`translate(${x} ${y})`} onClick={() => onSelect(id)} role="button" tabIndex="0" aria-label="Undiscovered place" onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(id); } }}>
               <circle className="pin-bg" r="20" />
               <text y="7" textAnchor="middle">?</text>
             </g>
@@ -128,7 +128,7 @@ export default function MapView({ places, home, owned, away, now, bear, selected
         return (
           <g key={id} className={`pin ${state} ${selected === id ? "selected" : ""} ${away?.destId === id ? "target" : ""}`} transform={`translate(${x} ${y})`}
             onClick={() => onSelect(id)} role="button" tabIndex="0" aria-label={`${p.name}: ${state === "visited" ? "visited" : state === "open" ? `${p.cost} points` : "locked"}`}
-            onKeyDown={(e) => e.key === "Enter" && onSelect(id)}>
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(id); } }}>
             <circle className="pin-bg" r="20" />
             {state === "locked" ? (
               <svg x="-11" y="-11" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">{ICON_PATHS.lock}</svg>

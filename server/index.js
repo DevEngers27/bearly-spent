@@ -85,9 +85,13 @@ function placesView(db) {
 
 function childView(db) {
   const now = Date.now();
+  const d = new Date(now), onejan = new Date(d.getFullYear(), 0, 1);
+  const week = `${d.getFullYear()}-w${Math.ceil(((d - onejan) / 86400000 + onejan.getDay() + 1) / 7)}`;
   return {
     version: db.version,
     now,
+    offline: false,
+    budgetDoneThisWeek: db.child.lastBudgetWeek === week,
     child: db.child,
     balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance },
     goals: db.savingsGoals.map((g) => ({ ...g, weeksLeft: game.weeksToGoal(db, g) })),
