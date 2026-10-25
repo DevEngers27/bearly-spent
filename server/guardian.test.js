@@ -1,3 +1,6 @@
+import { childIdFor as lessonChildId } from "./store.js";
+import { LESSONS as lessonCatalog } from "./catalog.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyAction, demoRunNow } from "./index.js";
@@ -9,6 +12,7 @@ import { runGuardian, hasDueWork, pendingFindings, reconcileNow, spendPolicy, in
 import { actions } from "./actions.js";
 import { dayKey } from "./time.js";
 
+const lessonAnswers = (db, lesson) => pickLessonIndexes(lessonChildId(db), lesson.id, db.child.lessonAttempts?.[lesson.id] || 0).map((i) => lesson.questions[i].answer);
 const DAY = 86400000;
 const fresh = () => seed(Date.now());
 // Exercise the exported HTTP helpers without sockets or timers.
@@ -24,7 +28,7 @@ function actionRunner(db, replans = []) {
 
 function approvedReward(db, amount = 500) {
   const goal = game.createParentGoal(db, { title: "Learn something", type: "lessons", count: 1, reward: amount / 100 });
-  game.completeLesson(db, "needs_wants", [0, 1, 0, 1]);
+  game.completeLesson(db, "needs_wants", lessonAnswers(db, lessonCatalog.find((l) => l.id === "needs_wants")));
   const approval = db.approvals.find((a) => a.goalId === goal.id);
   game.decide(db, approval.id, true);
   return approval;
@@ -213,12 +217,12 @@ test("M5 zero reward goals finish once without an approval or cash transfer", ()
   const goal = game.createParentGoal(db, { title: "Try a lesson", type: "lessons", count: 1, reward: 0 });
   const accounts = structuredClone(db.accounts);
   const transactions = db.transactions.length;
-  game.completeLesson(db, "needs_wants", [0, 1, 0, 1]);
+  game.completeLesson(db, "needs_wants", lessonAnswers(db, lessonCatalog.find((l) => l.id === "needs_wants")));
   assert.equal(goal.status, "done");
   assert.ok(goal.completedAt);
   assert.ok(db.notifications.some((n) => n.to === "child" && n.text === "You finished Try a lesson!"));
   assert.ok(db.notifications.some((n) => n.to === "parent" && n.text === "Mia finished Try a lesson (no cash reward)"));
-  game.completeLesson(db, "saving_math", [1, 0, 1]);
+  game.completeLesson(db, "saving_math", lessonAnswers(db, lessonCatalog.find((l) => l.id === "saving_math")));
   runGuardian(db, Date.now());
   assert.equal(db.approvals.filter((a) => a.kind === "reward").length, 0);
   assert.equal(db.transactions.length, transactions);

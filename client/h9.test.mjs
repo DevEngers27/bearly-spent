@@ -1,3 +1,4 @@
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 // Socket-free C1 regression checks: node --test client/c1.test.mjs
 // Browser gestures, installation and visual checks remain in CHECKLIST.md.
 import test from "node:test";
@@ -157,7 +158,7 @@ test("H9.2 five unpassed lessons roll after sheet closes, show New and collapse 
   byText(tree, catalog.LESSONS[0].title).props.onClick();
   assert.equal(opened[0][1].lesson.id, catalog.LESSONS[0].id);
   sheet = true; render(); h.flush();
-  game.completeLesson(db, catalog.LESSONS[0].id, catalog.LESSONS[0].questions.map((q) => q.answer));
+  game.completeLesson(db, catalog.LESSONS[0].id, pickLessonIndexes(undefined, catalog.LESSONS[0].id, 0).map((i) => catalog.LESSONS[0].questions[i].answer));
   state = childView(db); render(); h.flush();
   assert.equal(nodes(render(), (n) => n.props.className?.includes("mission-enter")).length, 0, "wait for result sheet to close");
   sheet = false; render(); h.flush(); tree = render();
@@ -175,7 +176,7 @@ test("H9.2 five unpassed lessons roll after sheet closes, show New and collapse 
   assert.match(text(byText(finished, catalog.LESSONS[0].title)), /Review · no points/);
   assert.doesNotMatch(text(byText(finished, catalog.LESSONS[0].title)), /\+20/);
   assert.equal(nodes(nodes(tree, (n) => n.props.className === "lesson-grid")[0], (n) => n.type === "button").length, 5);
-  for (const lesson of catalog.LESSONS) game.completeLesson(db, lesson.id, lesson.questions.map((q) => q.answer));
+  for (const lesson of catalog.LESSONS) game.completeLesson(db, lesson.id, pickLessonIndexes(undefined, lesson.id, db.child.lessonAttempts?.[lesson.id] || 0).map((i) => lesson.questions[i].answer));
   state = childView(db); tree = render(); h.flush();
   assert.match(normalized(tree), /You finished every lesson — more are on the way!/);
 });
@@ -183,11 +184,11 @@ test("H9.2 five unpassed lessons roll after sheet closes, show New and collapse 
 test("H9.2 parent lesson totals follow the catalog and quiz reviews say no points", async () => {
   const h = harness("Parent.jsx"), state = stateFixture();
   state.child.lessonsDone = catalog.LESSONS.slice(0, 6).map((l) => l.id);
-  assert.match(normalized(h.render(h.exports.Overview, { state })), /6\s*\/\s*15 unique/);
+  assert.match(normalized(h.render(h.exports.Overview, { state })), /6\s*\/\s*30 unique/);
   const quiz = harness("Child.jsx");
   const lesson = catalog.LESSONS[5];
-  const render = () => quiz.render(quiz.exports.LessonSheet, { state, lesson, run: async () => ({ passed: true, correct: 3, total: 3, firstTime: false }) });
-  for (let i = 0; i < lesson.questions.length; i++) await byText(render(), lesson.questions[i].options[lesson.questions[i].answer]).props.onClick();
+  const render = () => quiz.render(quiz.exports.LessonSheet, { state, lesson, run: async () => ({ passed: true, correct: 4, total: 4, firstTime: false }) });
+  for (const i of pickLessonIndexes(state.childId, lesson.id, 0)) await byText(render(), lesson.questions[i].options[lesson.questions[i].answer]).props.onClick();
   assert.match(normalized(render()), /Nice review! No extra points for repeats/);
 });
 

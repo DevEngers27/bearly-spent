@@ -1,3 +1,5 @@
+import { childIdFor as lessonChildId } from "./store.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -12,6 +14,7 @@ import { policies } from "./limits.js";
 import { readFile } from "node:fs/promises";
 import * as game from "./domain.js";
 
+const lessonAnswers = (db, lesson) => pickLessonIndexes(lessonChildId(db), lesson.id, db.child.lessonAttempts?.[lesson.id] || 0).map((i) => lesson.questions[i].answer);
 const originalDemo = process.env.MQ_DEMO;
 const originalDir = process.env.MQ_DATA_DIR;
 const form = (name) => ({ email: `${name.replaceAll(" ", "")}@example.test`, password: "parent-password", parentName: name, childName: name, childAge: 9, bearName: "Pip" });
@@ -79,14 +82,14 @@ test("H9.1 paired kid logout revokes cookie and keeps parent session usable", as
   assert.equal((await a.browser.call("GET", "/api/auth/me")).status, 200);
 });
 
-test("H9.2 fifteen ordered lessons have valid icons, answers and private answer keys", async () => {
+test("H9.2 thirty ordered lessons have valid icons, answers and private answer keys", async () => {
   const icons = await readFile(new URL("../client/src/Icons.jsx", import.meta.url), "utf8");
-  assert.equal(LESSONS.length, 15);
-  assert.equal(new Set(LESSONS.map((l) => l.id)).size, 15);
+  assert.equal(LESSONS.length, 30);
+  assert.equal(new Set(LESSONS.map((l) => l.id)).size, 30);
   for (const lesson of LESSONS) {
     assert.ok(lesson.title.length > 0);
     assert.ok(new Set([...icons.matchAll(/^  (\w+):/gm)].map((m) => m[1]).concat(["honey", "basket"])).has(lesson.icon), lesson.icon);
-    assert.ok(lesson.questions.length >= 3 && lesson.questions.length <= 4);
+    assert.equal(lesson.questions.length, 6);
     for (const q of lesson.questions) {
       assert.ok(q.q.length > 0);
       assert.ok(q.options.length >= 2 && q.options.length <= 3);
@@ -97,7 +100,7 @@ test("H9.2 fifteen ordered lessons have valid icons, answers and private answer 
   const a = await family("Mia");
   const view = (await a.browser.call("GET", "/api/state")).body;
   assert.deepEqual(view.lessons.next.map((l) => l.id), LESSONS.slice(0, 5).map((l) => l.id));
-  assert.deepEqual(view.catalog.lessons.map((l) => l.order), Array.from({ length: 15 }, (_, i) => i));
+  assert.deepEqual(view.catalog.lessons.map((l) => l.order), Array.from({ length: 30 }, (_, i) => i));
   for (const l of [...view.catalog.lessons, ...view.lessons.next]) assert.ok(l.questions.every((q) => !("answer" in q)));
 });
 
@@ -105,11 +108,11 @@ test("H9.2 first passes roll the server window; every replay earns zero points a
   const a = await family("Mia");
   const money = structuredClone(readChild(a.id).accounts);
   for (const [i, lesson] of LESSONS.entries()) {
-    const answers = lesson.questions.map((q) => q.answer);
+    const answers = lessonAnswers(readChild(a.id), lesson);
     const first = await a.browser.call("POST", "/api/child/lesson", { lessonId: lesson.id, answers });
     assert.equal(first.body.firstTime, true);
     const points = readChild(a.id).child.points;
-    const repeat = await a.browser.call("POST", "/api/child/lesson", { lessonId: lesson.id, answers });
+    const repeat = await a.browser.call("POST", "/api/child/lesson", { lessonId: lesson.id, answers: lessonAnswers(readChild(a.id), lesson) });
     assert.equal(repeat.body.firstTime, false);
     assert.equal(readChild(a.id).child.points, points);
     const view = (await a.browser.call("GET", "/api/state")).body;
@@ -117,11 +120,11 @@ test("H9.2 first passes roll the server window; every replay earns zero points a
     assert.equal(view.lessons.finished.length, i + 1);
   }
   assert.deepEqual(readChild(a.id).accounts, money);
-  assert.deepEqual(snapshot(readChild(a.id)).lessons, { finished: 15, total: 15 });
+  assert.deepEqual(snapshot(readChild(a.id)).lessons, { finished: 30, total: 30 });
   const d = seed(Date.now());
   // Direct first pass preserves the existing lesson reward, separate from daily mission rewards.
   const before = d.child.points;
-  game.completeLesson(d, LESSONS[5].id, LESSONS[5].questions.map((q) => q.answer));
+  game.completeLesson(d, LESSONS[5].id, lessonAnswers(d, LESSONS[5]));
   assert.equal(d.child.points, before + POINTS.lesson);
 });
 

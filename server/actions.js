@@ -63,7 +63,8 @@ export const actions = {
   lesson: action((db, body, now) => {
     const lessonId = id(body.lessonId);
     if (!Array.isArray(body.answers) || !body.answers.every((v) => Number.isInteger(v))) throw new game.GameError("Answer every question with a choice");
-    return game.completeLesson(db, lessonId, body.answers, now);
+    const attempt = Object.hasOwn(body, "attempt") ? integer(body.attempt) : undefined;
+    return game.completeLesson(db, lessonId, body.answers, now, attempt);
   }),
   adventureSeen: (db, adventureId) => game.markAdventureSeen(db, id(adventureId)),
   cancelGoal: (db, goalId) => game.cancelParentGoal(db, id(goalId)),

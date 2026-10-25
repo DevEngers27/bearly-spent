@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { seed } from "./store.js";
+import { LESSONS } from "./catalog.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import * as game from "./domain.js";
 import { spendPolicy } from "./guardian.js";
 import { chat } from "./buddy.js";
@@ -310,7 +312,7 @@ test("lesson validates IDs and an array of integer answers before scoring", () =
   for (const answers of [undefined, {}, "0101", [0, "1", 0, 1], [0, 1.5, 0, 1], [0, NaN, 0, 1]]) {
     rejectsUnchanged(db, () => actions.lesson(db, { lessonId: "needs_wants", answers }));
   }
-  assert.equal(actions.lesson(db, { lessonId: "needs_wants", answers: [0, 1, 0, 1] }).passed, true);
+  assert.equal(actions.lesson(db, { lessonId: "needs_wants", answers: pickLessonIndexes(undefined, "needs_wants", 0).map((i) => LESSONS[0].questions[i].answer) }).passed, true);
 });
 
 test("budget validates every allocation before awarding points", () => {

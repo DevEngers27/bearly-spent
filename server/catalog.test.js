@@ -1,3 +1,5 @@
+import { childIdFor as lessonChildId } from "./store.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { migrate, seed } from "./store.js";
@@ -5,9 +7,10 @@ import { LESSONS, PLACES, bonusDiscoveries, placeStatus } from "./catalog.js";
 import * as game from "./domain.js";
 import { hasDueWork, runGuardian } from "./guardian.js";
 
+const lessonAnswers = (db, lesson) => pickLessonIndexes(lessonChildId(db), lesson.id, db.child.lessonAttempts?.[lesson.id] || 0).map((i) => lesson.questions[i].answer);
 const fresh = () => seed(Date.now());
 const tradeApproval = (db, trade) => db.approvals.find((a) => a.tradeId === trade.id);
-const passLesson = (db, lesson) => game.completeLesson(db, lesson.id, lesson.questions.map((q) => q.answer));
+const passLesson = (db, lesson) => game.completeLesson(db, lesson.id, lessonAnswers(db, lesson));
 
 test("every catalog discovery and prerequisite references an existing place", () => {
   assert.equal(Object.keys(PLACES).length, 15);
@@ -270,7 +273,7 @@ test("five lesson replays award only 20 total points and one goal and coop step"
 test("a failed lesson attempt does not consume its first-pass reward", () => {
   const db = fresh();
   const before = db.child.points;
-  assert.equal(game.completeLesson(db, LESSONS[0].id, [1, 0, 1, 0]).passed, false);
+  assert.equal(game.completeLesson(db, LESSONS[0].id, lessonAnswers(db, LESSONS[0]).map((a) => 1 - a)).passed, false);
   assert.equal(db.child.stats.learningDone, 0);
   assert.equal(db.child.points, before);
   assert.equal(passLesson(db, LESSONS[0]).firstTime, true);

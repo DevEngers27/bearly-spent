@@ -5,6 +5,7 @@ import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Pos
 import Markdown from "./Markdown.jsx";
 import MapView from "./MapView.jsx";
 import { Icon } from "./Icons.jsx";
+import { LESSON_QUESTION_COUNT, pickLessonIndexes } from "../../shared/lessonPick.js";
 
 const TABS = [
   { id: "home", label: "Home", icon: "home" },
@@ -691,7 +692,7 @@ function Missions({ state, run, open, busy, goMap, setTab, lessonSheetOpen }) {
   const lessonCard = (l, i, done = false) => <button key={l.id} disabled={busy || (!done && leavingLessons.some((p) => p.id === l.id))} className={`lesson ${done ? "done" : leavingLessons.some((p) => p.id === l.id) ? "done mission-exit" : newLessons.includes(l.id) ? "mission-enter" : ""}`} style={{ "--tilt": `${[-1.2, 0.8, -0.6, 1, -0.9][i % 5]}deg` }} onClick={() => open("lesson", { lesson: l })}>
     <span className="lesson-emoji"><Icon name={l.icon} size={40} /></span>
     <strong>{l.title}</strong>
-    <small>{done ? "Review · no points" : leavingLessons.some((p) => p.id === l.id) ? "Finished!" : `${l.questions.length} questions · +${P.lesson}`}</small>
+    <small>{done ? "Review · no points" : leavingLessons.some((p) => p.id === l.id) ? "Finished!" : `${LESSON_QUESTION_COUNT} questions · +${P.lesson}`}</small>
     {!done && newLessons.includes(l.id) && <small className="mission-new">New!</small>}
     {done && <span className="done-stamp" aria-hidden="true"><Icon name="check" size={18} /></span>}
   </button>;
@@ -762,19 +763,21 @@ function LessonSheet({ lesson, run, close, busy, state }) {
   const [i, setI] = useState(0);
   const [answers, setAnswers] = useState([]);
   const [result, setResult] = useState(null);
+  const [attempt, setAttempt] = useState(() => state.lessonAttempts?.[lesson.id] || 0);
+  const questions = pickLessonIndexes(state.childId, lesson.id, attempt).map((idx) => lesson.questions[idx]);
   const pick = async (idx) => {
     if (busy) return;
     const next = [...answers, idx];
-    if (next.length < lesson.questions.length) { setAnswers(next); return setI(i + 1); }
-    setResult(await run("child/lesson", { lessonId: lesson.id, answers: next }));
+    if (next.length < questions.length) { setAnswers(next); return setI(i + 1); }
+    setResult(await run("child/lesson", { lessonId: lesson.id, attempt, answers: next }));
   };
-  const q = lesson.questions[i];
+  const q = questions[i];
   return (
     <Sheet title={lesson.title} onClose={close}>
       {!result ? (
         <div className="quiz" key={i}>
-          <div className="quiz-progress" aria-hidden="true">{lesson.questions.map((_, k) => <span key={k} className={k < i ? "on" : k === i ? "now" : ""} />)}</div>
-          <p className="fine">Question {i + 1} of {lesson.questions.length}</p>
+          <div className="quiz-progress" aria-hidden="true">{questions.map((_, k) => <span key={k} className={k < i ? "on" : k === i ? "now" : ""} />)}</div>
+          <p className="fine">Question {i + 1} of {questions.length}</p>
           <p className="quiz-q hand">{q.q}</p>
           <div className="quiz-opts">{q.options.map((o, idx) => <button key={o} disabled={busy} className="btn sage" onClick={() => pick(idx)}>{o}</button>)}</div>
         </div>
@@ -782,9 +785,9 @@ function LessonSheet({ lesson, run, close, busy, state }) {
         <div className="quiz-result">
           <p className="big"><Icon name={result.passed ? "medal" : "heart"} size={64} /></p>
           <p className="hand big-text">{result.correct} of {result.total} right!</p>
-          <p>{result.firstTime === false ? "Nice review! No extra points for repeats." : result.passed ? `Lesson complete. +${state.catalog.points.lesson} adventure points!` : "So close! Try again to earn your points."}</p>
+          <p>{!result.passed ? "Nearly! Try again — the questions will be a little different." : result.firstTime === false ? "Nice review! No extra points for repeats." : `Lesson complete. +${state.catalog.points.lesson} adventure points!`}</p>
           <div className="btn-row center">
-            {!result.passed && <button className="btn sage" onClick={() => { setI(0); setAnswers([]); setResult(null); }}>Try again</button>}
+            {!result.passed && <button className="btn sage" onClick={() => { setAttempt(Math.max(attempt + 1, state.lessonAttempts?.[lesson.id] || 0)); setI(0); setAnswers([]); setResult(null); }}>Try again</button>}
             <button className="btn honey" onClick={close}>Done</button>
           </div>
         </div>
