@@ -39,9 +39,83 @@ export function placeXY(id, p) {
   return [x + dx, y + dy];
 }
 
-export default function MapView({ places, home, owned, selected, onSelect }) {
+const clamp = (n) => Math.min(1, Math.max(0, Number.isFinite(n) ? n : 0));
+
+// A fixed loop through the open plains, independent of the trip and catalog.
+// All destination pin centres stay at least 40 viewBox pixels away.
+export function mysteryRoute(homeXY) {
+  const offset = ([x, y]) => [homeXY[0] + x, homeXY[1] + y];
+  const ends = [
+    [[20, 75], [40, 195], [150, 195]],
+    [[260, 195], [345, 185], [345, 95]],
+    [[345, 15], [355, -65], [290, -95]],
+    [[225, -125], [75, -135], [20, -70]],
+    [[-10, -35], [-18, -70], [0, 0]],
+  ];
+  let start = homeXY;
+  const segments = ends.map((points) => {
+    const segment = [start, ...points.map(offset)];
+    start = segment[3];
+    return segment;
+  });
+  return {
+    d: `M${homeXY.join(" ")} ` + segments.map(([, a, b, c]) => `C${a.join(" ")} ${b.join(" ")} ${c.join(" ")}`).join(" ") + " Z",
+    at(progress) {
+      const p = clamp(progress) * segments.length;
+      const i = Math.min(segments.length - 1, Math.floor(p)), t = p - i, u = 1 - t;
+      const [a, b, c, d] = segments[i];
+      return {
+        xy: [0, 1].map((axis) => u ** 3 * a[axis] + 3 * u ** 2 * t * b[axis] + 3 * u * t ** 2 * c[axis] + t ** 3 * d[axis]),
+        facingRight: 3 * u ** 2 * (b[0] - a[0]) + 6 * u * t * (c[0] - b[0]) + 3 * t ** 2 * (d[0] - c[0]) > 0,
+      };
+    },
+  };
+}
+
+export function trailD([x1, y1], [x2, y2]) {
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2 - Math.min(120, Math.hypot(x2 - x1, y2 - y1) * 0.25);
+  return {
+    d: `M${x1} ${y1} Q${mx} ${my} ${x2} ${y2}`,
+    at: (t) => ({
+      xy: [(1 - t) ** 2 * x1 + 2 * (1 - t) * t * mx + t ** 2 * x2, (1 - t) ** 2 * y1 + 2 * (1 - t) * t * my + t ** 2 * y2],
+      facingRight: x2 > x1,
+    }),
+  };
+}
+
+// The side-view asset faces left. Keep its flip separate from the bounce.
+function Walker({ facingRight, mystery }) {
+  return (
+    <>
+      <g className="walker-bounce"><g transform={facingRight ? "scale(-1 1)" : undefined}>
+        <image href="/bear/poses/bear_side.png" x="-26" y="-56" width="52" height="56" />
+      </g></g>
+      {mystery && <g className="mystery-cloud" aria-hidden="true" transform="translate(0 -78)">
+        <path d="M-18 9 C-32 8 -31 -8 -20 -10 C-20 -24 0 -26 6 -17 C23 -23 33 -5 23 5 C18 12 5 10 0 10 L-6 16 L-5 9 Z" />
+        <text y="4" textAnchor="middle">?</text>
+      </g>}
+    </>
+  );
+}
+
+export default function MapView({ places, home, owned, selected, onSelect, away, now = Date.now(), bear, latest, returnProgress = null, celebrate = false, reducedMotion = false }) {
   const homeXY = project(home.lon, home.lat);
   const entries = Object.entries(places);
+  let token = null, trail = null, progress = 0;
+  // Never read away.destId, even if a caller accidentally supplies one.
+  if (away) {
+    trail = mysteryRoute(homeXY);
+    progress = clamp((now - away.startedAt) / (away.returnsAt - away.startedAt));
+    if (reducedMotion) progress = Math.floor(progress * 8) / 8;
+    token = trail.at(progress);
+  } else if (latest?.status === "returned" && places[latest.destId] && !places[latest.destId].hidden) {
+    trail = trailD(homeXY, placeXY(latest.destId, places[latest.destId]));
+    if (returnProgress !== null) {
+      progress = reducedMotion ? Math.floor(clamp(returnProgress) * 4) / 4 : clamp(returnProgress);
+      token = trail.at(1 - progress);
+      token.facingRight = !token.facingRight;
+    }
+  }
   return (
     <svg className="adventure-map" viewBox={`0 0 ${W} ${H}`} role="group" aria-label="Adventure map">
       <g filter="url(#mq-wobble)" aria-hidden="true">
@@ -74,6 +148,7 @@ export default function MapView({ places, home, owned, selected, onSelect }) {
       <defs><clipPath id="pin-clip"><circle r="15.5" /></clipPath></defs>
       <text x="66" y="472" className="map-label small">Hawaiʻi</text>
 
+      {trail && <path d={trail.d} className={`trail ${away ? "mystery-trail" : token && returnProgress < 1 ? "latest-trail" : "latest-trail faint"}`} aria-label={away ? "Mystery route" : "Latest trip"} />}
       <g transform={`translate(${homeXY[0]} ${homeXY[1]})`} className="home-pin" aria-label="Home cabin">
         <path d="M-16 4 L0 -12 L16 4 V18 H-16 Z" fill="#D98D81" stroke="#514738" strokeWidth="2.5" strokeLinejoin="round" />
         <rect x="-5" y="6" width="10" height="12" fill="#9C6A40" stroke="#514738" strokeWidth="2" />
@@ -99,7 +174,7 @@ export default function MapView({ places, home, owned, selected, onSelect }) {
         const ly = side === "below" ? 34 : side === "above" ? -24 : 5;
         const anchor = side === "right" ? "start" : side === "left" ? "end" : "middle";
         return (
-          <g key={id} className={`pin ${state} ${selected === id ? "selected" : ""}`} transform={`translate(${x} ${y})`}
+          <g key={id} className={`pin ${state} ${selected === id ? "selected" : ""} ${!away && celebrate && latest?.destId === id ? "target" : ""}`} transform={`translate(${x} ${y})`}
             onClick={() => onSelect(id)} role="button" tabIndex="0" aria-label={`${p.name}: ${state === "visited" ? "visited" : state === "open" ? "a future adventure" : "locked"}`}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(id); } }}>
             <circle className="pin-bg" r="20" />
@@ -114,10 +189,20 @@ export default function MapView({ places, home, owned, selected, onSelect }) {
             {!visited && p.open && <title>{p.clue || `A little adventure in ${p.state}.`}</title>}
             {visited && <g transform="translate(9 -24)"><circle r="8" className="tick-bg" /><path className="tick" d="M-4 0 l3 3 5 -6" /></g>}
             <text x={lx} y={ly} textAnchor={anchor} className="map-label">{p.name}</text>
+            {!away && celebrate && latest?.destId === id && <text y="-44" textAnchor="middle" className="map-label postcard-callout">New postcard!</text>}
           </g>
         );
       })}
 
+      {away && token && <g className="walker-sparkles" aria-hidden="true">
+        {[0.015, 0.03, 0.045].filter((step) => progress >= step).map((step, i) => {
+          const [x, y] = trail.at(progress - step).xy;
+          return <path key={step} transform={`translate(${x} ${y - 4}) scale(${1 - i * 0.2})`} d="M0 -6 L2 -2 L6 0 L2 2 L0 6 L-2 2 L-6 0 L-2 -2 Z" />;
+        })}
+      </g>}
+      {token && <g className={`walker ${away ? "mystery" : "homeward"} ${reducedMotion ? "stepped" : ""}`} transform={`translate(${token.xy[0]} ${token.xy[1] + 6})`} role="img" aria-label={`${bear?.name || "Your bear"} ${away ? "is out exploring" : "is walking home"}`}>
+        <Walker facingRight={token.facingRight} mystery={Boolean(away)} />
+      </g>}
     </svg>
   );
 }
