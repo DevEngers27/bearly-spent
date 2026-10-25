@@ -249,7 +249,7 @@ async function callClaude(params) {
 const textOf = (content) => content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 
 const GUARD_PROMPT = "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, real-money promises, or anything a careful parent would not want a 9-year-old to read. Otherwise OK.";
-const GUARD_FALLBACK = "Hmm, let's talk about your savings or Maple's next trip instead! Want to see how close you are to your goal?";
+const guardFallback = (bearName) => `Hmm, let's talk about your savings or ${bearName}'s next trip instead! Want to see how close you are to your goal?`;
 
 async function runGuard(reply) {
   const res = await _internals.callGuard({
@@ -270,7 +270,7 @@ async function screenReply(reply, canWrite = () => true, childId) {
   if (canWrite()) mutateChild(childId, (d) => {
     if (canWrite()) audit(d, "buddy", "buddy_guard_blocked", reply.slice(0, 80));
   });
-  return GUARD_FALLBACK;
+  return guardFallback(readChild(childId).child.bear.name);
 }
 
 /** Run the agentic loop. Returns { reply, toolsUsed, completed }. */

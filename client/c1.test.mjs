@@ -41,7 +41,7 @@ function harness(name, { controller = null } = {}) {
       if (!slots[i] || changed(slots[i].deps, deps)) pending.push(() => { slots[i]?.cleanup?.(); slots[i] = { deps, cleanup: fn() }; });
     },
   };
-  const storageApi = (map) => ({ getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v), removeItem: (k) => map.delete(k) });
+  const storageApi = (map) => ({ get length() { return map.size; }, key: (i) => [...map.keys()][i] ?? null, getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v), removeItem: (k) => map.delete(k) });
   env.document = { activeElement: null, visibilityState: "visible", body: { classList: { add() {}, remove() {} } }, addEventListener() {}, removeEventListener() {}, querySelector: () => null };
   env.location = new URL("https://moneyquest.test/");
   env.navigator = { serviceWorker: Object.assign(new EventTarget(), { controller }) };
@@ -127,7 +127,7 @@ test("C1: child snapshot survives a failed refresh; offline actions send no requ
   offline.fetch = async () => { calls++; };
   await offline.render(() => offline.exports.useAction(offline.toast, true))[0]("child/save", {});
   assert.equal(calls, 0);
-  assert.equal(offline.notices[0][0], "You're offline — Maple's postcards are still here!");
+  assert.equal(offline.notices[0][0], "You're offline — your postcards are still here!");
   h.fetch = async () => new Response(JSON.stringify(state));
   await cached.refresh();
   assert.equal(h.render(() => h.exports.useLiveState("child")).offline, false);
@@ -808,7 +808,7 @@ test("B5b follow-up R1/R4: wrong password, wrong PIN and rate limits stay inline
       assert.equal(h.storage.get("mq_last_state"), "keep snapshot");
       assert.equal(h.storage.get("mq_child_session"), "keep identity");
       assert.equal(unauthorized, 0);
-      assert.equal(limited, status === 429 ? 1 : 0);
+      assert.equal(limited, status === 429 && form !== "pin" ? 1 : 0);
       assert.equal(accepted, 0);
     }
   }
@@ -2031,4 +2031,140 @@ test("F2: token endpoints trigger the parent PIN gate and do not store credentia
   };
   await h.exports.api("parent/wallet/send", { amount: 10 });
   assert.equal(h.storage.size, 0);
+});
+
+test("W3.1: offline action and ChildRoot notices use Bo's name", async () => {
+  const action = harness("api.js");
+  action.fetch = () => assert.fail("offline actions must not fetch");
+  await action.render(() => action.exports.useAction(action.toast, true, "Bo"))[0]("child/save", {});
+  assert.equal(action.notices[0][0], "You're offline — Bo's postcards are still here!");
+  const h = harness("App.jsx"), state = stateFixture();
+  state.child.bear.name = "Bo";
+  h.storage.set("mq_last_state", JSON.stringify(state));
+  h.fetch = async () => { throw new Error("Offline"); };
+  const render = () => h.render(h.exports.ChildRoot, { toast: h.toast });
+  render(); h.flush(); await new Promise(setImmediate);
+  render(); h.flush();
+  assert.equal(h.notices[0][0], "You're offline — Bo's postcards are still here!");
+});
+
+test("W3.2: a 12-line reply stays in a bordered bubble with a separate inner scroll box", async () => {
+  const h = harness("Child.jsx");
+  h.window.matchMedia = () => ({ matches: true });
+  const reply = Array.from({ length: 12 }, (_, i) => `Line ${i + 1}: a small saving step.`).join("\n");
+  const render = () => h.render(h.exports.SpeechBubble, { text: reply });
+  render(); h.flush();
+  const tree = render();
+  const content = nodes(tree, (n) => n.props.className === "bear-bubble-text")[0];
+  assert.equal(content.props.children[0], reply);
+  assert.ok(tree.props.children.includes(content), "text is inside the border-owning element");
+  assert.equal(nodes(tree, (n) => n.type === "svg").length, 0, "no scaled outline ending above the last line");
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  const outer = css.match(/\.bear-bubble\s*\{([^}]+)\}/)[1];
+  const inner = css.match(/\.bear-bubble-text\s*\{([^}]+)\}/)[1];
+  assert.match(outer, /border: 2px solid/);
+  assert.match(outer, /border-radius:/);
+  assert.match(outer, /padding: 15px 18px/);
+  assert.doesNotMatch(outer, /(?:^|;)\s*(?:max-)?height:|overflow-y:/, "border grows with the content box");
+  assert.match(inner, /max-height: 176px/);
+  assert.match(inner, /overflow-y: auto/);
+  assert.match(inner, /white-space: pre-wrap/);
+  assert.match(css, /\.bear-bubble::after\s*\{[^}]*bottom: -11px/);
+});
+
+test("W3.3: PIN lockout stays inline without a rate-limit toast", async () => {
+  const h = harness("App.jsx");
+  let limited = 0;
+  h.window.addEventListener("mq:rate-limit", () => limited++);
+  h.fetch = async () => new Response(JSON.stringify({ error: "Let's take a little break", attemptsLeft: 0, retryAfterSeconds: 900 }), { status: 429 });
+  const render = () => h.render(h.exports.PinGate, { onCancel: noop });
+  changeField(render(), "Parent PIN", "0000");
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.equal(limited, 0);
+  assert.match(text(render()), /Locked for 15 minutes/);
+  assert.equal(byText(render(), "Unlock").props.disabled, true);
+});
+
+test("W3.4: Show all activity renders old and new settings and allowance entries as sentences", () => {
+  const h = harness("Parent.jsx"), state = stateFixture();
+  state.audit = [
+    { id: "old", ts: h.now, actor: "parent", action: "settings", detail: 'Updated settings: {"timezone":"America/Los_Angeles","buddyEnabled":false}' },
+    { id: "new", ts: h.now, actor: "parent", action: "settings", detail: "Team challenge turned off" },
+    { id: "money", ts: h.now, actor: "parent", action: "allowance_updated", detail: "Allowance 10.00/wk, 50% saved" },
+  ];
+  const render = () => h.render(h.exports.Guardian, { state, run: noop });
+  const checkbox = nodes(render(), (n) => n.type === "input" && n.props.type === "checkbox")[0];
+  checkbox.props.onChange({ target: { checked: true } });
+  const copy = text(render());
+  assert.match(copy, /Time zone set to America\/Los_Angeles. Buddy turned off/);
+  assert.match(copy, /Team challenge turned off/);
+  assert.match(copy, /Allowance \$10.00\/wk/);
+  assert.doesNotMatch(copy, /Updated settings:|\{"/);
+});
+
+const childPreferenceKeys = ["mq_tab", "mq_seen_adv", "mq_muted", "mq_album_baseline:one", "mq_album_baseline:two", "mq_opened_cards:one", "mq_opened_cards:two"];
+const fillChildPreferences = (h) => {
+  for (const key of childPreferenceKeys) h.storage.set(key, key === "mq_tab" ? "album" : "[]");
+  h.storage.set("unrelated-setting", "keep");
+};
+const assertChildPreferencesCleared = (h) => {
+  for (const key of childPreferenceKeys) assert.equal(h.storage.has(key), false, key);
+  assert.equal(h.storage.get("unrelated-setting"), "keep");
+  const child = harness("Child.jsx");
+  for (const [key, value] of h.storage) child.storage.set(key, value);
+  const tree = child.render(child.exports.default, { state: stateFixture(), toast: noop });
+  assert.equal(nodes(tree, (n) => n.type?.name === "Home").length, 1, "re-linked child starts on Home");
+};
+
+test("W3.5: revoked kid sessions and Sign out everywhere clear navigation and all child caches", async () => {
+  const kid = harness("api.js");
+  fillChildPreferences(kid);
+  kid.storage.set("mq_child_session", "identity");
+  kid.fetch = async () => new Response('{"error":"Unlinked"}', { status: 401 });
+  await assert.rejects(kid.exports.api("state"), { status: 401 });
+  assertChildPreferencesCleared(kid);
+  assert.equal(kid.storage.has("mq_child_session"), false);
+  for (const success of [false, true]) {
+    const h = await appHarness(meFixture());
+    fillChildPreferences(h);
+    h.fetch = async () => new Response(success ? "{}" : '{"error":"Try again"}', { status: success ? 200 : 500 });
+    const root = nodes(h.tree(), (n) => n.type?.name === "ParentRoot")[0];
+    if (success) { await root.props.onSignOutAll(); assertChildPreferencesCleared(h); }
+    else {
+      await assert.rejects(root.props.onSignOutAll(), { status: 500 });
+      for (const key of childPreferenceKeys) assert.equal(h.storage.has(key), true, key);
+    }
+  }
+});
+
+test("W3.5: a matching session reload preserves child navigation; a new identity clears it", async () => {
+  for (const sameChild of [true, false]) {
+    const h = harness("App.jsx"), me = meFixture("child");
+    const state = { ...stateFixture(), childId: sameChild ? me.activeChild.id : "old-child" };
+    h.storage.set("mq_child_session", JSON.stringify({ ...me, activeChild: { ...me.activeChild, id: state.childId } }));
+    h.storage.set("mq_last_state", JSON.stringify(state));
+    fillChildPreferences(h);
+    h.fetch = async () => new Response(JSON.stringify(me));
+    h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+    if (sameChild) for (const key of childPreferenceKeys) assert.equal(h.storage.has(key), true, key);
+    else assertChildPreferencesCleared(h);
+  }
+});
+
+test("W3.6: money inputs offer decimal keyboards while lesson counts stay numeric", () => {
+  const state = stateFixture();
+  for (const [file, component, props, expected] of [
+    ["Child.jsx", "MoneySheet", { start: "save" }, 1],
+    ["Child.jsx", "MoneySheet", { start: "spend" }, 1],
+    ["Parent.jsx", "Goals", {}, 1],
+    ["Parent.jsx", "SavingsGoal", {}, 1],
+    ["Parent.jsx", "Allowance", {}, 3],
+    ["Parent.jsx", "WalletLedger", {}, 1],
+  ]) {
+    const h = harness(file), tree = h.render(h.exports[component], { state, run: noop, ...props });
+    const decimal = nodes(tree, (n) => n.type === "input" && n.props.inputMode === "decimal");
+    assert.equal(decimal.length, expected, component);
+    assert.ok(decimal.every((n) => n.props.type === "number"));
+    if (component === "Goals") assert.equal(nodes(tree, (n) => n.type === "input" && n.props.value === 5 && n.props.max === 5)[0].props.inputMode, undefined);
+  }
 });

@@ -11,11 +11,17 @@ export function setSelectedChild(id) {
   selectedChild = id;
 }
 
-export function clearSessionCache() {
+export function clearSessionCache({ preserveChildPreferences = false } = {}) {
   identityVersion++;
   selectedChild = null;
   try {
     for (const key of ["mq_last_state", "mq_child_session", "mq_parent_session", "mq_selected_child", "mq_parent_mode"]) localStorage.removeItem(key);
+    if (!preserveChildPreferences) {
+      const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i));
+      for (const key of keys) {
+        if (["mq_tab", "mq_seen_adv", "mq_muted"].includes(key) || key?.startsWith("mq_album_baseline:") || key?.startsWith("mq_opened_cards:")) localStorage.removeItem(key);
+      }
+    }
   } catch {}
 }
 
@@ -77,7 +83,7 @@ export async function apiResponse(path, body, { includeChild = true, handleUnaut
     err.status = res.status;
     err.demo = data.demo === true;
     for (const key of ["attemptsLeft", "retryAfterSeconds", "reason"]) if (data[key] !== undefined) err[key] = data[key];
-    if (res.status === 429) {
+    if (res.status === 429 && route !== "parent/unlock") {
       const event = new Event("mq:rate-limit");
       event.message = err.message;
       window.dispatchEvent(event);
@@ -106,14 +112,14 @@ export async function api(path, body, options) {
   return data;
 }
 
-export const OFFLINE_MESSAGE = "You're offline — Maple's postcards are still here!";
+export const offlineMessage = (bearName) => `You're offline — ${bearName ? `${bearName}'s` : "your"} postcards are still here!`;
 
 // A ref closes the double-click gap before React paints disabled controls.
-export function useAction(toast, offline = false) {
+export function useAction(toast, offline = false, bearName) {
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
   const run = async (path, body, ok) => {
-    if (offline) { toast(OFFLINE_MESSAGE); return null; }
+    if (offline) { toast(offlineMessage(bearName)); return null; }
     if (inflight.current) return null;
     inflight.current = true;
     setBusy(true);

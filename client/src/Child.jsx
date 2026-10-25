@@ -32,7 +32,7 @@ export default function Child({ state, toast, onGrownUps, offline }) {
   const [sheet, setSheet] = useState(null); // { type, ...props }
   const [mapFocus, setMapFocus] = useState(null);
   const setTab = (t) => { setTabRaw(t); store.set("mq_tab", t); window.scrollTo({ top: 0 }); };
-  const [run, pending] = useAction(toast, offline);
+  const [run, pending] = useAction(toast, offline, state.child.bear.name);
   const busy = pending || offline;
   const open = (type, props = {}) => setSheet({ type, ...props });
   const close = () => setSheet(null);
@@ -409,7 +409,7 @@ function MoneySheet({ state, run, close, start, startWallet = false, busy }) {
           {mode === "save" && `Moves money from spending (${money(state.balances.spending)}) into savings.`}
           {mode === "spend" && (appleCash ? "Already paid? Log it here only if your Shortcut hasn't recorded it." : `Buys over ${moneyShort(state.allowance.spendLimit)} need your grown-up's OK first.`)}
           {mode === "log" && "For cash that isn't in the app. It goes in your diary."}
-          {mode === "ask" && "Your grown-up decides. Maple can't move money."}
+          {mode === "ask" && `Your grown-up decides. ${state.child.bear.name} can't move money.`}
         </p>
         <button className="btn honey wide" type="submit" disabled={busy}>{{ save: "Save it", spend: "Record it", log: "Add to diary", ask: "Send request" }[mode]}</button>
       </form>
@@ -527,7 +527,7 @@ function Missions({ state, run, open, busy }) {
               <li key={m.id} className={m.status === "done" ? "done" : m.status === "pending_review" ? "waiting" : ""}>
                 <button disabled={busy || m.status !== "open"} onClick={() => run(`child/mission/${m.id}/done`, {}, "Sent to your grown-up to check!")}>
                   <span className="box" aria-hidden="true">{m.status === "done" ? <Icon name="check" size={18} /> : m.status === "pending_review" ? <Icon name="hourglass" size={18} /> : null}</span>
-                  <span className="grow">{m.title}<small>{m.status === "pending_review" ? "Waiting for a grown-up to check" : m.status === "done" ? "Confirmed!" : m.createdBy.includes("buddy") ? "Idea from Maple · tap when done" : "Tap when you're done"}</small></span>
+                  <span className="grow">{m.title}<small>{m.status === "pending_review" ? "Waiting for a grown-up to check" : m.status === "done" ? "Confirmed!" : m.createdBy.includes("buddy") ? `Idea from ${state.child.bear.name} · tap when done` : "Tap when you're done"}</small></span>
                   <span className="pts">+{m.points}</span>
                 </button>
               </li>
@@ -704,7 +704,7 @@ function PlaceSheet({ id, state, close, openCard }) {
         <span>{p.state}</span>
         <span className={`rarity-chip ${p.rarity}`}>{RARITY_LABEL[p.rarity]}</span>
       </div>
-      {owned && <><Stamp stamp={p.stamp} name={p.name} image={p.image} /><p className="story">{storyFor(p, state.child.bear.name)}</p><p className="fine">{visits ? `Visited ${visits} ${visits === 1 ? "time" : "times"}` : "A postcard from a friend. Maybe Maple will visit one day!"}</p></>}
+      {owned && <><Stamp stamp={p.stamp} name={p.name} image={p.image} /><p className="story">{storyFor(p, state.child.bear.name)}</p><p className="fine">{visits ? `Visited ${visits} ${visits === 1 ? "time" : "times"}` : `A postcard from a friend. Maybe ${state.child.bear.name} will visit one day!`}</p></>}
       {!owned && <p className="hand">{p.clue || `A little adventure in ${p.state}.`}</p>}
       {!p.open && <p className="lock-note"><Icon name="lock" size={20} /> {p.lockReason}{p.progress ? ` (${p.progress})` : ""}</p>}
       {owned && <button className="link" onClick={() => openCard(id)}>See my postcard</button>}
@@ -1063,8 +1063,7 @@ function SpeechBubble({ text, thinking }) {
   }, [text, thinking]);
   return (
     <div className="bear-bubble" aria-live="polite" aria-atomic="true">
-      <svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true"><path d="M12 4 Q0 6 4 28 L4 70 Q4 82 22 82 H120 L139 97 L143 82 H278 Q296 82 296 65 V21 Q296 4 278 4 Z" fill="#FFFDF7" stroke="#514738" strokeWidth="2" filter="url(#mq-wobble)" /></svg>
-      <span className="sr-only">{text}</span><span aria-hidden="true">{shown || "\u00a0"}</span>
+      <span className="sr-only">{text}</span><span className="bear-bubble-text" aria-hidden="true">{shown || "\u00a0"}</span>
     </div>
   );
 }
