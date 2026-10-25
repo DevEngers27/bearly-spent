@@ -851,7 +851,7 @@ export function renameBear(db, name) {
 
 // ------------------------------------------------------------------ friends
 const DIRECTORY = {
-  "SAM-12": { name: "Sam", bear: { name: "Biscuit", hat: "flower_sunhat", eyes: "heart_glasses" }, postcards: ["chicago", "new_york_city", "zion_national_park"] },
+  "SAM-12": { name: "Sam", bear: { name: "Biscuit", hat: "straw_hat", eyes: "sunglasses" }, postcards: ["chicago", "new_york_city", "zion_national_park"] },
   "ZOE-88": { name: "Zoe", bear: { name: "Clover", hat: "flower_crown", outfit: "striped_shirt" }, postcards: ["yosemite_national_park", "san_francisco"] },
 };
 

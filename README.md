@@ -124,7 +124,7 @@ The configured defaults are **claude-opus-5-5** with adaptive thinking at low ef
 
 After an online visit to the **production build**, the service worker caches the shell and hashed assets and warms available postcard/bear art. A paired kid device with a matching cached identity and `mq_last_state` can reload offline and read its cached album; wait for cache warming before disconnecting. API responses stay out of Cache Storage. Offline actions, chat and voice are disabled; fresh state replaces the snapshot on reconnect. A first visit or missing snapshot shows a retry screen. Parent data is not restored as an offline parent session.
 
-The UI uses hand-drawn SVGs in `client/src/Icons.jsx` plus illustrated PNGs. Custom icons can go in `client/public/icons/ui/<name>.png` and be registered in `CUSTOM`. The bear renderer has 21 wearable/companion items; the 22nd item PNG is the scene mushroom. Backgrounds are separate catalog cosmetics.
+The UI uses hand-drawn SVGs in `client/src/Icons.jsx` plus illustrated PNGs. Custom icons can go in `client/public/icons/ui/<name>.png` and be registered in `CUSTOM`. The bear wardrobe has 26 illustrated items across hats, glasses, neckwear, outfits, bags, things to hold and little friends, plus three home scenes. Closet thumbnails preview the new shared-canvas art. Two-paw props temporarily hide outfits, neckwear and bags; putting them down brings those layers back. Travel and reveal poses show the plain bear. Existing saves retire removed cosmetics without point refunds, keep catalog-valid items and earned milestone rewards, and receive the free map, bee and forest scene.
 
 ## Known limitations
 

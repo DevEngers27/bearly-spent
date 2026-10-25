@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction, GOAL_ICONS, goalIconName, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
-import { BearFigure, SceneBackdrop, bearScale } from "./Bear.jsx";
+import { BearFigure, SceneBackdrop, bearScale, ITEMS } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import MapView from "./MapView.jsx";
 import { Icon } from "./Icons.jsx";
@@ -587,7 +587,7 @@ function MoneySheet({ state, run, close, start, startWallet = true, busy, compar
 // ------------------------------------------------------------------ dress up
 const WARDROBE = [
   ["hat", "Hats"], ["eyes", "Glasses"], ["neck", "Neckwear"], ["outfit", "Outfits"],
-  ["held", "Things to hold"], ["friend", "Little friends"], ["background", "Home scene"],
+  ["bag", "Bags"], ["held", "Things to hold"], ["friend", "Little friends"], ["background", "Home scene"],
 ];
 const SCENE_SWATCH = { forest: "#A8B894", meadow: "#E5EEF0", stars: "#4E5F7A" };
 
@@ -600,8 +600,9 @@ function DressSheet({ state, run, close, busy }) {
   return (
     <Sheet title={`Dress up ${bear.name}`} onClose={close} tall>
       <div className="dress-preview"><BearFigure bear={bear} size={170} /></div>
+      {ITEMS[bear.held]?.fullBody && <p className="fine">{bear.name} holds this with both paws — outfits come back when you put it down</p>}
       <form className="rename" onSubmit={(e) => { e.preventDefault(); run("child/bear/name", { name }, "Name saved!"); }}>
-        <label className="grow">Bear's name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={16} /></label>
+        <label className="grow">Bear's name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} /></label>
         <button className="btn small sage" disabled={busy}>Rename</button>
       </form>
       <div className="wardrobe-tabs" role="tablist" aria-label="Wardrobe">
@@ -631,7 +632,7 @@ function DressSheet({ state, run, close, busy }) {
               onClick={() => (!locked ? run("child/cosmetic/equip", { kind: slot, value: c.value }) : c.cost != null ? setPurchase(c) : null)}>
               {slot === "background"
                 ? <span className="swatch-art scene" style={{ background: SCENE_SWATCH[c.value] }} aria-hidden="true" />
-                : <img className="swatch-art" src={`/bear/items/${c.value}.png`} alt="" loading="lazy" />}
+                : <img className="swatch-art" src={`/bear/thumbs/${c.value}.png`} alt="" loading="lazy" />}
               <span>{c.label}</span>
               <small>{!locked ? (on ? "Wearing" : c.cost === 0 ? "Free" : "Yours") : c.cost != null ? <><Icon name="sparkle" size={12} /> {c.cost}</> : `Save ${moneyShort(c.milestone)} to unlock`}</small>
             </button>

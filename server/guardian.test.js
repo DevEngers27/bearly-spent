@@ -389,7 +389,7 @@ test("M23 act reverses duplicates before a child save can unlock phantom milesto
   assert.equal(duplicate.status, "reversed");
   assert.equal(db.accounts.savings.balance, 2400);
   assert.ok(!db.child.milestonesUnlocked.includes(2500));
-  assert.equal(game.cosmeticUnlocked(db, COSMETICS.find((c) => c.id === "neck:red_bow_tie")), false);
+  assert.equal(game.cosmeticUnlocked(db, COSMETICS.find((c) => c.id === "neck:bow_tie")), false);
   assert.ok(db.child.points - points < 100, "no milestone points awarded");
   assert.ok(replans.some((reason) => /reversed/i.test(reason)));
 });

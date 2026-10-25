@@ -239,7 +239,7 @@ test("adventure and cosmetics reject corrupt points instead of granting free ite
     const db = fresh();
     db.child.points = points;
     rejectsUnchanged(db, () => actions.adventure(db, { destId: "san_francisco" }));
-    rejectsUnchanged(db, () => actions.buyCosmetic(db, { id: "hat:knit_beanie" }));
+    rejectsUnchanged(db, () => actions.buyCosmetic(db, { id: "hat:beanie" }));
   }
 });
 
@@ -282,12 +282,12 @@ test("valid adventures, cosmetics, friends, trades and mission IDs still work", 
   db.child.points = 200;
   actions.adventure(db, { destId: "san_francisco" });
   assert.equal(db.child.points, 120);
-  actions.buyCosmetic(db, { id: "hat:knit_beanie" });
+  actions.buyCosmetic(db, { id: "hat:beanie" });
   assert.equal(db.child.points, 90);
   actions.equip(db, { kind: "hat", value: null });
   assert.equal(db.child.bear.hat, null);
-  actions.equip(db, { kind: "hat", value: "knit_beanie" });
-  assert.equal(db.child.bear.hat, "knit_beanie");
+  actions.equip(db, { kind: "hat", value: "beanie" });
+  assert.equal(db.child.bear.hat, "beanie");
   assert.equal(actions.friend(db, { code: " sam-12 " }).name, "Sam");
   assert.equal(actions.trade(db, { friendId: "fr_maya", give: "chicago", get: "seattle" }).status, "pending");
   const mission = actions.mission(db, { title: "Read" });
