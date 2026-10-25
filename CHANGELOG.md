@@ -14,7 +14,7 @@ merged by Claude (see `docs/VERSIONING.md`).
 ## [0.7.0] — 2026-10-25
 
 One pot of real money, missions that keep coming, and the polish from the
-owner's two rounds of phone testing. 325 server tests and 183 client tests;
+owner's two rounds of phone testing. 326 server tests and 183 client tests;
 browser smoke of the new flows at 390×844 and 1280×900.
 
 ### Changed
