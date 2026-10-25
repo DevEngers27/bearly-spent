@@ -11,12 +11,12 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - `feat/f2-apple-cash` — Apple Cash tracking via an iOS Shortcut, parent
   "sent via Apple Cash" entries and a wallet account per child.
-- `docs/d1-readme` — README and docs refresh.
 
 ## [0.4.0] — 2026-10-25
 
-Real accounts. 215 server tests and 92 client tests; account flows,
-trips, talk and the parent app verified in a real browser.
+Real accounts. 220 server tests and 96 client tests; account flows,
+trips, talk and the parent app verified in a real browser (12 of 12 final
+checks).
 
 ### Added
 - Families: parents create a family with email and password (scrypt),
@@ -33,6 +33,9 @@ trips, talk and the parent app verified in a real browser.
   security headers and a CSP, HTTPS-only Nessie, demo mode behind
   `MQ_DEMO=1` with a demo parent and a "Try the demo family" button.
 - Parent chat view pages through the retained transcript.
+- Parents record money set aside for the allowance ("Add money"); the
+  demo top-up stays demo-only.
+- README, API.md and the browser checklist describe the product as it is.
 
 ### Changed
 - The legacy PIN-only parent login and the `x-parent-token` header are gone;
