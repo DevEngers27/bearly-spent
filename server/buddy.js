@@ -303,18 +303,25 @@ const GUARD_PROMPT = "You check messages written to a child aged 7–12 inside a
 const guardFallback = (bearName) => `Hmm, let's talk about your savings or ${bearName}'s next trip instead! Want to see how close you are to your goal?`;
 
 async function runGuard(reply) {
-  const res = await _internals.callGuard({
+  const params = {
     model: process.env.BUDDY_GUARD_MODEL || "claude-haiku-5-5",
     system: GUARD_PROMPT,
     messages: [{ role: "user", content: redact(reply).text }],
     max_tokens: 5,
-  });
-  return res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  };
+  // The classifier now and then returns no text at all (seen live on a plain allowance answer);
+  // one retry keeps a good reply from being swapped for the fallback line. Still only "OK" passes.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await _internals.callGuard(params);
+    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 async function screenReply(reply, canWrite = () => true, childId) {
   try {
-    if (await _internals.runGuard(reply) === "OK") return reply;
+    if (String((await _internals.runGuard(reply)) ?? "").trim() === "OK") return reply;
   } catch {
     // A failed check must never let an unchecked model reply through.
   }
