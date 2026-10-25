@@ -35,7 +35,8 @@ default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https
 ```json
 {
   "demo": false,
-  "family": { "id": "family_...", "name": "Jordan", "timezone": "America/Los_Angeles", "pinSet": false },
+  "family": { "id": "family_...", "name": "Jordan", "displayName": "", "timezone": "America/Los_Angeles", "pinSet": false },
+  "user": { "id": "user_...", "name": "Jordan", "email": "jordan@example.test" },
   "role": "parent",
   "children": [{ "id": "child_...", "name": "Mia", "age": 9, "bearName": "Maple", "version": 1 }],
   "activeChild": { "id": "child_...", "name": "Mia", "age": 9, "bearName": "Maple", "version": 1 },
@@ -43,7 +44,7 @@ default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https
 }
 ```
 
-A paired child receives only its own summary in `children`; a parent receives all family children. Times are Unix milliseconds. `unlockedUntil` is session-specific; compare it to current time only when `pinSet` is true. PIN hashes are never returned.
+A paired child receives only its own summary in `children` and no `user` field; a parent receives all family children and their own `{id,name,email}` user. Times are Unix milliseconds. `unlockedUntil` is session-specific; compare it to current time only when `pinSet` is true. PIN hashes are never returned. `family.displayName` is an optional display label, empty by default.
 
 `demo` is always a boolean: true exactly when `MQ_DEMO=1` and the signed-in family is the demo family. Real families always receive false. Without a valid session, `GET /api/auth/me` returns HTTP 401 with `{ "error": "short message", "demo": false }` (or `demo: true` when enabled). This lets the Welcome screen discover demo availability before login; no family or session details are included in that response.
 
@@ -54,7 +55,12 @@ A paired child receives only its own summary in `children`; a parent receives al
 | `POST /api/auth/logout` | Session | No fields | `{ok:true}` + cleared cookie. Revokes the current cookie/bearer session. |
 | `POST /api/auth/logout-all` | Parent | No fields | `{ok:true}` + cleared cookie. Revokes every session of the family, including all parents, paired kid devices and the current cookie/bearer session. Requires PIN unlock when a PIN is set. Other families are untouched. Kid devices need new codes to pair again. |
 | `GET /api/auth/me` | Session (401 discovery available without a session) | `?child=` optional | `Me`, including `demo`; remains accessible while PIN-locked. Missing/invalid/expired session: 401 `{error,demo}`. |
+| `POST /api/auth/account` | Parent | `{name?}`; trimmed, nonempty, <=64 characters | `{ok:true}`. Updates the parent name and family parent-name copy. |
+| `POST /api/auth/email` | Parent | `{email,password}` | `{ok:true}`. Current password required (401 on mismatch); same email normalization/uniqueness as registration. Shares login limits: 10/15 minutes/IP, 5/15 minutes/current normalized email. |
+| `POST /api/auth/password` | Parent | `{currentPassword,newPassword}` | `{ok:true}`. Current password required; new password uses registration rules (8–1024 untrimmed characters). Revokes other parent sessions for this user, retaining the current session and paired kid devices. Same shared limits as email changes. |
+| `POST /api/parent/family` | Parent | `{displayName}`; trimmed, <=40 characters; empty string clears it | `{ok:true}`. Stored on `families.display_name`, returned as `me.family.displayName`. |
 | `POST /api/parent/children` | Parent | `{name, age, bearName}`; age 7–12 | New `ChildSummary`. Separate funding account and game document. |
+| `POST /api/parent/children/:id/profile` | Parent | `{name,age,bearName}`; names <=24 characters with a letter/number, age 7–12 | Updated `ChildSummary`. Unknown/other-family child: 404. Audits changes and notifies the kid; savings/spending labels reflect the new name. |
 | `POST /api/parent/children/:id/link` | Parent | No fields | `{code, expiresAt}`. Six uppercase characters without vowels/ambiguous characters; expires in 15 minutes, single use. 5 generation attempts/15 minutes/child; excess returns 429 with `Let's take a little break. Try again soon!`. Each new code cancels older unused codes for that child. Known used/expired/cancelled codes remain as tombstones for specific error copy; other children's codes are untouched. |
 | `POST /api/auth/link` | Public | `{code}` (case-insensitive) | `Me` + child cookie, bound to that child. Unknown codes return 400 `{error,reason:"unknown"}`; known used/expired/cancelled codes return 400 `{error,reason:"used_or_expired"}`. Extra guessing protection: 10 attempts/15 minutes/IP. |
 | `GET /api/parent/children/:id/link` | Parent | `?code=<code>` (case-insensitive) | `{status:"pending"\|"linked"\|"expired"}` for that exact child's code. Used codes stay `linked` after expiry or device unlink; cancelled unused codes are `expired`. Unknown codes or codes belonging to another child/family return 404. Read-only; does not consume or extend a code. |
@@ -83,6 +89,7 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | --- | --- |
 | `childId`, `version`, `now`, `dayKey`, `weekKey`, `offline`, `budgetDoneThisWeek` | Selected ID, child document version, server Unix milliseconds, zoned `YYYY-MM-DD`, ISO `YYYY-Www`, `false`, boolean |
 | `child` | `{name, age, points, bear, ownedCosmetics, milestonesUnlocked, stats, lessonsDone, ...progressMarkers}`; bear has `name, hat, eyes, neck, outfit, held, friend, background`; stats have `savingsActions, learningDone, tracked, budgetsDone, adventures` |
+| `profile` | `{name,age,bearName,friendCode?,since,stats,badges}`; `since` is document `createdAt` (legacy: earliest audit timestamp or migration time, persisted). `stats`: `{points,postcards:{collected,total,cards},tripsTaken,lessonsFinished,missionsDone,longestStreak?}`. Collected counts distinct postcard places; total counts currently open places; trips include away trips. Badges are stored unlocked milestone definitions in reverse unlock order. Friend code is omitted until available. |
 | `balances` | `{savings, spending}` in cents |
 | `goals` | `[{id, title, icon, target, createdAt, status, activeFlag, current, weeksLeft}]`; status is active/reached/bought/archived, target is cents; weeksLeft is null for history or no weekly saving |
 | `currentGoalId` | Current savings goal ID; null only for an empty legacy goal list. Also in `child.currentGoalId`. |
@@ -110,6 +117,7 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 - Latest 30 parent `notifications`, 60 `transactions`, 120 `audit` entries (all newest first), latest 20 `tracking` entries (newest first), and unfiltered `friends`.
 - `chat`: up to 200 retained messages, oldest first, exclusively before `?before=` if supplied. `chatNextBefore` is the first returned message's ID if more earlier retained messages exist, otherwise null. Retention is 200 total, so paging cannot recover pruned messages.
 - Audit entries are `{id,ts,actor,action,detail,data}`; tracking entries are `{id,ts,direction,amount,note}`.
+- `profile` is the same selected-child summary as `ChildState`; savings/spending account labels derive from the current child's name. Account updates append `action:"account", kind:"account"` audit entries to every family child's document atomically and publish version changes. No password or email is written into child audits.
 
 SSE immediately sends the selected child's version, then emits:
 
@@ -140,6 +148,9 @@ All routes below have **Child** auth and support parent `?child=` selection. Unl
 | `POST /api/child/cosmetic/equip` | `{kind,value}` | `{ok:true}`; owned item ID; null unequips except background requires a scene. |
 | `POST /api/child/bear/name` | `{name}` | `{ok:true}`; 1–24 trimmed characters. |
 | `POST /api/child/friend` | `{code}` | Real-family anonymous request receipt (see G3 below). Demo practice codes return a pending public friend view. |
+| `POST /api/child/bear/name` | `{name}` | `{ok:true}`; 1–24 trimmed characters with a letter/number. Same validation, audit and parent notification as `/api/child/profile`. |
+| `POST /api/child/profile` | `{bearName}` | `{ok:true}`; 1–24 trimmed characters with a letter/number; no PIN required. Only renames the selected child's bear. Audit: `Renamed the bear to …`; parent notification names the child and bear. Publishes the new state version. |
+| `POST /api/child/friend` | `{code}` | New public `friendView` record, pending parent approval. Practice codes from `DIRECTORY` remain supported. |
 | `POST /api/child/trade` | `{friendId,give,get}` | Trade record; catalog postcard IDs, approved friend, owned unlocked copy; secret postcards cannot be traded. |
 | `POST /api/child/greet` | `{friendId,index}` | `{ok:true}`; predefined greeting index 0 through `catalog.greetings.length-1`, approved friend. |
 | `POST /api/child/notifications/read` | No fields | `{ok:true}`; marks only child notifications read. |

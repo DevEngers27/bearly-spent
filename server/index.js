@@ -2,7 +2,7 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readChild, mutateChild, resetChild, subscribe, childIdFor, childrenWithDueWork, createChild, friendCode, childRecord, DEMO_FAMILY_ID } from "./store.js";
+import { readChild, mutateChild, resetChild, subscribe, childIdFor, childrenWithDueWork, createChild, friendCode, childRecord, updateChildProfile, DEMO_FAMILY_ID } from "./store.js";
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
 import { runGuardian, injectDuplicatePosting, reconcileNow } from "./guardian.js";
@@ -72,6 +72,21 @@ export function childView(db, now = Date.now()) {
   game.normalizeGoals(db);
   const day = dayKey(now, db.settings.timezone);
   const week = weekKey(now, db.settings.timezone);
+  const places = placesView(db, now);
+  const profile = {
+    name: db.child.name, age: db.child.age, bearName: db.child.bear.name,
+    friendCode: childIdFor(db) ? friendCode(childIdFor(db)) : null,
+    since: db.createdAt,
+    stats: {
+      points: db.child.points,
+      postcards: { collected: new Set(db.postcards.map((p) => p.defId)).size, total: Object.values(places).filter((p) => p.open).length, cards: db.postcards.length },
+      tripsTaken: db.adventures.length,
+      lessonsFinished: db.child.lessonsDone.length,
+      missionsDone: db.missions.filter((m) => m.status === "done").length,
+      ...(Number.isFinite(db.child.stats.longestStreak) ? { longestStreak: db.child.stats.longestStreak } : {}),
+    },
+    badges: db.child.milestonesUnlocked.slice().reverse().map((at) => MILESTONES.find((m) => m.at === at)).filter(Boolean),
+  };
   return {
     version: db.version,
     demo: game.isDemoChild(db),
@@ -82,6 +97,7 @@ export function childView(db, now = Date.now()) {
     offline: false,
     budgetDoneThisWeek: db.child.lastBudgetWeek === week,
     child: db.child,
+    profile,
     balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance, wallet: db.accounts.wallet.balance },
     walletLastTransaction: db.transactions.findLast((t) => ["wallet_in", "wallet_spend"].includes(t.kind)) || null,
     currentGoalId: db.child.currentGoalId,
@@ -102,7 +118,7 @@ export function childView(db, now = Date.now()) {
     settings: { ...db.settings, coopChallenge: game.isDemoChild(db) && db.settings.coopChallenge },
     catalog: {
       // Secrets stay out of the payload until discovered.
-      places: placesView(db, now),
+      places,
       home: HOME,
       // Answers stay on the server.
       lessons: LESSONS.map((l) => ({ ...l, questions: l.questions.map(({ q, options }) => ({ q, options })) })),
@@ -130,7 +146,9 @@ export function parentView(db, before) {
     family: { parentName: db.family.parentName },
     chat,
     chatNextBefore: end > chat.length ? chat[0]?.id : null,
-    accounts: db.accounts,
+    accounts: Object.fromEntries(Object.entries(db.accounts).map(([key, account]) => [key, {
+      ...account, ...(["savings", "spending"].includes(key) ? { label: `${db.child.name}'s ${key}` } : {}),
+    }])),
     allowance: db.allowance,
     approvals: game.socialApprovalsView(db).slice().reverse(),
     notifications: db.notifications.filter((n) => n.to === "parent").slice().reverse()
@@ -170,6 +188,10 @@ register("POST", "/api/auth/logout-all", "parent", (req, ctx, res, now) => {
   return { ok: true };
 });
 register("GET", "/api/auth/me", "session", (req, ctx) => auth.me(ctx));
+register("POST", "/api/auth/account", "parent", (req, ctx, res, now) => auth.updateAccount(ctx, req.body, now));
+register("POST", "/api/auth/email", "parent", (req, ctx, res, now) => auth.updateEmail(ctx, req.body, options(req, now)));
+register("POST", "/api/auth/password", "parent", (req, ctx, res, now) => auth.updatePassword(ctx, req.body, options(req, now)));
+register("POST", "/api/parent/family", "parent", (req, ctx, res, now) => auth.updateFamily(ctx, req.body, now));
 register("POST", "/api/demo/login", "public", (req, ctx, res, now) => signedIn(req, res, auth.demoLogin(options(req, now)), now));
 register("POST", "/api/parent/pin", "parent", (req, ctx, res, now) => auth.setPin(ctx, req.body, now));
 register("POST", "/api/parent/unlock", "lockedParent", (req, ctx, res, now) => auth.unlock(ctx, req.body, now));
@@ -178,6 +200,7 @@ register("POST", "/api/parent/pin/reset", "lockedParent", (req, ctx, res, now) =
 register("GET", "/api/parent/children/:id/devices", "parent", (req, ctx, res, now) => auth.childDevices(ctx, req.params.id, now));
 register("DELETE", "/api/parent/children/:id/devices/:sessionId", "parent", (req, ctx) => auth.unlinkDevice(ctx, req.params.id, req.params.sessionId));
 register("POST", "/api/parent/children", "parent", (req, ctx) => createChild(ctx.family.id, req.body));
+register("POST", "/api/parent/children/:id/profile", "parent", (req, ctx) => updateChildProfile(ctx.family.id, req.params.id, req.body));
 register("POST", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.createLink(ctx, req.params.id, now));
 register("GET", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.linkStatus(ctx, req.params.id, req.query?.code, now));
 register("GET", "/api/state", "child", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...childView(readChild(ctx.childId), now) }; });
@@ -237,6 +260,7 @@ register("GET", "/api/stream", "child", stream);
 const childActions = {
   save: "save", spend: "spend", journal: "journal", extra: "extra", lesson: "lesson", budget: "budget",
   "cosmetic/buy": "buyCosmetic", "cosmetic/equip": "equip", "bear/name": "renameBear",
+  profile: "profile",
 };
 for (const [path, action] of Object.entries(childActions)) {
   register("POST", `/api/child/${path}`, "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now));

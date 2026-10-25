@@ -3,8 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { database, transaction } from "./db.js";
-import { CODE_ALPHABET, createChild, childRecord, listChildren, seed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
-import { GameError } from "./domain.js";
+import { CODE_ALPHABET, createChild, childRecord, listChildren, mutateFamilyChildren, seed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
+import { GameError, audit } from "./domain.js";
 import { object, str } from "./validate.js";
 import { takeLimit, resetLimit, MINUTE } from "./limits.js";
 
@@ -49,7 +49,7 @@ function timezoneName(value = "UTC") {
 export function familyById(id) {
   const row = database().prepare("SELECT * FROM families WHERE id = ?").get(id);
   if (!row) throw new GameError("Please sign in again", 401);
-  return { id: row.id, name: row.name, parentPin: row.parent_pin, timezone: row.timezone, createdAt: row.created_at };
+  return { id: row.id, name: row.name, displayName: row.display_name, parentPin: row.parent_pin, timezone: row.timezone, createdAt: row.created_at };
 }
 
 export function createSession({ familyId, userId = null, role = "parent", childId = null, ua = "", deviceKind = "browser", now = Date.now() }) {
@@ -145,10 +145,72 @@ export function me(context) {
   const children = listChildren(family.id).filter((c) => role === "parent" || c.id === childId);
   return {
     demo: process.env.MQ_DEMO === "1" && family.id === DEMO_FAMILY_ID,
-    family: { id: family.id, name: family.name, timezone: family.timezone, pinSet: Boolean(family.parentPin) },
+    family: { id: family.id, name: family.name, displayName: family.displayName, timezone: family.timezone, pinSet: Boolean(family.parentPin) },
+    ...(role === "parent" ? { user: database().prepare("SELECT id, name, email FROM users WHERE id = ? AND family_id = ?").get(session.user_id, family.id) } : {}),
     role, children, activeChild: children.find((c) => c.id === childId) || null,
     unlockedUntil: session.unlocked_until,
   };
+}
+
+function accountUser(context, now = Date.now()) {
+  if (context.role !== "parent") throw new GameError("A grown-up needs to sign in", 403);
+  if (context.family.parentPin && context.session.unlocked_until <= now) throw new GameError("Please unlock parent mode", 403);
+  const user = database().prepare("SELECT * FROM users WHERE id = ? AND family_id = ?").get(context.session.user_id, context.family.id);
+  if (!user) throw new GameError("Please sign in again", 401);
+  return user;
+}
+
+function accountChange(context, write, detail, updateChild = () => {}) {
+  mutateFamilyChildren(context.family.id, write, (d) => {
+    updateChild(d);
+    audit(d, "parent", "account", detail);
+    d.audit.at(-1).kind = "account";
+  });
+  return { ok: true };
+}
+
+export function updateAccount(context, input, now = Date.now()) {
+  const user = accountUser(context, now), body = object(input);
+  const name = Object.hasOwn(body, "name") ? str(body.name, { max: 64 }) : user.name;
+  return accountChange(context, (db) => {
+    db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, user.id);
+    db.prepare("UPDATE families SET name = ? WHERE id = ?").run(name, context.family.id);
+  }, "Parent name changed", (d) => { d.family.parentName = name; });
+}
+
+function checkAccountPassword(context, value, { ip = "unknown", now = Date.now() } = {}) {
+  const user = accountUser(context, now);
+  takeLimit("loginIp", ip, now);
+  takeLimit("loginEmail", user.email, now);
+  if (!verifyPassword(passwordText(value), user.pass_hash)) throw new GameError("That password didn't match", 401);
+  return user;
+}
+
+export function updateEmail(context, input, options = {}) {
+  const body = object(input);
+  const user = checkAccountPassword(context, body.password, options), email = emailAddress(body.email);
+  return accountChange(context, (db) => {
+    if (db.prepare("SELECT id FROM users WHERE email = ? AND id != ?").get(email, user.id)) throw new GameError("That email is already registered");
+    db.prepare("UPDATE users SET email = ? WHERE id = ?").run(email, user.id);
+  }, "Sign-in email changed");
+}
+
+export function updatePassword(context, input, options = {}) {
+  const body = object(input);
+  const user = checkAccountPassword(context, body.currentPassword, options);
+  const hash = hashPassword(passwordText(body.newPassword, true));
+  return accountChange(context, (db) => {
+    db.prepare("UPDATE users SET pass_hash = ? WHERE id = ?").run(hash, user.id);
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND role = 'parent' AND token_hash != ?").run(user.id, context.session.token_hash);
+  }, "Password changed");
+}
+
+export function updateFamily(context, input, now = Date.now()) {
+  accountUser(context, now);
+  const displayName = str(object(input).displayName, { max: 40, required: false });
+  return accountChange(context, (db) => {
+    db.prepare("UPDATE families SET display_name = ? WHERE id = ?").run(displayName, context.family.id);
+  }, "Family display name changed");
 }
 
 export function logout(session) {

@@ -3,9 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { database, transaction } from "./db.js";
-import { GameError, dueAdventures, normalizeGoals } from "./domain.js";
+import { GameError, dueAdventures, normalizeGoals, audit, notify } from "./domain.js";
 import { hasDueWork } from "./guardian.js";
-import { str, integer, object } from "./validate.js";
+import { profileName, integer, object } from "./validate.js";
 
 const documents = new Map();
 const identities = new WeakMap();
@@ -24,6 +24,7 @@ const DAY = 24 * 60 * 60 * 1000;
 export function seed(now = Date.now()) {
   return {
     version: 1,
+    createdAt: now,
     family: { parentName: "Jordan" },
     child: {
       currentGoalId: "goal_bike",
@@ -112,6 +113,10 @@ export function seed(now = Date.now()) {
 // Map them onto the illustrated wardrobe so existing progress keeps working.
 export function migrate(d) {
   if (d.child) normalizeGoals(d);
+  if (!Number.isFinite(d.createdAt)) {
+    const times = (d.audit || []).map((entry) => entry.ts).filter(Number.isFinite);
+    d.createdAt = times.length ? Math.min(...times) : Date.now();
+  }
   if (d.accounts && !d.accounts.wallet) d.accounts.wallet = { id: uid("acct"), label: "Apple Cash", balance: 0 };
   const HATS = { beanie: "knit_beanie", ranger: "ranger_hat", flowers: "flower_crown" };
   const fix = (b) => {
@@ -174,7 +179,12 @@ export function readChild(childId) {
   if (documents.has(childId)) return documents.get(childId);
   const row = database().prepare("SELECT doc FROM children WHERE id = ?").get(childId);
   if (!row) throw new GameError("Child not found", 404);
-  return remember(childId, migrate(JSON.parse(row.doc)));
+  const stored = JSON.parse(row.doc);
+  const needsSince = !Number.isFinite(stored.createdAt);
+  const d = migrate(stored);
+  // Persist migration timestamps so repeated reads/restarts keep the same date.
+  if (needsSince) database().prepare("UPDATE children SET doc = ? WHERE id = ?").run(JSON.stringify(d), childId);
+  return remember(childId, d);
 }
 
 export function listChildren(familyId) {
@@ -188,9 +198,9 @@ export function listChildren(familyId) {
 
 export function createChild(familyId, input) {
   const body = object(input);
-  const name = str(body.name, { max: 24 });
+  const name = profileName(body.name);
   const age = integer(body.age, { min: 7, max: 12 });
-  const bearName = str(body.bearName, { max: 24 });
+  const bearName = profileName(body.bearName);
   if (!database().prepare("SELECT id FROM families WHERE id = ?").get(familyId)) throw new GameError("Family not found", 404);
   const d = seed();
   d.family = { parentName: database().prepare("SELECT name FROM families WHERE id = ?").get(familyId).name };
@@ -254,8 +264,9 @@ export function mutateChildren(childIds, fn) {
       docs.forEach((d, i) => {
         retain(d);
         d.version = rows[i].version + 1;
-        db.prepare("UPDATE children SET doc = ?, version = ?, updated_at = ? WHERE id = ?")
-          .run(JSON.stringify(d), d.version, Date.now(), ids[i]);
+        const written = db.prepare("UPDATE children SET doc = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?")
+          .run(JSON.stringify(d), d.version, Date.now(), ids[i], rows[i].version);
+        if (written.changes !== 1) throw new GameError("Please try that again", 409);
       });
       return out;
     });
@@ -286,6 +297,44 @@ export function friendCode(childId, regenerate = false) {
 
 export function childForFriendCode(code) {
   return database().prepare("SELECT child_id FROM friend_codes WHERE code = ?").get(code)?.child_id;
+}
+
+export function updateChildProfile(familyId, childId, input) {
+  const row = childRecord(childId);
+  if (!row || row.family_id !== familyId) throw new GameError("Child not found", 404);
+  const body = object(input);
+  const name = profileName(body.name), age = integer(body.age, { min: 7, max: 12 }), bearName = profileName(body.bearName);
+  mutateChild(childId, (d) => {
+    const renamed = d.child.bear.name !== bearName;
+    Object.assign(d.child, { name, age });
+    d.child.bear.name = bearName;
+    for (const key of ["savings", "spending"]) d.accounts[key].label = `${name}'s ${key}`;
+    audit(d, "parent", "profile_updated", `Updated ${name}'s profile${renamed ? `; renamed the bear to ${bearName}` : ""}`);
+    notify(d, "child", renamed ? `Your grown-up renamed your bear to ${bearName}` : "Your grown-up updated your profile");
+  });
+  return listChildren(familyId).find((child) => child.id === childId);
+}
+
+// Account writes and their per-child audit events commit together. Publish only
+// after commit so streams cannot observe an account update without its audit.
+export function mutateFamilyChildren(familyId, changeAccount, changeChild) {
+  const rows = database().prepare("SELECT id, version FROM children WHERE family_id = ?").all(familyId);
+  const docs = rows.map((row) => ({ ...row, doc: structuredClone(readChild(row.id)) }));
+  transaction((db) => {
+    changeAccount(db);
+    for (const row of docs) {
+      changeChild(row.doc);
+      retain(row.doc);
+      row.doc.version = row.version + 1;
+      db.prepare("UPDATE children SET doc = ?, version = ?, updated_at = ? WHERE id = ?")
+        .run(JSON.stringify(row.doc), row.doc.version, Date.now(), row.id);
+    }
+  });
+  for (const row of docs) {
+    const current = readChild(row.id);
+    Object.assign(current, row.doc);
+    publish(familyId, row.doc.version, row.id);
+  }
 }
 
 export function childrenWithDueWork(now = Date.now()) {
