@@ -575,7 +575,11 @@ test("H6.3 help escapes raw HTML, code and request-host injection", async () => 
   const result = await device().call("GET", "/help/apple-cash", undefined, { headers: { host: '\"><script>alert(1)</script>&' } });
   assert.equal(result.status, 200);
   assert.doesNotMatch(result.body, /<script|<img/);
-  assert.match(result.body, /&quot;&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;&amp;/);
+  // A malformed Host header never reaches the guide; the page falls back to localhost.
+  assert.doesNotMatch(result.body, /alert\(1\)/);
+  assert.match(result.body, /localhost\/api\/child\/wallet\/spend/);
+  const odd = await device().call("GET", "/help/apple-cash", undefined, { headers: { host: "demo.moneyquest.test:8443" } });
+  assert.match(odd.body, /demo\.moneyquest\.test:8443\/api\/child\/wallet\/spend/);
 });
 
 test("H6.2 replan pending covers debounce and in-flight work, then publishes completion", async (t) => {

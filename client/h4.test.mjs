@@ -159,7 +159,7 @@ test("H4.3 trip bubble stays static across ticks and Home never draws an away be
   state.adventures = [{ id: "trip-one", status: "away", returnsAt: h.now + 60000 }];
   let talk = h.render(h.exports.useMapleTalk, { state }); h.flush(); talk.open();
   talk = h.render(h.exports.useMapleTalk, { state });
-  assert.equal(talk.bubble, "Maple is on a trip — back soon!");
+  assert.equal(talk.bubble, "Maple is on a trip!");
   const home = harness("Child.jsx"), bubble = harness("Child.jsx");
   const render = () => home.render(home.exports.Home, { state, talk: { ...talk, isOpen: true, mood: "resting" }, open: noop });
   let tree = render(); home.flush();

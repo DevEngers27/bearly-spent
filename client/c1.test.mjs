@@ -1109,7 +1109,7 @@ test("F6: talk guards Buddy-off, away and offline with warm bubbles and no reque
     let talk = h.render(h.exports.useMapleTalk, props); h.flush();
     talk.open(); talk = h.render(h.exports.useMapleTalk, props);
     assert.equal(talk.isOpen, false);
-    assert.match(talk.bubble, mode === "off" ? /grown-up switched chatting off/ : mode === "away" ? /on a trip — back soon!/ : /can't chat while we're offline/);
+    assert.match(talk.bubble, mode === "off" ? /grown-up switched chatting off/ : mode === "away" ? /is on a trip!/ : /can't chat while we're offline/);
     assert.equal(await talk.send("Hello"), false);
     assert.equal(calls, 0);
   }
