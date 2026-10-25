@@ -22,7 +22,7 @@ test("W3.1: offline helper, trip notifications and audit use the child's bear na
   game.finalizeAdventures(db, now + game.ADVENTURE_MS);
   game.childWalletSpend(db, { amount: 100, merchant: "Bookshop" }, spendPolicy, now);
   assert.ok(db.notifications.some((n) => /Bo is home/.test(n.text)));
-  assert.ok(db.notifications.some((n) => /Bo's Apple Cash/.test(n.text)));
+  assert.ok(db.notifications.some((n) => n.text.startsWith(`${db.child.name}'s Apple Cash`)), "the overspend notice names the child, not the bear");
   assert.ok(db.audit.some((a) => /Sent Bo/.test(a.detail)));
   assert.doesNotMatch(JSON.stringify({ notifications: db.notifications, audit: db.audit }), /Maple/);
 });

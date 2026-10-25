@@ -325,7 +325,7 @@ function Activity({ state }) {
           {state.transactions.map((t) => (
             <tr key={t.id} className={t.status !== "posted" ? "struck" : t.flagged ? "flag" : ""}>
               <td>{formatDateTime(t.ts)}</td>
-              <td>{t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small>{t.note}</small>}</td>
+              <td>{t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</td>
               <td>{label[t.from]} → {label[t.to]}</td>
               <td className="num">{money(t.amount)}</td>
               <td>{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}{t.uncovered ? " · uncovered" : ""}</td>
@@ -528,7 +528,7 @@ function WalletLedger({ state, run, busy }) {
     <h3>Wallet ledger</h3>
     <table className="ptable"><thead><tr><th>When</th><th>What</th><th>Amount</th><th>Status</th></tr></thead><tbody>
       {!(state.walletTransactions?.length) && <tr><td colSpan="4">No Apple Cash activity yet.</td></tr>}
-      {state.walletTransactions?.map((t) => <tr key={t.id}><td>{formatDateTime(t.ts)}</td><td>{t.memo}{t.note && <small>{t.note}</small>}</td><td>{t.kind === "wallet_in" ? "+" : "−"}{money(t.amount)}</td><td>{t.uncovered ? "Uncovered — check outside transfers" : t.status}</td></tr>)}
+      {state.walletTransactions?.map((t) => <tr key={t.id}><td>{formatDateTime(t.ts)}</td><td>{t.memo}{t.note && <small> · {t.note}</small>}</td><td>{t.kind === "wallet_in" ? "+" : "−"}{money(t.amount)}</td><td>{t.uncovered ? "Uncovered — check outside transfers" : t.status}</td></tr>)}
     </tbody></table>
   </section>;
 }

@@ -141,7 +141,7 @@ test("F2 uncovered purchases post and flag the parent's shortfall; later sends r
   assert.equal(txn.uncovered, true);
   assert.equal(txn.status, "posted");
   assert.equal(db.accounts.wallet.balance, -225);
-  assert.ok(db.notifications.some((n) => n.to === "parent" && n.text === "Maple's Apple Cash shows $2.25 more spent than was sent — did you send money outside MoneyQuest?"));
+  assert.ok(db.notifications.some((n) => n.to === "parent" && n.text === "Mia's Apple Cash shows $2.25 more spent than was sent — did you send money outside MoneyQuest?"));
   parentWalletSend(db, { amount: 500 });
   assert.equal(db.accounts.wallet.balance, 275);
   assert.equal(spend(db, { amount: 200 }).uncovered, false);

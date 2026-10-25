@@ -306,7 +306,7 @@ export function childWalletSpend(db, { amount, merchant, at, external_id }, poli
   db.accounts.wallet.balance -= amount;
   db.transactions.push(txn);
   if (key) (db.walletReceipts ||= {})[key] = { ...txn };
-  if (uncovered) notify(db, "parent", `${db.child.bear.name}'s Apple Cash shows ${dollars(-db.accounts.wallet.balance)} more spent than was sent — did you send money outside MoneyQuest?`, "guardian", `uncovered:${txn.id}`);
+  if (uncovered) notify(db, "parent", `${db.child.name}'s Apple Cash shows ${dollars(-db.accounts.wallet.balance)} more spent than was sent — did you send money outside MoneyQuest?`, "guardian", `uncovered:${txn.id}`);
   dailyTrackingBonus(db, now);
   audit(db, "child", "wallet_spend", `Recorded ${dollars(amount)} paid with Apple Cash at ${merchant}`, { txnId: txn.id, uncovered });
   moneyMoved(db, "Apple Cash purchase recorded");
