@@ -295,6 +295,12 @@ export function friendCode(childId, regenerate = false) {
   throw new GameError("Try making a new code in a moment", 429);
 }
 
+/** How a family introduces itself to another family: its display name, else "<parent>'s family". */
+export function familyLabel(childId) {
+  const row = database().prepare("SELECT f.display_name AS displayName, f.name AS name FROM families f JOIN children c ON c.family_id = f.id WHERE c.id = ?").get(childId);
+  return row?.displayName?.trim() || `${row?.name || "their grown-up"}'s family`;
+}
+
 export function childForFriendCode(code) {
   return database().prepare("SELECT child_id FROM friend_codes WHERE code = ?").get(code)?.child_id;
 }

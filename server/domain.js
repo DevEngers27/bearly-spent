@@ -2,7 +2,7 @@
 // HTTP layer wraps calls in store.mutateChild(). Throw GameError for user-facing
 // validation problems.
 import { randomInt } from "node:crypto";
-import { uid, childIdFor, childRecord, readChild, mutateChildren, childForFriendCode, DEMO_FAMILY_ID } from "./store.js";
+import { uid, childIdFor, childRecord, readChild, mutateChildren, childForFriendCode, familyLabel, DEMO_FAMILY_ID } from "./store.js";
 import { object, id, str, bool, integer } from "./validate.js";
 import { transfer, BankError } from "./bank.js";
 import { dayKey, weekKey } from "./time.js";
@@ -852,7 +852,7 @@ function advanceFriend(docs, friends) {
   friends.forEach((f) => { f.status = status; });
   if (a.parentAccepted && !docs[1 - aIndex].approvals.some((r) => r.real && r.socialId === a.id)) {
     const sender = docs[aIndex], recipient = docs[1 - aIndex];
-    socialApproval(recipient, "friend_request", b, `${firstName(sender)} (from the ${sender.family.parentName} family) wants to be friends with ${firstName(recipient)}`);
+    socialApproval(recipient, "friend_request", b, `${firstName(sender)} (from ${childIdFor(sender) ? familyLabel(childIdFor(sender)) : `${sender.family.parentName}'s family`}) wants to be friends with ${firstName(recipient)}`);
     notify(recipient, "child", `${firstName(sender)} wants to be friends`, "info");
   }
   if (status === "approved") docs.forEach((d, i) => {
