@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { database, transaction } from "./db.js";
-import { CODE_ALPHABET, createChild, childRecord, listChildren, mutateFamilyChildren, seed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
+import { CODE_ALPHABET, createChild, childRecord, listChildren, mutateFamilyChildren, seed, demoSeed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
 import { GameError, audit } from "./domain.js";
 import { object, str } from "./validate.js";
 import { takeLimit, resetLimit, MINUTE } from "./limits.js";
@@ -364,7 +364,7 @@ export function initializeAccounts() {
     const now = Date.now();
     db.prepare("INSERT OR IGNORE INTO families (id, name, created_at) VALUES (?, ?, ?)").run(DEMO_FAMILY_ID, "Jordan", now);
     if (!db.prepare("SELECT id FROM children WHERE id = ?").get(DEMO_CHILD_ID)) {
-      const d = seed(now);
+      const d = demoSeed(now);
       delete d.family.parentPin;
       db.prepare("INSERT INTO children (id, family_id, doc, version, updated_at) VALUES (?, ?, ?, ?, ?)")
         .run(DEMO_CHILD_ID, DEMO_FAMILY_ID, JSON.stringify(d), d.version, now);

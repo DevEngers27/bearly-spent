@@ -23,7 +23,7 @@ For the seeded family, copy the optional environment template before launching:
 cp .env.example .env
 ```
 
-The template sets `MQ_DEMO=1`. Welcome then shows **Try the demo family**, or you can sign in as **demo@moneyquest.test / demo-pass-1234**. The demo has Mia and Maple, $20 savings, $10 spending, $250 funding, 40 points and two Chicago postcards. There is **no default parent PIN**. Disable `MQ_DEMO` for a deployment without demo login and demo controls.
+The template sets `MQ_DEMO=1`. Welcome then shows **Try the demo family**, or you can sign in as **demo@moneyquest.test / demo-pass-1234**. The demo has Mia and Maple, $20 savings, $10 spending, $250 funding, 500 points and two Chicago postcards. There is **no default parent PIN**. Disable `MQ_DEMO` for a deployment without demo login and demo controls.
 
 API keys are optional: without them, the server uses the simulated bank, a rule-based Buddy and browser speech. This still needs a running local API; it does not make chat work without a network connection. Set optional Claude, Nessie and Cartesia keys in `.env`; see [.env.example](.env.example). `ADVENTURE_SECONDS` defaults to **60**.
 

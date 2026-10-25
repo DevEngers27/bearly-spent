@@ -11,6 +11,47 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.6.0] — 2026-10-25
+
+Goals the family can manage, real friends, profiles, and a parent app that
+works on a phone. 296 server tests and 150 client tests; browser smoke of the
+new flows at 390×844 and 1280×900.
+
+### Added
+- Savings goals: several goals per child with one current goal; kids and
+  parents create, edit, switch and put goals away, parents can delete
+  (never the current or a bought goal). Reaching the target celebrates once
+  and lets the kid ask to buy it; the parent approves from the Inbox and the
+  Guardian pays savings → merchant exactly once, marks the goal bought and
+  prompts for the next one. Declines and short savings leave money untouched.
+  Hand-drawn goal pictures; Buddy plans against the current goal.
+- Real friends: every child has a stable 8-character friend code (parents
+  can replace it); a request needs both kids and both parents, shows no name
+  until accepted, and declines are silent. Friends see each other's bear and
+  postcards only. Postcard swaps run as one SQLite transaction across both
+  albums with cards locked while pending and a 7-day expiry; prewritten
+  greetings are limited to 20 a day per friendship. Practice friends and
+  team challenges stay in the demo family.
+- Profiles: a kid "Me" sheet (bear portrait and rename, about me, friend
+  code, lifetime numbers, badges, Dress up / Add a friend shortcuts) and a
+  parent Account section (name, sign-in email, password change that signs
+  out other parent devices, family display name used in friend requests).
+  Parents edit each child's name, age and bear name.
+- Parent app on a phone: bottom tabs (Inbox, Home, Money, Kids, More),
+  stacked cards instead of tables, 44px targets and safe-area padding below
+  820px; the desktop sidebar is unchanged.
+
+### Changed
+- The demo family starts (and resets) with 500 points so trips and swaps can
+  be tried right away; new real children still start at zero.
+- Nessie mirror follows the sandbox's current schema (completed whole-dollar
+  records, transfer plus deposit for internal moves) and is verified live.
+
+### Fixed
+- Apple Cash card refreshes after a Shortcut is unlinked; the speech bubble
+  never covers the bear's face; a used kid code shows "Linked ✓"; the Buddy
+  switch label follows its state; Create goal explains the lesson limit.
+
 ## [0.5.0] — 2026-10-25
 
 Apple Cash tracking and the post-0.4.0 polish. 241 server tests and

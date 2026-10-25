@@ -21,6 +21,14 @@ export const CODE_ALPHABET = "BCDFGHJKMNPQRTVWXY346789";
 
 const DAY = 24 * 60 * 60 * 1000;
 
+/** The demo family starts with enough points to try several surprise trips and swaps. */
+export const DEMO_POINTS = 500;
+export function demoSeed(now = Date.now()) {
+  const d = seed(now);
+  d.child.points = DEMO_POINTS;
+  return d;
+}
+
 export function seed(now = Date.now()) {
   return {
     version: 1,
@@ -368,7 +376,7 @@ export function resetChild(childId) {
   if (!row || row.family_id !== DEMO_FAMILY_ID || process.env.MQ_DEMO !== "1") throw new GameError("Demo control unavailable", 404);
   // Replace the root identity too, invalidating any in-flight Buddy work.
   const previous = documents.get(childId);
-  remember(childId, seed());
+  remember(childId, demoSeed());
   try {
     mutateChild(childId, (d) => { delete d.family.parentPin; });
   } catch (e) {
