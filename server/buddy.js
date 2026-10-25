@@ -6,7 +6,7 @@
 // configured, a small deterministic fallback keeps the demo working.
 import Anthropic from "@anthropic-ai/sdk";
 import { readChild, mutateChild, childIdFor, uid } from "./store.js";
-import { audit, notify, weeksToGoal, GameError } from "./domain.js";
+import { audit, notify, weeksToGoal, currentGoal, GameError } from "./domain.js";
 
 const MODEL = process.env.BUDDY_MODEL || "claude-opus-5-5";
 const EFFORT = process.env.BUDDY_EFFORT || "low"; // kid chat: keep latency low
@@ -68,8 +68,9 @@ function redactMessages(messages) {
 
 // ------------------------------------------------------------------ tools
 export function snapshot(db) {
-  const goals = db.savingsGoals.map((g) => ({
-    id: g.id, title: g.title, target: dollars(g.target),
+  currentGoal(db);
+  const goals = db.savingsGoals.filter((g) => ["active", "reached"].includes(g.status)).map((g) => ({
+    id: g.id, title: g.title, status: g.status, current: g.id === db.child.currentGoalId, target: dollars(g.target),
     saved_so_far: dollars(Math.min(db.accounts.savings.balance, g.target)),
     weeks_left_at_current_pace: weeksToGoal(db, g),
   }));
@@ -101,8 +102,8 @@ function simulatePurchase(db, { price_dollars, pay_from }) {
   const shortfall = Math.max(0, price - db.accounts.spending.balance);
   // How goals shift if the purchase (or its shortfall) comes out of savings.
   const hit = from === "savings" ? price : 0;
-  result.goal_impact = db.savingsGoals.map((g) => ({
-    goal: g.title,
+  result.goal_impact = db.savingsGoals.filter((g) => ["active", "reached"].includes(g.status || "active")).map((g) => ({
+    id: g.id, goal: g.title,
     weeks_left_now: weeksToGoal(db, g),
     weeks_left_after_purchase: weeksToGoal(db, g, -hit),
   }));
@@ -140,7 +141,7 @@ const TOOLS = [
       properties: {
         summary: { type: "string", description: "One or two sentences, max 200 characters, addressed to the child." },
         weekly_save_dollars: { type: "number", description: "Suggested dollars to save each week" },
-        goal_id: { type: "string", description: "Which savings goal this plan targets" },
+        goal_id: { type: "string", description: "The current savings goal ID from the snapshot" },
         steps: { type: "array", items: { type: "string" }, maxItems: 4, description: "Up to 4 short concrete steps" },
       },
       required: ["summary", "weekly_save_dollars", "steps"],
@@ -174,10 +175,12 @@ function runTool(name, input, canWrite = () => true, childId) {
       if (!db.settings.buddyEnabled || !canWrite()) return { error: "This plan update is no longer needed." };
       return mutateChild(childId, (d) => {
         if (!d.settings.buddyEnabled || !canWrite()) return { error: "This plan update is no longer needed." };
+        const goal = currentGoal(d);
+        if (input.goal_id && input.goal_id !== goal?.id) return { error: "The current goal changed. Read the snapshot and plan for the current goal." };
         const summary = String(input.summary || "").slice(0, 240);
         const steps = (input.steps || []).slice(0, 4).map((s) => String(s).slice(0, 120));
         const weekly = Math.max(0, Math.round(Number(input.weekly_save_dollars) * 100) || 0);
-        d.buddy.plan = { summary, steps, weeklySave: weekly, goalId: input.goal_id || d.savingsGoals[0]?.id, updatedAt: Date.now() };
+        d.buddy.plan = { summary, steps, weeklySave: weekly, goalId: goal?.id || null, updatedAt: Date.now() };
         audit(d, "buddy", "plan_updated", `Money Buddy updated the savings plan: ${summary}`);
         return { ok: true };
       });
@@ -328,7 +331,7 @@ export function parsePrice(text) {
 const NO_WEEKLY_SAVINGS = "Right now nothing goes to savings each week — ask your grown-up to set a saving amount, or save some yourself!";
 
 export function offlineReply(db, text, childId = childIdFor(db)) {
-  const goal = db.savingsGoals[0];
+  const goal = currentGoal(db);
   const weekly = Math.round((db.allowance.amount * db.allowance.savePct) / 100);
   const bear = db.child.bear.name;
   const price = parsePrice(text);
@@ -339,10 +342,10 @@ export function offlineReply(db, text, childId = childIdFor(db)) {
   if (has(text, /\b(buy(?:ing)?|get|purchase|afford|spend|cost)\b/) && price) {
     const sim = simulatePurchase(db, { price_dollars: price / 100, pay_from: "spending" });
     const simSave = simulatePurchase(db, { price_dollars: price / 100, pay_from: "savings" });
-    const gi = simSave.goal_impact[0];
+    const gi = simSave.goal_impact.find((g) => g.id === goal?.id);
     const limit = price > db.allowance.spendLimit ? ` It's over ${dollars(db.allowance.spendLimit)}, so your grown-up would need to say OK first.` : "";
-    if (sim.can_afford) return `Yes, you can pay with your spending money and still have ${sim.balance_after} left. Your ${goal.title} savings stay safe.${limit} Want to wait one day to check you still want it?`;
-    const impact = gi.weeks_left_after_purchase === null || gi.weeks_left_now === null
+    if (sim.can_afford) return `Yes, you can pay with your spending money and still have ${sim.balance_after} left. Your ${goal?.title || "goal"} savings stay safe.${limit} Want to wait one day to check you still want it?`;
+    const impact = !gi ? "Pick a new saving goal when you are ready." : gi.weeks_left_after_purchase === null || gi.weeks_left_now === null
       ? NO_WEEKLY_SAVINGS
       : `If you took it from savings, your ${gi.goal} would take ${gi.weeks_left_after_purchase} weeks instead of ${gi.weeks_left_now}.`;
     return `You have ${dollars(db.accounts.spending.balance)} to spend, so you'd need ${dollars(price - db.accounts.spending.balance)} more. ${impact}${limit} Want me to make a plan to save for it?`;
@@ -359,6 +362,7 @@ export function offlineReply(db, text, childId = childIdFor(db)) {
     return `Here's your plan: ${plan.summary} Steps: ${plan.steps.join("; ")}. I put it on your Home page!`;
   }
   if (has(text, /\b(how long|when|weeks|goal|bike|bicycle)\b/)) {
+    if (!goal) return "Pick or create your next saving goal from Home!";
     const w = weeksToGoal(db, goal);
     if (w === 0) return `You already saved enough for your ${goal.title}! Ask your grown-up about buying it, then pick a new goal.`;
     if (w === null) return NO_WEEKLY_SAVINGS;
@@ -380,18 +384,19 @@ export function offlineReply(db, text, childId = childIdFor(db)) {
     return "Three saving tricks: save first when money comes in, wait one day before buying something you want, and compare prices before you buy. Small amounts add up!";
   }
   if (has(text, /^(hi|hey|hello|yo|good (morning|afternoon|evening))\b/)) {
-    return `Hi ${db.child.name}! I'm ${bear}. You can ask me "Can I buy a $15 toy?", "When will I get my ${goal.title.toLowerCase()}?", or "Make me a saving plan".`;
+    return `Hi ${db.child.name}! I'm ${bear}. You can ask me "Can I buy a $15 toy?", "When will I get my ${goal?.title.toLowerCase() || "next goal"}?", or "Make me a saving plan".`;
   }
-  return `I'm not sure about that one. I'm best at money questions! Try "Can I buy a $15 toy?", "When will I get my ${goal.title.toLowerCase()}?", or "Make me a saving plan".`;
+  return `I'm not sure about that one. I'm best at money questions! Try "Can I buy a $15 toy?", "When will I get my ${goal?.title.toLowerCase() || "next goal"}?", or "Make me a saving plan".`;
 }
 
 export function offlinePlan(db, reason) {
-  const goal = db.savingsGoals[0];
+  const goal = currentGoal(db);
   const weekly = Math.round((db.allowance.amount * db.allowance.savePct) / 100);
   const w = weeksToGoal(db, goal);
+  if (!goal) return { summary: "Pick or create your next saving goal from Home!", steps: ["Choose something to save for"], weeklySave: weekly, goalId: null, updatedAt: Date.now(), reason, offline: true };
   return {
     summary: w === 0
-      ? `You reached your ${goal.title} goal! Time to pick a new one.`
+      ? `You reached your ${goal.title} goal! Ask your grown-up about buying it.`
       : w === null ? NO_WEEKLY_SAVINGS
         : `${dollars(db.accounts.savings.balance)} saved — about ${w} weeks to your ${goal.title} at ${dollars(weekly)}/week.`,
     steps: [weekly > 0 ? `Keep saving ${dollars(weekly)} from each allowance` : "Ask your grown-up about saving a little each week", "Finish lessons to earn reward money", "Wait a day before big buys"],

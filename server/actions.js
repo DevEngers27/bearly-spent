@@ -120,10 +120,16 @@ export const actions = {
     const detail = Object.entries(update).map(([key, value]) => key === "timezone" ? `Time zone set to ${value}` : `${labels[key]} turned ${value ? "on" : "off"}`).join(". ");
     game.audit(db, "parent", "settings", detail || "Settings unchanged");
   }),
-  savingsGoal: action((db, body) => {
+  goalSave: action((db, body, goalId = null, actor = "child") => {
     const update = {};
-    if (Object.hasOwn(body, "title")) update.title = str(body.title);
-    if (Object.hasOwn(body, "target")) update.target = money(body.target, { min: 100 });
-    Object.assign(db.savingsGoals[0], update);
+    if (!goalId || Object.hasOwn(body, "title")) update.title = str(body.title, { max: 40 });
+    if (!goalId || Object.hasOwn(body, "target")) update.target = money(body.target, { min: 100, max: 100000 });
+    if (!goalId || Object.hasOwn(body, "icon")) update.icon = oneOf(body.icon, game.GOAL_ICONS);
+    return game.saveSavingsGoal(db, update, goalId && id(goalId), actor);
   }),
+  goalCurrent: (db, goalId, actor) => game.selectSavingsGoal(db, id(goalId), actor),
+  goalArchive: (db, goalId, actor) => game.retireSavingsGoal(db, id(goalId), actor),
+  goalDelete: (db, goalId) => game.retireSavingsGoal(db, id(goalId), "parent", true),
+  goalPurchase: (db, goalId) => game.requestGoalPurchase(db, id(goalId)),
+  savingsGoal: action(() => { throw new game.GameError("Use the savings goals controls instead", 410); }),
 };

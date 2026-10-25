@@ -118,13 +118,13 @@ export const offlineMessage = (bearName) => `You're offline — ${bearName ? `${
 export function useAction(toast, offline = false, bearName) {
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
-  const run = async (path, body, ok) => {
+  const run = async (path, body, ok, options) => {
     if (offline) { toast(offlineMessage(bearName)); return null; }
     if (inflight.current) return null;
     inflight.current = true;
     setBusy(true);
     try {
-      const result = await (typeof path === "function" ? path() : api(path, body));
+      const result = await (typeof path === "function" ? path() : api(path, body, options));
       if (ok) toast(typeof ok === "function" ? ok(result) : ok);
       return result;
     } catch (e) {
@@ -212,3 +212,11 @@ export const postcardMetrics = (state) => state.metrics?.postcards || {
   cards: state.postcards.length,
   total: Object.keys(state.catalog.places).length,
 };
+
+export const GOAL_ICONS = ["bike", "game", "book", "gift", "trip", "toy", "other"];
+export const goalPicture = (icon) => ({ bike: "🚲", game: "🎮", book: "📚", gift: "🎁", trip: "🧳", toy: "🧸", other: "⭐" }[icon] || "⭐");
+export function currentSavingsGoal(state) {
+  const id = state.currentGoalId !== undefined ? state.currentGoalId : state.child.currentGoalId;
+  const live = (g) => !g.status || ["active", "reached"].includes(g.status);
+  return state.goals.find((g) => live(g) && (id !== undefined ? g.id === id : g.current || g.activeFlag)) || (id === undefined ? state.goals.find(live) : null);
+}

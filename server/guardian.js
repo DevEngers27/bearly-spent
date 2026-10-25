@@ -12,7 +12,7 @@
 // postings that exceed an obligation, and anything outside that is escalated.
 // Every decision lands in the audit log with the policy that produced it.
 import { transfer, reverse, BankError } from "./bank.js";
-import { audit, notify, checkMilestones, allowanceLastPaidAt, allowancePaidRecently, resolveEscalation } from "./domain.js";
+import { audit, notify, checkMilestones, allowanceLastPaidAt, allowancePaidRecently, resolveEscalation, normalizeGoals } from "./domain.js";
 import { uid } from "./store.js";
 import { dayKey } from "./time.js";
 
@@ -21,13 +21,14 @@ const DAY = 86400000;
 
 /** Cheap check so the ticker only writes when there's real work. */
 export function hasDueWork(db, now = Date.now()) {
+  if (db.savingsGoals.some((g) => g.id === db.child.currentGoalId && g.status === "active" && db.accounts.savings.balance >= g.target)) return true;
   if (now >= db.allowance.nextRun) return true;
   if (db.approvals.some((a) => payoutReady(db, a))) return true;
   return pendingFindings(db).length > 0;
 }
 
 function needsPayout(a) {
-  return a.kind === "reward" || a.kind === "spend" || a.kind === "extra";
+  return a.kind === "reward" || a.kind === "spend" || a.kind === "extra" || a.kind === "goal_purchase";
 }
 
 /**
@@ -43,9 +44,9 @@ function obligations(db) {
 
 function payoutReady(db, a) {
   if (a.status !== "approved" || !needsPayout(a) || a.paidTxnId) return false;
-  const existing = db.transactions.find((t) => t.status === "posted" && t.idempotencyKey === `approval:${a.id}`);
+  const existing = db.transactions.find((t) => t.status === "posted" && t.idempotencyKey === (a.kind === "goal_purchase" ? `goal:${a.goalId}` : `approval:${a.id}`));
   if (existing) return existing.amount === a.amount;
-  return a.escalatedAt == null || db.accounts[a.kind === "spend" ? "spending" : "parent"].balance >= a.amount;
+  return a.escalatedAt == null || db.accounts[a.kind === "goal_purchase" ? "savings" : a.kind === "spend" ? "spending" : "parent"].balance >= a.amount;
 }
 
 function reconcileFindings(db) {
@@ -181,30 +182,47 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
 
   if (backPaid.length > 1) notify(db, "parent", `Back-paid ${backPaid.length} weeks of allowance (${backPaid[0]} → ${backPaid.at(-1)})`, "guardian");
 
+  checkMilestones(db);
+
   // G2 — pay approved obligations exactly once
   for (const a of db.approvals) {
     if (!payoutReady(db, a)) continue;
     const wasEscalated = a.escalatedAt != null;
     delete a.escalatedAt;
     const plan =
+      a.kind === "goal_purchase" ? { from: "savings", to: "merchant", memo: `Goal: ${a.memo}` } :
       a.kind === "reward" ? { from: "parent", to: db.allowance.rewardDestination, memo: `Reward: ${a.title.replace(/^.*completed /, "")}` } :
       a.kind === "extra" ? { from: "parent", to: "spending", memo: `Extra allowance: ${a.reason}` } :
       { from: "spending", to: "merchant", memo: a.memo };
     try {
-      const { txn, duplicate } = transfer(db, { ...plan, amount: a.amount, kind: a.kind === "spend" ? "spend" : a.kind, idempotencyKey: `approval:${a.id}`, ts: now });
+      const { txn, duplicate } = transfer(db, { ...plan, amount: a.amount, kind: a.kind === "spend" ? "spend" : a.kind, idempotencyKey: a.kind === "goal_purchase" ? `goal:${a.goalId}` : `approval:${a.id}`, ts: now });
       txn.ref = a.id;
       a.paidTxnId = txn.id;
       for (const related of db.approvals) if (related.approvalId === a.id && ["topup", "child_funds"].includes(related.kind)) resolveEscalation(db, related);
+      if (a.kind === "goal_purchase") {
+        const g = db.savingsGoals.find((g) => g.id === a.goalId);
+        if (g && g.status !== "bought") {
+          g.status = "bought";
+          g.boughtAt = now;
+          normalizeGoals(db);
+          db.buddy.plan = null;
+          audit(db, "guardian", "savings_goal_bought", `${db.child.name} bought ${g.title} with ${dollars(a.amount)} from savings`, { goalId: g.id, txnId: txn.id });
+          notify(db, "child", `You saved for ${g.title} and bought it! Pick or create your next goal.`, "celebrate", `bought:${g.id}`);
+        }
+      }
       if (a.kind === "reward") {
         const g = db.parentGoals.find((x) => x.id === a.goalId);
         if (g) g.status = "paid";
       }
+      checkMilestones(db);
       if (!duplicate) log("obligation_paid", `G2: Executed parent-approved ${a.kind} — ${dollars(a.amount)} ${plan.from} → ${plan.to}.`, { policy: "G2", approvalId: a.id, txnId: txn.id });
     } catch (e) {
       if (!(e instanceof BankError)) throw e;
       a.escalatedAt = now;
       if (!wasEscalated) {
-        if (a.kind === "spend") {
+        if (a.kind === "goal_purchase") {
+          escalate(db, "child_funds", `${db.child.name}'s savings are short now for ${a.memo}`, "Save a little more, or decline this purchase for now.", { approvalId: a.id }, now);
+        } else if (a.kind === "spend") {
           escalate(db, "child_funds", `${db.child.name}'s spending money is short by ${dollars(a.amount - db.accounts.spending.balance)} for '${a.memo}'`, "Your child needs to save less or earn more, or you can decline the purchase.", { approvalId: a.id }, now);
         } else {
           escalate(db, "topup", `Couldn't complete "${a.title}": ${e.message}.`, "Choose Add money in Allowance or decline the request.", { approvalId: a.id }, now);
@@ -229,7 +247,7 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
     log("low_funds_warning", `G5: Funding ${dollars(db.accounts.parent.balance)} < upcoming ${dollars(upcoming)}. Warned parent early.`, { policy: "G5" });
   }
 
-  if (actions.length) checkMilestones(db);
+  checkMilestones(db);
   return actions;
 }
 

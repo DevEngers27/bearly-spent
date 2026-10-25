@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction } from "./api.js";
+import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction, GOAL_ICONS, goalPicture, currentSavingsGoal } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import MapView from "./MapView.jsx";
@@ -171,6 +171,7 @@ function SheetRouter({ sheet, ...ctx }) {
   const { state, close } = ctx;
   switch (sheet.type) {
     case "chat": return <Sheet title="Our chat" onClose={close} tall><Buddy {...ctx} transcriptOnly /></Sheet>;
+    case "goals": return <GoalsSheet {...ctx} />;
     case "money": return <MoneySheet {...ctx} start={sheet.start} startWallet={sheet.wallet} />;
     case "dress": return <DressSheet {...ctx} />;
     case "lesson": return <LessonSheet {...ctx} lesson={sheet.lesson} />;
@@ -193,6 +194,43 @@ function SheetRouter({ sheet, ...ctx }) {
       );
     default: return null;
   }
+}
+
+function GoalsSheet({ state, run, busy, close }) {
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState({ title: "", target: "", icon: "bike" });
+  const current = currentSavingsGoal(state);
+  const edit = (g) => { setEditing(g.id); setDraft({ title: g.title, target: g.target / 100, icon: g.icon }); };
+  const reset = () => { setEditing(null); setDraft({ title: "", target: "", icon: "bike" }); };
+  // Refresh an open edit only when its editable server values change.
+  const edited = state.goals.find((g) => g.id === editing);
+  useEffect(() => { if (editing) { if (edited) setDraft({ title: edited.title, target: edited.target / 100, icon: edited.icon }); else reset(); } }, [editing, edited?.title, edited?.target, edited?.icon]);
+  return <Sheet title="My goals" onClose={close} tall>
+    <p>What would you like to save for, {state.child.name}?</p>
+    <ul className="savings-goal-list">
+      {state.goals.map((g) => {
+        const live = !g.status || ["active", "reached"].includes(g.status);
+        const waiting = state.pendingRequests.some((a) => a.kind === "goal_purchase" && a.goalId === g.id);
+        return <li key={g.id}>
+          <strong>{goalPicture(g.icon)} {g.title}</strong><p>{money(g.target)} · {g.status || "active"}{current?.id === g.id ? " · Current goal" : ""}</p>
+          <div className="btn-row">
+            {live && current?.id !== g.id && <button disabled={busy} className="btn small sage" onClick={() => run(`child/goals/${g.id}/current`, {}, "Let's save for this!")}>Save for this</button>}
+            {live && <button disabled={busy || waiting} className="btn small" onClick={() => edit(g)}>Edit</button>}
+            {live && <button disabled={busy || waiting} className="btn small" onClick={async () => { if (await run(`child/goals/${g.id}/archive`, {}, "Goal put away")) reset(); }}>Put away</button>}
+          </div>
+        </li>;
+      })}
+    </ul>
+    <h3>{editing ? "Edit goal" : "New goal"}</h3>
+    <form className="goal-form" onSubmit={async (e) => { e.preventDefault(); if (await run(`child/goals${editing ? `/${editing}` : ""}`, draft, editing ? "Goal updated!" : "Goal created!")) reset(); }}>
+      <fieldset disabled={busy}>
+        <label>Saving for<input required maxLength={40} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label>
+        <label>Target ($)<input required type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })} /></label>
+        <label>Picture<select value={draft.icon} onChange={(e) => setDraft({ ...draft, icon: e.target.value })}>{GOAL_ICONS.map((icon) => <option key={icon} value={icon}>{goalPicture(icon)} {icon}</option>)}</select></label>
+        <div className="btn-row"><button className="btn honey">{editing ? "Update goal" : "Create goal"}</button>{editing && <button type="button" className="btn" onClick={reset}>New goal instead</button>}</div>
+      </fieldset>
+    </form>
+  </Sheet>;
 }
 
 // ------------------------------------------------------------------ home
@@ -228,7 +266,7 @@ function nextUp(state, now) {
 
 function Home({ state, setTab, open, run, busy, talk }) {
   const now = useNow();
-  const goal = state.goals[0];
+  const goal = currentSavingsGoal(state);
   const away = state.adventures.find((a) => a.status === "away");
   const mood = talk?.mood || moodFor(state, now);
   const tripCost = state.catalog.trip?.cost ?? 30;
@@ -288,7 +326,8 @@ function Home({ state, setTab, open, run, busy, talk }) {
           <Jar pct={pct} />
           <div className="jar-text">
             <span className="kicker">Saving for</span>
-            <h2><Icon name={goal.icon || "bike"} size={26} /> {goal.title}</h2>
+            <button className="chip" onClick={() => open("goals")}>Switch goal</button>
+            <h2><span aria-hidden="true">{goalPicture(goal.icon)}</span> {goal.title}</h2>
             <p><b>{money(Math.min(state.balances.savings, goal.target))}</b> of {moneyShort(goal.target)}{goal.weeksLeft ? ` · about ${goal.weeksLeft} weeks to go` : goal.weeksLeft === 0 ? " · you did it!" : ""}</p>
           </div>
         </div>
@@ -298,6 +337,12 @@ function Home({ state, setTab, open, run, busy, talk }) {
             <i key={m.at} className={state.child.milestonesUnlocked.includes(m.at) ? "on" : ""} style={{ left: `${(m.at / goal.target) * 100}%` }} title={`${m.label} at ${moneyShort(m.at)}`} />
           ))}
         </div>
+        {goal.status === "reached" && <div className="goal-celebrate">
+          <p>You did it! Ask your grown-up to buy it</p>
+          <button className="btn honey" disabled={busy || state.pendingRequests.some((a) => a.kind === "goal_purchase" && a.goalId === goal.id)} onClick={() => run(`child/goals/${goal.id}/purchase`, {}, "Your grown-up has your request!")}>
+            {state.pendingRequests.some((a) => a.kind === "goal_purchase" && a.goalId === goal.id) ? "Waiting for your grown-up" : "Ask to buy it"}
+          </button>
+        </div>}
         {nextMilestone && <p className="fine">Next: {nextItem?.label || nextMilestone.label} at {moneyShort(nextMilestone.at)}</p>}
         <div className="btn-row">
           <button className="btn honey" onClick={() => open("money", { start: "save" })}>Save money</button>
@@ -305,7 +350,8 @@ function Home({ state, setTab, open, run, busy, talk }) {
         </div>
       </section> : <section className="paper-card jar-card">
         <h2 className="hand">Set a savings goal</h2>
-        <p>Ask your grown-up to help pick something to save for.</p>
+        <p>Pick or create your next goal!</p>
+        <button className="btn honey" onClick={() => open("goals")}>My goals</button>
         <div className="btn-row">
           <button className="btn honey" onClick={() => open("money", { start: "save" })}>Save money</button>
           <button className="btn sage" onClick={() => open("money", { start: "spend" })}>Spent money</button>
@@ -966,7 +1012,7 @@ function Buddy({ state, run, busy, offline, startTalk, transcriptOnly }) {
   return (
     <div className="page buddy">
       {!transcriptOnly && <h1 className="page-title">Our chat</h1>}
-      {!state.goals[0] && <section className="paper-card"><h2 className="hand">Set a savings goal</h2><p>Ask your grown-up to help choose one.</p></section>}
+      {!currentSavingsGoal(state) && <section className="paper-card"><h2 className="hand">Set a savings goal</h2><p>Ask your grown-up to help choose one.</p></section>}
       <div className="chat" ref={chatRef}>
         {chat.length === 0 && <p className="msg assistant">Our chats will be right here. What would you like to know?</p>}
         {chat.map((m) => (

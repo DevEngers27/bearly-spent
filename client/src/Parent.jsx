@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAction } from "./api.js";
+import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAction, GOAL_ICONS, goalPicture, currentSavingsGoal } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 
 const SECTIONS = [
@@ -15,7 +15,7 @@ const SECTIONS = [
   ["security", "Security"],
 ];
 
-const KIND_LABEL = { reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
+const KIND_LABEL = { goal_purchase: "Goal purchase", child_funds: "Child funds", reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
 const BROWSER_TIMEZONE = Intl.DateTimeFormat("en-US").resolvedOptions().timeZone || "UTC";
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
@@ -37,7 +37,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
     timezoneAttempted.current = true;
     run("parent/settings", { timezone: BROWSER_TIMEZONE });
   }, [state.settings.timezone, run]);
-  const pending = state.approvals.filter((a) => a.status === "pending");
+  const pending = state.approvals.filter((a) => a.status === "pending" || (a.kind === "goal_purchase" && a.status === "approved" && !a.paidTxnId));
   const ctx = { state, run, busy, demo: me?.demo === true, onAddMoney };
   return (
     <div className="parent">
@@ -108,7 +108,7 @@ function Inbox({ state, run, demo, pending, busy, onAddMoney }) {
                 </>
               ) : (
                 <>
-                  <button disabled={busy} className="pbtn primary" onClick={() => run(`parent/approval/${a.id}`, { approve: true }, a.kind === "reward" ? `Approved. The Guardian is sending ${money(a.amount)}.` : "Approved")}>
+                  <button disabled={busy || a.status === "approved"} className="pbtn primary" onClick={() => run(`parent/approval/${a.id}`, { approve: true }, a.kind === "reward" ? `Approved. The Guardian is sending ${money(a.amount)}.` : "Approved")}>
                     {a.kind === "reward" ? `Approve ${money(a.amount)}` : a.kind === "task" ? "Confirm" : "Approve"}
                   </button>
                   <button disabled={busy} className="pbtn" onClick={() => run(`parent/approval/${a.id}`, { approve: false }, "Declined")}>Decline</button>
@@ -146,7 +146,7 @@ function Inbox({ state, run, demo, pending, busy, onAddMoney }) {
 }
 
 function Overview({ state, onAddMoney, busy }) {
-  const goal = state.goals[0];
+  const goal = currentSavingsGoal(state);
   const learned = state.child.stats;
   return (
     <div className="p-stack">
@@ -227,7 +227,9 @@ function Goals({ state, run, busy }) {
           </form>
         </section>
       </div>
-      <SavingsGoal key={JSON.stringify(state.goals[0] && [state.goals[0].id, state.goals[0].title, state.goals[0].target])} state={state} run={run} busy={busy} />
+      <h2>Savings goals</h2>
+      {state.goals.map((goal) => <SavingsGoal key={JSON.stringify([goal.id, goal.title, goal.target, goal.icon])} goal={goal} state={state} run={run} busy={busy} />)}
+      <SavingsGoal key="new" create state={state} run={run} busy={busy} />
       <h2>All goals</h2>
       <table className="ptable">
         <thead><tr><th>Goal</th><th>Progress</th><th>Reward</th><th>Status</th></tr></thead>
@@ -251,17 +253,28 @@ function Goals({ state, run, busy }) {
   );
 }
 
-function SavingsGoal({ state, run, busy }) {
-  const [sg, setSg] = useState({ title: state.goals[0]?.title || "", target: state.goals[0] ? state.goals[0].target / 100 : 50 });
+function SavingsGoal({ state, goal, create = false, run, busy }) {
+  const selected = create ? null : goal || currentSavingsGoal(state);
+  const [sg, setSg] = useState({ title: selected?.title || "", target: selected ? selected.target / 100 : 50, icon: selected?.icon || "bike" });
+  const live = !selected?.status || ["active", "reached"].includes(selected.status);
+  const current = selected && selected.id === (state.currentGoalId ?? state.child.currentGoalId);
+  const waiting = selected && state.approvals.some((a) => a.kind === "goal_purchase" && a.goalId === selected.id && ["pending", "approved"].includes(a.status) && !a.paidTxnId);
   return (
     <section className="p-card">
-      <h2>{state.goals[0] ? "Savings goal" : "Set a savings goal"}</h2>
-      {!state.goals[0] && <p>Pick something your child would love to save for.</p>}
-      <form className="pform pform-row" onSubmit={(e) => { e.preventDefault(); run("parent/savings-goal", sg, "Savings goal updated"); }}>
-        <label>Saving for<input value={sg.title} onChange={(e) => setSg({ ...sg, title: e.target.value })} /></label>
-        <label>Target ($)<input type="number" inputMode="decimal" min="1" value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
-        <button disabled={busy} className="pbtn">Update</button>
+      <h2>{selected ? `${goalPicture(selected.icon)} ${selected.title}` : "Set a savings goal"}</h2>
+      {selected && <p>{selected.status || "active"}{current ? " · Current goal" : ""}</p>}
+      {!selected && <p>Pick something your child would love to save for.</p>}
+      <form className="pform pform-row" onSubmit={async (e) => { e.preventDefault(); if (await run(`parent/goals${selected ? `/${selected.id}` : ""}`, sg, selected ? "Savings goal updated" : "Savings goal created")) { if (!selected) setSg({ title: "", target: 50, icon: "bike" }); } }}>
+        <label>Saving for<input required maxLength={40} disabled={busy || !live || waiting} value={sg.title} onChange={(e) => setSg({ ...sg, title: e.target.value })} /></label>
+        <label>Target ($)<input required type="number" inputMode="decimal" min="1" max="1000" step="0.01" disabled={busy || !live || waiting} value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
+        <label>Picture<select disabled={busy || !live || waiting} value={sg.icon} onChange={(e) => setSg({ ...sg, icon: e.target.value })}>{GOAL_ICONS.map((icon) => <option key={icon} value={icon}>{goalPicture(icon)} {icon}</option>)}</select></label>
+        <button disabled={busy || !live || waiting} className="pbtn">{selected ? "Update" : "Create savings goal"}</button>
       </form>
+      {selected && <div className="btn-row">
+        {live && !current && <button disabled={busy} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/current`, {}, "Current goal changed")}>Make current</button>}
+        {live && <button disabled={busy || waiting} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/archive`, {}, "Goal archived")}>Archive</button>}
+        <button disabled={busy || current || waiting || selected.status === "bought"} className="pbtn" onClick={() => run(`parent/goals/${selected.id}`, undefined, "Goal deleted", { method: "DELETE" })}>Delete</button>
+      </div>}
     </section>
   );
 }

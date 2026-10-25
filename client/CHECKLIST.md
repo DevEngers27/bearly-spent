@@ -78,3 +78,14 @@ Socket-free regressions cover named-bear rendering, bubble structure/CSS, lockou
 - [ ] **W3.5 — Session cleanup:** Visit Album, open cards and mute speech, then unlink that kid device or Sign out everywhere. After its next authenticated 401, navigation, reveal/album receipts and mute keys are removed alongside identity/state. Re-link: Home opens. An ordinary reload of the same valid session retains navigation; failed global sign-out retains it too.
 - [ ] **W3.6 — Amount keyboard:** On a phone, check Add money, Allowance, purchase limit, goal reward, savings target, Save/Spent and Send via Apple Cash: each amount input offers the decimal keyboard.
 - [ ] **W3.7/8 — Demo/docs:** On a fresh demo follow the README's payday step before Post a duplicate. Accounts explains Add money; Known limitations links the Apple Cash Shortcut guide and explains tracking boundaries.
+
+
+## G1 savings goals
+
+Socket-free regression coverage: server/goals.test.js and client/g1.test.mjs. Browser checks remain pending.
+
+- [ ] Home Switch goal opens My goals; create with each picture, edit, switch and put away. Verify 40-character and $1/$1,000 boundaries and decimal keyboard. Polls preserve edits; server edits refresh the affected form.
+- [ ] Reach the current target: one celebration, “You did it! Ask your grown-up to buy it”, one waiting request after repeated taps. Approve in parent Inbox: savings decreases once, history says bought, next live goal becomes current. With no live goals Home offers My goals to pick/create the next.
+- [ ] Decline: reached goal and warm note remain, request again works. Drop savings before approval: no debit, “savings are short now”, restore savings to retry or decline the unpaid approval.
+- [ ] Parent Goals & tasks: add/edit/current/archive/delete controls, bought/current delete disabled. Lock the PIN and try every parent route. A paired kid cannot delete. Switch siblings and verify independent goals.
+- [ ] Buddy snapshot/plan and parent Overview follow the current goal. All four statuses appear in My goals, archived/bought history stays, permanent milestones survive purchases. Use a child and bear with custom names; check 390px layout, keyboard focus and offline disabled mutations.

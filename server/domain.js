@@ -72,6 +72,7 @@ function dailyTrackingBonus(db, now) {
 }
 
 export function checkMilestones(db) {
+  checkSavingsGoal(db);
   const saved = db.accounts.savings.balance;
   for (const m of MILESTONES) {
     if (saved >= m.at && !db.child.milestonesUnlocked.includes(m.at)) {
@@ -82,6 +83,133 @@ export function checkMilestones(db) {
       audit(db, "system", "milestone_unlocked", `Savings milestone ${dollars(m.at)} unlocked permanently`, { at: m.at });
     }
   }
+}
+
+// ------------------------------------------------------------------ savings goals
+export const GOAL_ICONS = ["bike", "game", "book", "gift", "trip", "toy", "other"];
+const liveGoal = (g) => ["active", "reached"].includes(g.status);
+
+// Also used by storage migration. Keep one current ID while history exists.
+export function normalizeGoals(db) {
+  db.savingsGoals ||= [];
+  for (const g of db.savingsGoals) {
+    g.status ||= "active";
+    g.icon ||= "other";
+  }
+  const previous = db.savingsGoals.find((g) => g.id === db.child.currentGoalId);
+  const current = (previous && liveGoal(previous) ? previous : null) || db.savingsGoals.find(liveGoal) || previous || db.savingsGoals[0];
+  db.child.currentGoalId = current?.id || null;
+  for (const g of db.savingsGoals) g.activeFlag = g.id === db.child.currentGoalId;
+  return current || null;
+}
+
+export function currentGoal(db) {
+  const g = normalizeGoals(db);
+  return g && liveGoal(g) ? g : null;
+}
+
+export function checkSavingsGoal(db) {
+  const g = currentGoal(db);
+  if (g?.status === "active" && db.accounts.savings.balance >= g.target) {
+    g.status = "reached";
+    if (g.reachedAt) return;
+    g.reachedAt = Date.now();
+    notify(db, "child", `You did it, ${db.child.name}! Ask your grown-up to buy ${g.title}.`, "celebrate", `reached:${g.id}`);
+    audit(db, "system", "savings_goal_reached", `${db.child.name} reached ${g.title} (${dollars(g.target)})`, { goalId: g.id });
+  }
+}
+
+function savingsGoalById(db, id) {
+  const g = db.savingsGoals.find((g) => g.id === id);
+  if (!g) throw new GameError("That goal isn't here. Pick another one!");
+  return g;
+}
+
+function purchaseWaiting(db, g) {
+  return db.approvals.some((a) => a.kind === "goal_purchase" && a.goalId === g.id && ["pending", "approved"].includes(a.status) && !a.paidTxnId);
+}
+
+export function saveSavingsGoal(db, input, id = null, actor = "child") {
+  // Validate everything before changing the document, including direct domain calls.
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new GameError("Fill in your goal");
+  const update = {};
+  if (!id || Object.hasOwn(input, "title")) {
+    if (typeof input.title !== "string" || !input.title.trim() || input.title.trim().length > 40) throw new GameError("Give your goal a name up to 40 letters");
+    update.title = input.title.trim();
+  }
+  if (!id || Object.hasOwn(input, "target")) {
+    if (!Number.isInteger(input.target) || input.target < 100 || input.target > 100000) throw new GameError("Pick a goal from $1 to $1,000");
+    update.target = input.target;
+  }
+  if (!id || Object.hasOwn(input, "icon")) {
+    if (!GOAL_ICONS.includes(input.icon)) throw new GameError("Pick a goal picture");
+    update.icon = input.icon;
+  }
+  let g;
+  if (id) {
+    g = savingsGoalById(db, id);
+    if (!liveGoal(g) || purchaseWaiting(db, g)) throw new GameError("This goal is resting or waiting for your grown-up");
+    const targetChanged = update.target !== undefined && update.target !== g.target;
+    Object.assign(g, update);
+    if (targetChanged && g.status === "reached" && db.accounts.savings.balance < g.target) g.status = "active";
+  } else {
+    g = { id: uid("goal"), ...update, createdAt: Date.now(), status: "active" };
+    db.savingsGoals.push(g);
+    if (actor === "child") notify(db, "parent", `${db.child.name} set a new goal: ${g.title} (${dollars(g.target)})`, "info", `new:${g.id}`);
+  }
+  normalizeGoals(db);
+  checkSavingsGoal(db);
+  db.buddy.plan = null;
+  audit(db, actor, id ? "savings_goal_edited" : "savings_goal_created", `${id ? "Updated" : "Set a new goal:"} ${g.title} (${dollars(g.target)})`, { goalId: g.id });
+  hooks.moneyChanged("Savings goal changed", db);
+  return g;
+}
+
+export function selectSavingsGoal(db, id, actor = "child") {
+  const g = savingsGoalById(db, id);
+  if (!liveGoal(g)) throw new GameError("Pick a goal you're still saving for");
+  db.child.currentGoalId = id;
+  normalizeGoals(db);
+  checkSavingsGoal(db);
+  db.buddy.plan = null;
+  audit(db, actor, "savings_goal_current", `Now saving for ${g.title}`, { goalId: id });
+  hooks.moneyChanged("Current savings goal changed", db);
+  return g;
+}
+
+export function retireSavingsGoal(db, id, actor = "child", remove = false) {
+  const g = savingsGoalById(db, id);
+  if (purchaseWaiting(db, g)) throw new GameError("Your grown-up is checking this goal first");
+  if (remove) {
+    if (actor !== "parent") throw new GameError("Ask your grown-up to delete a goal", 403);
+    if (g.status === "bought") throw new GameError("Keep bought goals to remember your success");
+    if (db.child.currentGoalId === id) throw new GameError("Choose another current goal first");
+    db.savingsGoals = db.savingsGoals.filter((g) => g.id !== id);
+  } else {
+    if (!liveGoal(g)) throw new GameError("That goal is already resting");
+    g.status = "archived";
+  }
+  normalizeGoals(db);
+  checkSavingsGoal(db);
+  db.buddy.plan = null;
+  audit(db, actor, remove ? "savings_goal_deleted" : "savings_goal_archived", `${remove ? "Deleted" : "Put away"} goal: ${g.title}`, { goalId: id });
+  hooks.moneyChanged("Savings goal changed", db);
+  return g;
+}
+
+export function requestGoalPurchase(db, id) {
+  checkSavingsGoal(db);
+  const g = savingsGoalById(db, id);
+  const existing = db.approvals.find((a) => a.kind === "goal_purchase" && a.goalId === id && ["pending", "approved"].includes(a.status));
+  if (existing) return existing;
+  if (g.id !== db.child.currentGoalId || g.status !== "reached") throw new GameError("Reach your current goal first — you can do it!");
+  const a = { id: uid("apr"), kind: "goal_purchase", status: "pending", createdAt: Date.now(), goalId: id, amount: g.target,
+    title: `${db.child.name} reached ${g.title} (${dollars(g.target)}) — buy it and take ${dollars(g.target)} out of savings?`,
+    detail: "Approve after buying it. MoneyQuest records the purchase; it does not buy or send real money.", memo: g.title };
+  db.approvals.push(a);
+  notify(db, "parent", a.title, "approval", a.id);
+  audit(db, "child", "goal_purchase_requested", `Asked your grown-up about buying ${g.title}`, { goalId: id, approvalId: a.id });
+  return a;
 }
 
 // ------------------------------------------------------------------ parent goals
@@ -335,7 +463,7 @@ export function requestExtraAllowance(db, { amount, reason }) {
 // ------------------------------------------------------------------ approvals
 export function decide(db, approvalId, approve, note = "") {
   const a = db.approvals.find((x) => x.id === approvalId);
-  const canDecline = a && !approve && a.status === "approved" && !a.paidTxnId && ["reward", "extra", "spend"].includes(a.kind);
+  const canDecline = a && !approve && a.status === "approved" && !a.paidTxnId && ["reward", "extra", "spend", "goal_purchase"].includes(a.kind);
   if (!a || (a.status !== "pending" && !canDecline)) throw new GameError("That request was already handled");
   resolveParentNotification(db, a.id);
   a.status = approve ? "approved" : "declined";
@@ -353,6 +481,9 @@ export function decide(db, approvalId, approve, note = "") {
       if (approve && txn) txn.acknowledged = true;
       break;
     }
+    case "goal_purchase":
+      if (!approve) notify(db, "child", `Let's wait a little on ${a.memo}. Your saving success still counts!${note ? ` ${note}` : ""}`, "info");
+      break; // Guardian records the approved purchase.
     case "reward": {
       const g = db.parentGoals.find((x) => x.id === a.goalId);
       if (g) g.status = approve ? "approved" : "declined";
@@ -646,7 +777,8 @@ export function friendView(f) {
   return { id: f.id, name: f.name, status: f.status, bear: f.bear, postcards: f.postcards, greetings: f.greetings || [], coopLearning: f.coopLearning };
 }
 
-export function weeksToGoal(db, goal, extraSaving = 0) {
+export function weeksToGoal(db, goal = currentGoal(db), extraSaving = 0) {
+  if (!goal || ["bought", "archived"].includes(goal.status)) return null;
   const saved = db.accounts.savings.balance + extraSaving;
   const remaining = goal.target - saved;
   if (remaining <= 0) return 0;

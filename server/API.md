@@ -4,7 +4,7 @@ This is the API contract for the v0.4.0 release candidate; the cookie-based clie
 
 ## Conventions and authentication
 
-All successful JSON routes return HTTP 200. Actions without another result return `{ "ok": true }`. Errors are `{ "error": "short message" }` (except the `/api/auth/me` 401 shape below): 400 invalid input/game rule, 401 missing/invalid/expired credentials or wrong password/PIN, 403 child attempting parent access or parent mode locked, 404 unknown route/child or unavailable integration/demo control, 413 JSON body too large, 429 rate/concurrency limit. An unknown child and another family's child both return 404. Unexpected errors return a generic 500.
+All successful JSON routes return HTTP 200. Actions without another result return `{ "ok": true }`. Errors are `{ "error": "short message" }` (except the `/api/auth/me` 401 shape below): 400 invalid input/game rule, 401 missing/invalid/expired credentials or wrong password/PIN, 403 child attempting parent access or parent mode locked, 404 unknown route/child or unavailable integration/demo control, 410 deprecated savings-goal route, 413 JSON body too large, 429 rate/concurrency limit. An unknown child and another family's child both return 404. Unexpected errors return a generic 500.
 
 The login/register/link responses set `mq_session=<token>; HttpOnly; SameSite=Lax; Path=/; Max-Age=...`. Cookies also have `Secure` in production or on HTTPS requests. Browser requests should send credentials; do not store another parent token. `Authorization: Bearer <token>` is also accepted and takes precedence over cookies. Tokens are 32 random bytes in base64url; only SHA-256 hashes are stored. JSON login responses do not expose the token. Cookie-backed requests refresh the cookie as the parent session slides; authenticated bearer requests also receive the session cookie. Parent sessions last 30 days sliding, capped at 90 days from creation; child sessions last a fixed 180 days. Logout invalidates the current session and clears the cookie.
 
@@ -83,7 +83,8 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | `childId`, `version`, `now`, `dayKey`, `weekKey`, `offline`, `budgetDoneThisWeek` | Selected ID, child document version, server Unix milliseconds, zoned `YYYY-MM-DD`, ISO `YYYY-Www`, `false`, boolean |
 | `child` | `{name, age, points, bear, ownedCosmetics, milestonesUnlocked, stats, lessonsDone, ...progressMarkers}`; bear has `name, hat, eyes, neck, outfit, held, friend, background`; stats have `savingsActions, learningDone, tracked, budgetsDone, adventures` |
 | `balances` | `{savings, spending}` in cents |
-| `goals` | `[{id, title, icon?, target, createdAt, weeksLeft}]`; weeksLeft can be null when nothing is saved weekly |
+| `goals` | `[{id, title, icon, target, createdAt, status, activeFlag, current, weeksLeft}]`; status is active/reached/bought/archived, target is cents; weeksLeft is null for history or no weekly saving |
+| `currentGoalId` | Current savings goal ID; null only for an empty legacy goal list. Also in `child.currentGoalId`. |
 | `allowance` | `{amount, savePct, nextRun, spendLimit}` |
 | `parentGoals`, `missions` | Goal and mission records described in the parent-action table |
 | `transactions` | Latest 30, newest first; `{id, ts, from, to, amount, kind, memo, idempotencyKey, status, ref?, ...reviewFields}` |
@@ -158,7 +159,7 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | `POST /api/parent/allowance` | Partial `{amount?,savePct?,spendLimit?,rewardDestination?}` | `{ok:true}`; amount $0–$100, savePct integer 0–100, spendLimit $0–$10,000, destination `spending` or `savings`. |
 | `POST /api/parent/funding/add` | `{amount,note?:string}` | `{ok:true}`; $1–$1,000, optional trimmed note up to 120 characters. Any family; PIN unlock required when set. Records a `funding_in` transaction (`external` → `parent`) for the selected child's funding account, with memo from note or `Added by <parentName>`. Audits `Recorded $X added to <childName>'s funding — real money stays with you`. No child notification; funding entries/notes stay in parent state. Clears parent-funded escalations so allowance/rewards can pay on the next Guardian pass (including the post-action pass). No route-specific rate limit; normal body limits apply. |
 | `POST /api/parent/settings` | Partial `{requireTradeApproval?,buddyEnabled?,coopChallenge?,timezone?}` | `{ok:true}`; strict booleans; timezone must be a valid IANA name. Disabling Buddy cancels this child's queued/in-flight replans. |
-| `POST /api/parent/savings-goal` | Partial `{title?,target?}` | `{ok:true}`; updates first savings goal, target $1–$10,000. |
+| `POST /api/parent/savings-goal` | Deprecated | HTTP 410; use `/api/parent/goals` and `/api/parent/goals/:id`. |
 
 ## Apple Cash tracking (F2)
 
@@ -230,3 +231,24 @@ Nessie defaults to `https://api.nessieisreal.com`. With `NESSIE_API_KEY` configu
 Passwords and PINs use `scrypt$32768$8$1$<16-byte-salt-base64>$<64-byte-key-base64>` with constant-time verification. The registration timezone is stored on the SQLite family row and returned by `/api/auth/me`. Game/calendar rules currently use each child document's `settings.timezone`, falling back to the server zone. The parent UI initializes a missing child setting from the browser and edits it through `/api/parent/settings`; changing it does not update the family row or siblings.
 
 The old `POST /api/parent/login` PIN-to-token flow and `x-parent-token` header are removed. The client implements account login/register, cookie auth, pairing, active-child selection, PIN unlock/reset, device unlinking and family-wide logout using the routes above.
+
+## Savings goals
+
+Existing documents migrate the first goal to current, fill missing status with `active` and preserve history. Exactly one goal is current whenever any goals exist. Archiving or buying the current goal selects the first remaining live goal; with none left, its historical current ID stays until a live goal is created. Home and Buddy prompt to pick/create the next goal rather than planning against history. Creating a goal keeps an existing live current choice. Switching clears the previous Buddy plan. Savings are a shared balance, not money reserved separately for each goal. Milestone unlocks stay permanent.
+
+| Method and route | Auth | JSON request / result |
+| --- | --- | --- |
+| `POST /api/child/goals` | Child | `{title,target,icon}` → goal. Title 1–40 trimmed characters, target $1–$1,000, icon bike/game/book/gift/trip/toy/other. Notifies the parent. |
+| `POST /api/child/goals/:id` | Child | Partial `{title?,target?,icon?}` → updated goal. Only active/reached goals. |
+| `POST /api/child/goals/:id/current` | Child | No fields → goal. Only active/reached goals. |
+| `POST /api/child/goals/:id/archive` | Child | No fields → archived goal; preserves history. |
+| `POST /api/parent/goals` and `POST /api/parent/goals/:id` | Parent | Same create/edit contract. |
+| `POST /api/parent/goals/:id/current` and `POST /api/parent/goals/:id/archive` | Parent | Same switch/archive contract. |
+| `DELETE /api/parent/goals/:id` | Parent | No body → deleted goal. Choose another current goal first; bought goals cannot be deleted. |
+| `POST /api/child/goals/:id/purchase` | Child | No fields → `goal_purchase` approval. Current reached goal only. Repeated requests return the pending/approved approval. |
+
+Parent routes require the current session's PIN unlock when configured. All IDs are scoped to the selected child's document. Every goal action is audited. Pending/approved unpaid purchase requests block edits, archival and deletion until declined or paid. A declined request leaves the goal reached and may be requested again. Child `pendingRequests` includes `goalId` and approved unpaid purchases so Home can show waiting.
+
+Guardian checks the current goal after money changes and marks it reached once, with a celebration. Reached status persists if savings fall. Approving a goal purchase records target cents from savings to merchant using `goal:<goalId>`, marks the goal bought, and notifies the child. This records a grown-up's purchase; it does not order goods or send real money. Short savings make no transfer and create a `child_funds` escalation saying “savings are short now”; Guardian retries when savings recover. The parent can decline an approved unpaid request. A successful purchase cannot be declined or repeated, including after ledger history retention because bought goals cannot request another purchase.
+
+Buddy snapshots include all active/reached goals, each with status/current, and plans target the current goal. Bought/archived goals remain visible in goal history but leave Buddy planning and purchase simulations.
