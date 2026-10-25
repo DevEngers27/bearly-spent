@@ -151,7 +151,15 @@ export function read() {
 /** Run `fn(db)` and persist. Returns whatever fn returns. */
 export function mutate(fn) {
   ensureLoaded();
-  const result = fn(db);
+  const snapshot = structuredClone(db);
+  let result;
+  try {
+    result = fn(db);
+  } catch (e) {
+    for (const key of Object.keys(db)) delete db[key];
+    Object.assign(db, snapshot);
+    throw e;
+  }
   db.version += 1;
   persist();
   for (const l of listeners) l(db.version);

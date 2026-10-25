@@ -74,8 +74,15 @@ function bumpGoals(db, type) {
     if (g.status !== "active" || g.type !== type) continue;
     g.progress = Math.min(g.count, g.progress + 1);
     if (g.progress >= g.count) {
-      g.status = "awaiting_approval";
       g.completedAt = Date.now();
+      if (g.reward === 0) {
+        g.status = "done";
+        notify(db, "child", `You finished ${g.title}!`, "celebrate");
+        notify(db, "parent", `${db.child.name} finished ${g.title} (no cash reward)`, "info");
+        audit(db, "system", "goal_completed", `Goal "${g.title}" verified complete (${g.progress}/${g.count}); no cash reward`, { goalId: g.id });
+        continue;
+      }
+      g.status = "awaiting_approval";
       const approval = {
         id: uid("apr"), kind: "reward", status: "pending", createdAt: Date.now(),
         goalId: g.id, amount: g.reward,
@@ -237,13 +244,23 @@ export function requestExtraAllowance(db, { amount, reason }) {
 // ------------------------------------------------------------------ approvals
 export function decide(db, approvalId, approve, note = "") {
   const a = db.approvals.find((x) => x.id === approvalId);
-  if (!a || a.status !== "pending") throw new GameError("That request was already handled");
+  const canDecline = a && !approve && a.status === "approved" && !a.paidTxnId && ["reward", "extra", "spend"].includes(a.kind);
+  if (!a || (a.status !== "pending" && !canDecline)) throw new GameError("That request was already handled");
   a.status = approve ? "approved" : "declined";
   a.decidedAt = Date.now();
   a.note = note;
   audit(db, "parent", approve ? "approved" : "declined", `${approve ? "Approved" : "Declined"}: ${a.title}`, { approvalId: a.id, kind: a.kind });
+  if (!approve) {
+    delete a.escalatedAt;
+    for (const related of db.approvals) if (related.approvalId === a.id && ["topup", "child_funds"].includes(related.kind)) related.status = "resolved";
+  }
 
   switch (a.kind) {
+    case "review": {
+      const txn = db.transactions.find((t) => t.id === a.txnId);
+      if (approve && txn) txn.acknowledged = true;
+      break;
+    }
     case "reward": {
       const g = db.parentGoals.find((x) => x.id === a.goalId);
       if (g) g.status = approve ? "approved" : "declined";
@@ -293,6 +310,14 @@ export function decide(db, approvalId, approve, note = "") {
       break;
   }
   return a;
+}
+
+export function requestAllowanceRun(db, now = Date.now()) {
+  const period = `allowance:${today(now)}`;
+  if (db.allowance.lastPeriod === period || db.transactions.some((t) => t.status === "posted" && (t.ref === period || t.idempotencyKey === `${period}:save` || t.idempotencyKey === `${period}:spend`))) {
+    throw new GameError("Allowance for today was already paid");
+  }
+  db.allowance.nextRun = Math.min(db.allowance.nextRun, now);
 }
 
 // ------------------------------------------------------------------ adventures

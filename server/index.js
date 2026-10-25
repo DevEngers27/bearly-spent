@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { read, mutate, reset, subscribe } from "./store.js";
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
-import { runGuardian, hasDueWork, spendPolicy, injectDuplicatePosting } from "./guardian.js";
+import { runGuardian, hasDueWork, spendPolicy, injectDuplicatePosting, reconcileNow } from "./guardian.js";
 import { chat, replan, buddyMode, offlinePlan } from "./buddy.js";
 import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
@@ -44,7 +44,9 @@ function guardianPass(db, trigger) {
 /** Run a mutation, then let the guardian react to the new state. */
 function act(fn, trigger) {
   return mutate((db) => {
+    const repairs = reconcileNow(db, Date.now(), trigger);
     const out = fn(db);
+    if (repairs.some((action) => /reversed/i.test(action))) queueReplan("Guardian reversed a duplicate posting");
     guardianPass(db, trigger);
     return out;
   });
@@ -221,14 +223,14 @@ app.post("/api/parent/allowance", route((req) => act((db) => {
 }, "allowance_settings")));
 // Demo control: fast-forward the schedule so the guardian pays this week's allowance now.
 app.post("/api/parent/allowance/run-now", route(() => act((db) => {
-  db.allowance.nextRun = Date.now();
+  game.requestAllowanceRun(db);
 }, "fast_forward")));
 app.post("/api/parent/topup", route((req) => act((db) => {
   const amount = cents(req.body.amount || 50);
   db.accounts.parent.balance += amount;
-  // Unblock anything the guardian escalated for lack of funds.
+  // A parent deposit can unblock parent-funded payouts, not child spending.
   db.approvals.forEach((a) => {
-    if (a.escalatedAt && !a.paidTxnId) delete a.escalatedAt;
+    if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
     if (a.kind === "topup" && a.status === "pending") a.status = "approved";
   });
   game.audit(db, "parent", "topup", `Added $${(amount / 100).toFixed(2)} to the funding account (simulated deposit)`);
