@@ -6,6 +6,7 @@ import { uid, childIdFor, childRecord, readChild, mutateChild, mutateChildren, c
 import { object, id, str, bool, integer } from "./validate.js";
 import { transfer, BankError } from "./bank.js";
 import { dayKey, weekKey } from "./time.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import {
   PLACES, LESSONS, COSMETICS, MILESTONES, POINTS, MISSION_POOL, TRIP, SLOTS, placeStatus, bonusDiscoveries,
 } from "./catalog.js";
@@ -409,15 +410,21 @@ export function childMarkMissionDone(db, missionId) {
   return m;
 }
 
-export function completeLesson(db, lessonId, answers, now = Date.now()) {
+export function completeLesson(db, lessonId, answers, now = Date.now(), expectedAttempt) {
   const lesson = LESSONS.find((l) => l.id === lessonId);
   if (!lesson) throw new GameError("Unknown lesson");
-  if (!Array.isArray(answers) || answers.length !== lesson.questions.length) throw new GameError("Answer every question");
-  const correct = lesson.questions.filter((q, i) => q.answer === answers[i]).length;
-  const passed = correct / lesson.questions.length >= 0.6;
+  const attempt = db.child.lessonAttempts?.[lessonId] || 0;
+  if (expectedAttempt !== undefined && expectedAttempt !== attempt) throw new GameError("This lesson changed. Close it and try again.");
+  const questions = pickLessonIndexes(childIdFor(db), lessonId, attempt).map((i) => lesson.questions[i]);
+  if (!Array.isArray(answers) || answers.length !== questions.length) throw new GameError("Answer every question");
+  if (!questions.every((q, i) => Number.isInteger(answers[i]) && answers[i] >= 0 && answers[i] < q.options.length)) throw new GameError("Answer every question with a choice");
+  db.child.lessonAttempts ||= {};
+  db.child.lessonAttempts[lessonId] = attempt + 1;
+  const correct = questions.filter((q, i) => q.answer === answers[i]).length;
+  const passed = correct >= 3;
   if (!passed) {
-    audit(db, "child", "lesson_attempt", `Tried "${lesson.title}" (${correct}/${lesson.questions.length})`);
-    return { passed, correct, total: lesson.questions.length };
+    audit(db, "child", "lesson_attempt", `Tried "${lesson.title}" (${correct}/${questions.length})`);
+    return { passed, correct, total: questions.length };
   }
   const firstTime = !db.child.lessonsDone.includes(lessonId);
   if (firstTime) {
@@ -429,7 +436,7 @@ export function completeLesson(db, lessonId, answers, now = Date.now()) {
     bumpGoals(db, "lessons");
     coopProgress(db);
   }
-  return { passed, correct, total: lesson.questions.length, firstTime };
+  return { passed, correct, total: questions.length, firstTime };
 }
 
 export function completeBudget(db, allocations, now = Date.now(), total = 2000) {

@@ -1,4 +1,7 @@
 // Core rule tests: run with `npm test`. Uses the in-memory seed, never touches disk.
+import { childIdFor as lessonChildId } from "./store.js";
+import { LESSONS as lessonCatalog } from "./catalog.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { seed } from "./store.js";
@@ -6,13 +9,14 @@ import * as game from "./domain.js";
 import { runGuardian, spendPolicy, injectDuplicatePosting } from "./guardian.js";
 import { redact } from "./buddy.js";
 
+const lessonAnswers = (db, lesson) => pickLessonIndexes(lessonChildId(db), lesson.id, db.child.lessonAttempts?.[lesson.id] || 0).map((i) => lesson.questions[i].answer);
 const fresh = () => seed(Date.now());
 const passAllLessons = (db) => {
-  game.completeLesson(db, "needs_wants", [0, 1, 0, 1]);
-  game.completeLesson(db, "saving_math", [1, 0, 1]);
-  game.completeLesson(db, "compare_prices", [1, 0, 1]);
-  game.completeLesson(db, "earning", [0, 0, 1]);
-  game.completeLesson(db, "budgeting", [0, 0, 0]);
+  game.completeLesson(db, "needs_wants", lessonAnswers(db, lessonCatalog.find((l) => l.id === "needs_wants")));
+  game.completeLesson(db, "saving_math", lessonAnswers(db, lessonCatalog.find((l) => l.id === "saving_math")));
+  game.completeLesson(db, "compare_prices", lessonAnswers(db, lessonCatalog.find((l) => l.id === "compare_prices")));
+  game.completeLesson(db, "earning", lessonAnswers(db, lessonCatalog.find((l) => l.id === "earning")));
+  game.completeLesson(db, "budgeting", lessonAnswers(db, lessonCatalog.find((l) => l.id === "budgeting")));
 };
 
 test("parent goal → approval → guardian pays exactly once", () => {
@@ -45,7 +49,7 @@ test("declined reward moves no money", () => {
 test("guardian reverses a duplicate bank posting", () => {
   const db = fresh();
   game.createParentGoal(db, { title: "x", type: "lessons", count: 1, reward: 5 });
-  game.completeLesson(db, "needs_wants", [0, 1, 0, 1]);
+  game.completeLesson(db, "needs_wants", lessonAnswers(db, lessonCatalog.find((l) => l.id === "needs_wants")));
   game.decide(db, db.approvals.at(-1).id, true);
   runGuardian(db);
   const savings = db.accounts.savings.balance;

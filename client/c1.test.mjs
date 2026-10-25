@@ -193,11 +193,11 @@ test("C5: childView budget flag agrees with completeBudget; completed checklist 
 test("Lesson replay copy and failed final submission retry use the original answer count", async () => {
   const h = harness("Child.jsx"), lesson = catalog.LESSONS[0];
   let attempts = 0;
-  const props = { lesson, close: noop, run: async (path, body) => {
-    assert.equal(body.answers.length, lesson.questions.length);
+  const props = { lesson, state: stateFixture(), close: noop, run: async (path, body) => {
+    assert.equal(body.answers.length, 4);
     return ++attempts === 1 ? null : { correct: body.answers.length, total: body.answers.length, passed: true, firstTime: false };
   } };
-  for (let i = 0; i < lesson.questions.length + 1; i++) {
+  for (let i = 0; i < 5; i++) {
     const tree = h.render(h.exports.LessonSheet, props);
     await nodes(tree, (n) => n.type === "button")[0].props.onClick();
   }
@@ -1403,7 +1403,7 @@ test("D2: impossible lesson goals ask a grown-up and zero remaining never sugges
   const parent = harness("Parent.jsx");
   state.child.lessonsDone = catalog.LESSONS.slice(0, 3).map((l) => l.id);
   let goals = parent.render(parent.exports.Goals, { state });
-  assert.match(text(goals), /12\s+lessons remaining/);
+  assert.match(text(goals), /27\s+lessons remaining/);
   const count = nodes(goals, (n) => n.type === "input" && n.props.type === "number")[0];
   assert.equal(count.props.max, catalog.LESSONS.length - 3);
   let request;

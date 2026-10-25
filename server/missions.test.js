@@ -1,3 +1,5 @@
+import { childIdFor as lessonChildId } from "./store.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { seed, readChild, mutateChild, _clearStoreForTest } from "./store.js";
@@ -10,6 +12,7 @@ import { snapshot, cancelReplan } from "./buddy.js";
 import { spendPolicy } from "./guardian.js";
 import { _clearLimitsForTest, HOUR } from "./limits.js";
 
+const lessonAnswers = (db, lesson) => pickLessonIndexes(lessonChildId(db), lesson.id, db.child.lessonAttempts?.[lesson.id] || 0).map((i) => lesson.questions[i].answer);
 const now = Date.parse("2026-10-24T12:00:00-07:00");
 const fresh = () => { const db = seed(now); db.settings.timezone = "America/Los_Angeles"; return db; };
 function assign(db, keys, at = now) {
@@ -62,10 +65,10 @@ test("H2 rewards: track/save and first-time lessons pay once, reviews pay nothin
   assert.equal(db.child.points - points, POINTS.save + POINTS.track);
   game.childSave(db, 100, now + 1000);
   assert.equal(db.child.points - points, POINTS.save + POINTS.track);
-  const lesson = LESSONS[0], answers = lesson.questions.map((q) => q.answer);
-  game.completeLesson(db, lesson.id, answers, now);
+  const lesson = LESSONS[0];
+  game.completeLesson(db, lesson.id, lessonAnswers(db, lesson), now);
   assert.equal(db.child.points - points, POINTS.save + POINTS.track + POINTS.lesson);
-  game.completeLesson(db, lesson.id, answers, now);
+  game.completeLesson(db, lesson.id, lessonAnswers(db, lesson), now);
   assert.equal(db.child.points - points, POINTS.save + POINTS.track + POINTS.lesson);
   assert.deepEqual(db.child.dailyMissions.done.map((m) => m.key), ["save", "track", "lesson"]);
 });

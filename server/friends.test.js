@@ -7,6 +7,7 @@ import { initializeAccounts } from "./auth.js";
 import { dispatch, tick } from "./index.js";
 import { _clearLimitsForTest } from "./limits.js";
 import { cancelReplan } from "./buddy.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import { LESSONS } from "./catalog.js";
 
 const originalDemo = process.env.MQ_DEMO;
@@ -367,8 +368,10 @@ test("G3.7/9 practice friends and simulated coop stay demo-only", async () => {
   assert.equal(readChild(a.id).settings.coopChallenge, false);
   assert.equal((await demo.call("POST", "/api/parent/settings", { coopChallenge: true })).status, 200);
   const lesson = LESSONS[0];
-  const answers = { lessonId: lesson.id, answers: lesson.questions.map((q) => q.answer) };
-  for (const browser of [a.browser, demo]) assert.equal((await browser.call("POST", "/api/child/lesson", answers)).status, 200);
+  for (const [browser, childId] of [[a.browser, a.id], [demo, DEMO_CHILD_ID]]) {
+    const answers = pickLessonIndexes(childId, lesson.id, 0).map((i) => lesson.questions[i].answer);
+    assert.equal((await browser.call("POST", "/api/child/lesson", { lessonId: lesson.id, answers })).status, 200);
+  }
   assert.equal(readChild(a.id).child.coopLearning, undefined);
   assert.equal(readChild(DEMO_CHILD_ID).child.coopLearning, 1);
 });

@@ -1,9 +1,12 @@
+import { childIdFor as lessonChildId } from "./store.js";
+import { pickLessonIndexes } from "../shared/lessonPick.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const lessonAnswers = (db, lesson) => pickLessonIndexes(lessonChildId(db), lesson.id, db.child.lessonAttempts?.[lesson.id] || 0).map((i) => lesson.questions[i].answer);
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "moneyquest-consistency-"));
 const previousDataDir = process.env.MQ_DATA_DIR;
 process.env.MQ_DATA_DIR = dataDir;
@@ -34,7 +37,7 @@ test("D2: lesson goals respect remaining unique lessons and cancellation stops p
   const goal = game.createParentGoal(db, { title: "Learn two", type: "lessons", count: 2, reward: 5 });
   actions.cancelGoal(db, goal.id);
   const lesson = catalog.LESSONS[3];
-  game.completeLesson(db, lesson.id, lesson.questions.map((q) => q.answer));
+  game.completeLesson(db, lesson.id, lessonAnswers(db, lesson));
   assert.equal(goal.status, "cancelled");
   assert.equal(goal.progress, 0);
   assert.ok(goal.cancelledAt);

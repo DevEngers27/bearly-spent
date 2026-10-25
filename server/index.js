@@ -123,6 +123,7 @@ export function childView(db, now = Date.now()) {
     parentGoals: db.parentGoals,
     missions: db.missions,
     missionsToday: todayMissions,
+    lessonAttempts: Object.fromEntries(LESSONS.map((l) => [l.id, db.child.lessonAttempts?.[l.id] || 0])),
     lessons: { next: lessons.filter((l) => !db.child.lessonsDone.includes(l.id)).slice(0, 5), finished: lessons.filter((l) => db.child.lessonsDone.includes(l.id)), total: lessons.length },
     transactions: db.transactions.filter((t) => t.kind !== "funding_in" && (t.from !== "parent" || t.to !== "parent")).slice(-30).reverse(),
     notifications: db.notifications.filter((n) => n.to === "child").slice(-20).reverse(),
