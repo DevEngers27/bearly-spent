@@ -13,10 +13,35 @@ merged by Claude (see `docs/VERSIONING.md`).
   codes, PIN lockout, multi-child, per-family SSE, rate limits, security
   headers (`fix/b5a-accounts-server`, merged into `wave2`; client in
   `fix/b5b-accounts-client`).
-- `feat/f36-trip-and-talk` — surprise trips (the bear picks a random open
-  destination, a wooden sign and countdown while away, a postcard reveal on
-  return) and talking to the bear instead of a chat box.
+- `feat/f1-consistency` — parent/kid consistency fixes from the browser
+  smoke run (first-install update toast, impossible lesson goals, double
+  allowance after a time-zone change, shared postcard metrics, notification
+  lifecycle, en-US formatting, server-side reveal receipts).
 - `feat/f5-bear-fit` — accessory anchors tuned per pose.
+
+## [0.3.0] — 2026-10-24
+
+Surprise trips and talking to the bear. 159 server tests and 40 client
+tests; verified in a real browser at 390 px.
+
+### Added
+- The child sends Maple on a trip for a flat 30 points; the destination is
+  drawn on the server from open places (uncollected first, common 3 : rare
+  1) and hidden until the postcard reveal. While away, a swaying wooden sign
+  with a live countdown replaces the bear; on return an envelope opens, the
+  card flips, a secret bonus shows as a surprise and "Add to album" flies the
+  card to the Album tab, which badges it New until opened. The map is a
+  read-only travel log with clues shown in the place sheet.
+- Tapping the bear opens a talk bar (text, suggestion chips, press-and-hold
+  mic where available); replies appear in a hand-drawn speech bubble with
+  moods (thinking, happy, resting), are read aloud with a persistent mute,
+  and the Chat tab keeps the transcript. Away, Buddy-off and offline states
+  speak through the bubble.
+
+### Fixed
+- Speech bubbles no longer widen the page on phones; the reveal does not
+  spoil the place name before the flip; a/an before place names; the
+  offline helper points to the trip button.
 
 ## [0.2.0] — 2026-10-24
 
@@ -50,6 +75,7 @@ First hardening wave after the eight-way review. 148 server tests and
 
 Baseline: the Cal Hacks demo as reviewed. 11 rule tests.
 
-[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/DevEngers27/moneyquest/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/DevEngers27/moneyquest/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/DevEngers27/moneyquest/releases/tag/v0.1.0
