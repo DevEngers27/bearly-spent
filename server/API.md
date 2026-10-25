@@ -4,7 +4,7 @@ This is the contract for B5b. The server requires Node >=22.9 (built-in `node:sq
 
 ## Conventions and authentication
 
-All successful JSON routes return HTTP 200. Actions without another result return `{ "ok": true }`. Errors are `{ "error": "short message" }`: 400 invalid input/game rule, 401 missing/invalid/expired credentials or wrong password/PIN, 403 child attempting parent access or parent mode locked, 404 unknown route/child or unavailable integration/demo control, 413 JSON body too large, 429 rate/concurrency limit. An unknown child and another family's child both return 404. Unexpected errors return a generic 500.
+All successful JSON routes return HTTP 200. Actions without another result return `{ "ok": true }`. Errors are `{ "error": "short message" }` (except the `/api/auth/me` 401 shape below): 400 invalid input/game rule, 401 missing/invalid/expired credentials or wrong password/PIN, 403 child attempting parent access or parent mode locked, 404 unknown route/child or unavailable integration/demo control, 413 JSON body too large, 429 rate/concurrency limit. An unknown child and another family's child both return 404. Unexpected errors return a generic 500.
 
 The login/register/link responses set `mq_session=<token>; HttpOnly; SameSite=Lax; Path=/; Max-Age=...`. Cookies also have `Secure` in production or on HTTPS requests. Browser requests should send credentials; do not store another parent token. `Authorization: Bearer <token>` is also accepted and takes precedence over cookies. Tokens are 32 random bytes in base64url; only SHA-256 hashes are stored. JSON login responses do not expose the token. Cookie-backed requests refresh the cookie as the parent session slides; authenticated bearer requests also receive the session cookie. Parent sessions last 30 days sliding, capped at 90 days from creation; child sessions last a fixed 180 days. Logout invalidates the current session and clears the cookie.
 
@@ -34,6 +34,7 @@ default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https
 
 ```json
 {
+  "demo": false,
   "family": { "id": "family_...", "name": "Jordan", "timezone": "America/Los_Angeles", "pinSet": false },
   "role": "parent",
   "children": [{ "id": "child_...", "name": "Mia", "age": 9, "bearName": "Maple", "version": 1 }],
@@ -44,14 +45,17 @@ default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https
 
 A paired child receives only its own summary in `children`; a parent receives all family children. Times are Unix milliseconds. `unlockedUntil` is session-specific; compare it to current time only when `pinSet` is true. PIN hashes are never returned.
 
+`demo` is always a boolean: true exactly when `MQ_DEMO=1`, false otherwise, regardless of which family is signed in. Without a valid session, `GET /api/auth/me` returns HTTP 401 with `{ "error": "short message", "demo": false }` (or `demo: true` when enabled). This lets the Welcome screen discover demo availability before login; no family or session details are included in that response.
+
 | Method and route | Auth | Request | Response and limits |
 | --- | --- | --- | --- |
 | `POST /api/auth/register` | Public | `{email, password, parentName, childName, childAge, bearName, timezone?}`; age 7–12, timezone valid IANA name (default UTC) | `Me` + parent cookie. Creates family, parent user and first child atomically. 5 attempts/hour/IP. |
 | `POST /api/auth/login` | Public | `{email, password}` | `Me` + parent cookie. 10 attempts/15 minutes/IP and 5/15 minutes/normalized email. Invalid credentials return 401. |
 | `POST /api/auth/logout` | Session | No fields | `{ok:true}` + cleared cookie. Revokes the current cookie/bearer session. |
-| `GET /api/auth/me` | Session | `?child=` optional | `Me`; remains accessible while PIN-locked. |
+| `POST /api/auth/logout-all` | Parent | No fields | `{ok:true}` + cleared cookie. Revokes every session of the current parent user, including the current cookie/bearer session. Requires PIN unlock when a PIN is set. Paired child sessions, other parents' sessions and other families are untouched. |
+| `GET /api/auth/me` | Session (401 discovery available without a session) | `?child=` optional | `Me`, including `demo`; remains accessible while PIN-locked. Missing/invalid/expired session: 401 `{error,demo}`. |
 | `POST /api/parent/children` | Parent | `{name, age, bearName}`; age 7–12 | New `ChildSummary`. Separate funding account and game document. |
-| `POST /api/parent/children/:id/link` | Parent | No fields | `{code, expiresAt}`. Six uppercase characters without vowels/ambiguous characters; expires in 15 minutes, single use. |
+| `POST /api/parent/children/:id/link` | Parent | No fields | `{code, expiresAt}`. Six uppercase characters without vowels/ambiguous characters; expires in 15 minutes, single use. 5 generation attempts/15 minutes/child; excess returns 429 with `Let's take a little break. Try again soon!`. Each new code purges expired and used pairing rows across the database. |
 | `POST /api/auth/link` | Public | `{code}` (case-insensitive) | `Me` + child cookie, bound to that child. Invalid/used/expired codes return 400. Extra guessing protection: 10 attempts/15 minutes/IP. |
 | `POST /api/parent/pin` | Parent | `{pin}` as a string of 4–8 digits | `{ok:true, unlockedUntil}`. Sets/replaces a scrypt hash; unlocks this session for 15 minutes and clears other parent-session unlocks. No default PIN. |
 | `POST /api/parent/unlock` | Locked parent | `{pin}` | `{ok:true, unlockedUntil}` for 15 minutes. 5 attempts/15 minutes/session; the fifth wrong PIN returns 401 and persists a further 15-minute lockout; subsequent attempts return 429. |
@@ -165,6 +169,8 @@ On first startup an existing `MQ_DATA_DIR/db.json` is imported as the demo child
 ## Limits, storage and integration notes
 
 Rate windows, in-flight chat locks and SSE connection lists are **in-memory, per process**; rate windows reset on restart. PIN lockout deadlines and sessions persist in SQLite. Deploy one API process per database; multi-process rate limiting, cache invalidation and cross-process SSE are follow-ups. IP keys use Express `req.ip` without blindly trusting forwarded headers. If deploying behind a trusted reverse proxy, configure an appropriate trusted-proxy policy before relying on distinct client IPs.
+
+On POSIX, opening/creating `MQ_DATA_DIR/moneyquest.sqlite` restricts its mode to **0600** (owner read/write only), along with any existing `-wal` and `-shm` files. Permissions are reapplied after WAL/schema initialization to cover newly created sidecars. Windows skips chmod; unsupported-platform/filesystem chmod errors are ignored.
 
 Retention per child: tracking **500**, audit **2000**, transactions **5000**, Buddy chat **200**, notifications **200 per recipient**. Oldest entries are pruned on mutation. Each mutation uses a SQLite transaction and restores held document references after failures; versions and family notifications advance only after commit. Store subscribers receive `(version,childId)` within their family.
 
