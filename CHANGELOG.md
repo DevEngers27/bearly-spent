@@ -9,10 +9,42 @@ merged by Claude (see `docs/VERSIONING.md`).
 ## [Unreleased]
 
 ### In progress (branches)
-- `wave2` — real accounts: SQLite storage, email+password parents, kid link
-  codes, PIN lockout, multi-child, per-family SSE, rate limits, security
-  headers (`fix/b5a-accounts-server`, merged into `wave2`; client in
-  `fix/b5b-accounts-client`).
+- `feat/f2-apple-cash` — Apple Cash tracking via an iOS Shortcut, parent
+  "sent via Apple Cash" entries and a wallet account per child.
+- `docs/d1-readme` — README and docs refresh.
+
+## [0.4.0] — 2026-10-25
+
+Real accounts. 215 server tests and 92 client tests; account flows,
+trips, talk and the parent app verified in a real browser.
+
+### Added
+- Families: parents create a family with email and password (scrypt),
+  sessions are HttpOnly cookies (30 days sliding for parents, 180 days for
+  kid devices), kid devices link with a single-use 6-character code, a
+  parent-mode PIN (optional, hashed, 5 failures lock for 15 minutes, reset
+  with the password), multiple children with a switcher, a devices list
+  with unlink per child, "Sign out everywhere" (parents and kid devices),
+  Lock that also clears the server unlock.
+- Storage moves to `node:sqlite` (one document per child, 0600 file); a
+  legacy `data/db.json` is imported once as the demo family.
+- Per-family live updates, a tick that only visits children with due work,
+  rate limits on login/link/unlock/chat/speech/voice, retention caps,
+  security headers and a CSP, HTTPS-only Nessie, demo mode behind
+  `MQ_DEMO=1` with a demo parent and a "Try the demo family" button.
+- Parent chat view pages through the retained transcript.
+
+### Changed
+- The legacy PIN-only parent login and the `x-parent-token` header are gone;
+  the client uses cookies and sends `?child=` for the selected child.
+- Demo controls (fast-forward, post a duplicate, add $50, reset) exist only
+  for the demo family.
+
+### Fixed
+- Service worker precache no longer fails under the CSP; a cold start while
+  offline shows a retry screen instead of the Welcome page; kid sessions
+  have no sign-out control; PIN attempts count failures only and show
+  tries left; the parent app fits a phone.
 
 ## [0.3.2] — 2026-10-24
 
@@ -101,7 +133,8 @@ First hardening wave after the eight-way review. 148 server tests and
 
 Baseline: the Cal Hacks demo as reviewed. 11 rule tests.
 
-[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/DevEngers27/moneyquest/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/DevEngers27/moneyquest/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/DevEngers27/moneyquest/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/DevEngers27/moneyquest/compare/v0.2.0...v0.3.0
