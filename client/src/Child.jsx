@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, money, moneyShort, plural, formatTime, postcardMetrics, useAction, GOAL_ICONS, goalIconName, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
+import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction, GOAL_ICONS, goalIconName, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale, ITEMS } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import Markdown from "./Markdown.jsx";
@@ -39,7 +39,7 @@ export default function Child({ state, toast, onGrownUps, onSignOut, offline }) 
   const open = (type, props = {}) => setSheet({ type, ...props });
   const close = () => setSheet(null);
   const goMap = (placeId) => { setMapFocus(placeId || null); setTab("map"); close(); };
-  const talk = useMapleTalk({ state, run, busy, offline });
+  const talk = useMapleTalk({ state, run, busy, offline, tab });
   const startTalk = () => { close(); setTab("home"); talk.open(); };
   const [seen, setSeen] = useState(() => {
     const ids = storedList("mq_seen_adv");
@@ -1244,6 +1244,7 @@ function Buddy({ state, run, busy, offline, startTalk, transcriptOnly, open }) {
               const question = chat.slice(0, index).reverse().find((message) => message.role === "user");
               if (question) run("buddy/chat", { text: question.text });
             }}>Ask {state.child.bear.name} again</button>}
+            {m.role === "assistant" && <button className="speak" disabled={busy || offline} onClick={() => { primeAudio(); run(() => speak(m.text, state.integrations?.voice)); }} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
           </div>
         ))}
       </div>
@@ -1265,30 +1266,104 @@ function countdown(returnsAt, now) {
   return seconds ? `Back in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : "Any second now…";
 }
 
-function useMapleTalk({ state, run, busy, offline }) {
+// Read-aloud. With Cartesia configured the browser fetches a short-lived token from our server and
+// calls Cartesia itself; if that fails it tries our server proxy; without a key it uses the browser's
+// own speech synthesis. The API key never reaches the browser.
+function speakBrowser(text) {
+  if (!("speechSynthesis" in window)) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 1;
+  u.pitch = 1.1;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(u);
+}
+
+// iPhones only play sound that a tap started, so the talk bar primes one shared element with a
+// silent clip on Send and every reply plays through that element.
+const SILENT_WAV = "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
+let audioEl = null;
+let audioUrl = null;
+function releaseAudioUrl() {
+  if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
+}
+function primeAudio() {
+  if (typeof Audio === "undefined") return;
+  audioEl ||= new Audio();
+  if (audioEl.src && !audioEl.paused) return;
+  try { audioEl.muted = true; audioEl.src = SILENT_WAV; audioEl.play().catch(() => {}); } catch { /* no audio here */ }
+}
+async function playBlob(blob) {
+  if (typeof Audio === "undefined") return;
+  audioEl ||= new Audio();
+  audioEl.pause();
+  releaseAudioUrl();
+  audioUrl = URL.createObjectURL(blob);
+  audioEl.muted = false;
+  audioEl.src = audioUrl;
+  audioEl.onended = releaseAudioUrl;
+  await audioEl.play();
+}
+
+async function speak(text, mode, allowed = () => true) {
+  if (!allowed()) return;
+  const clean = text.replace(/[*_#]/g, "").slice(0, 500);
+  if (mode === "cartesia") {
+    try {
+      const { token, version, request } = await api("voice/token", {});
+      if (!allowed()) return;
+      const res = await fetch("https://api.cartesia.ai/tts/bytes", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Cartesia-Version": version, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...request, transcript: clean }),
+      });
+      if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
+    } catch (err) { if ([401, 403, 423, 429].includes(err.status)) throw err; }
+    if (!allowed()) return;
+    try {
+      const res = await apiResponse("buddy/speak", { text: clean });
+      if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
+    } catch (err) { if ([401, 403, 423, 429].includes(err.status)) throw err; }
+  }
+  if (allowed()) speakBrowser(clean);
+}
+
+function stopSpeaking() {
+  audioEl?.pause();
+  releaseAudioUrl();
+  window.speechSynthesis?.cancel();
+}
+
+function useMapleTalk({ state, run, busy, offline, tab = "home" }) {
   const [isOpen, setOpen] = useState(false);
   const [bubble, setBubble] = useState("");
   const [bubbleId, setBubbleId] = useState(0);
   const [retryQuestion, setRetryQuestion] = useState(null);
   const showBubble = (text) => { setBubble(text); setBubbleId((id) => id + 1); };
-  const dismiss = () => { setBubble(""); setRetryQuestion(null); };
+  // Dismissing also retires the turn in flight, so a late reply cannot reopen the bubble or start talking.
+  const dismiss = () => { setBubble(""); setRetryQuestion(null); turn.current++; stopSpeaking(); };
   const [mood, setMood] = useState(null);
+  const [muted, setMuted] = useState(() => store.get("mq_muted", "false") === "true");
   const turn = useRef(0);
   const inflight = useRef(false);
   const latest = useRef(null);
   const away = state.adventures.find((a) => a.status === "away");
   const previousTrip = useRef(away?.id);
-  latest.current = { offline, away, enabled: state.settings.buddyEnabled };
+  latest.current = { offline, away, enabled: state.settings.buddyEnabled, muted };
   const allowed = () => !latest.current.offline && !latest.current.away && latest.current.enabled;
   const close = () => { setOpen(false); dismiss(); };
   useEffect(() => {
     const returned = previousTrip.current && !away;
     previousTrip.current = away?.id;
-    if (returned) { setBubble(""); setMood(null); turn.current++; }
+    if (returned) { setBubble(""); setMood(null); turn.current++; stopSpeaking(); }
     if (!offline && !away && state.settings.buddyEnabled) return;
-    setOpen(false); setBubble(""); setMood(null); turn.current++;
+    setOpen(false); setBubble(""); setMood(null); turn.current++; stopSpeaking();
   }, [offline, away?.id, state.settings.buddyEnabled]);
-  useEffect(() => () => { turn.current++; }, []);
+  useEffect(() => () => { turn.current++; stopSpeaking(); }, []);
+  // The talk bar lives on Home: leaving Home closes it, stops any sound and drops the reply in flight.
+  useEffect(() => {
+    if (tab === "home") return;
+    setOpen(false); setBubble(""); setRetryQuestion(null); setMood(null); turn.current++; stopSpeaking();
+  }, [tab]);
   const open = () => {
     if (offline) { showBubble("I can't chat while we're offline, but your postcards are right here!"); setMood("resting"); return; }
     if (away) { showBubble(`${state.child.bear.name} is on a trip!`); return; }
@@ -1299,18 +1374,26 @@ function useMapleTalk({ state, run, busy, offline }) {
     if (!text.trim() || busy || inflight.current || !allowed()) return false;
     inflight.current = true;
     const id = ++turn.current;
-    setRetryQuestion(null); setMood("thinking"); showBubble("…");
+    stopSpeaking(); setRetryQuestion(null); setMood("thinking"); showBubble("…");
     try {
       const result = await run("buddy/chat", { text: text.trim() });
       if (id !== turn.current || !allowed()) return false;
       if (!result) { setMood("resting"); showBubble("Let's try that again in a moment."); return false; }
       showBubble(result.reply);
       setRetryQuestion(result.fallback ? text.trim() : null);
+      const maySpeak = () => id === turn.current && allowed() && !latest.current.muted;
+      if (maySpeak()) speak(result.reply, state.integrations?.voice, maySpeak).catch(() => {});
       setMood(/Hmm|trusted grown-up|quick answer|ask.*again/i.test(result.reply) ? "resting" : "happy");
       return true;
     } finally { inflight.current = false; }
   };
-  return { isOpen, bubble, bubbleId, retryQuestion, tripId: away?.id || previousTrip.current, mood, open, close, dismiss, send };
+  const toggleMute = () => {
+    const next = !muted;
+    latest.current.muted = next;
+    setMuted(next); store.set("mq_muted", String(next));
+    if (next) stopSpeaking();
+  };
+  return { isOpen, bubble, bubbleId, retryQuestion, tripId: away?.id || previousTrip.current, mood, muted, open, close, dismiss, send, toggleMute };
 }
 
 function SpeechBubble({ text, thinking, staticText, countdownText, onClose, retry, bearName, busy }) {
@@ -1354,6 +1437,7 @@ function TalkBar({ state, talk, busy, open }) {
     return () => { window.removeEventListener("keydown", escape); previous?.focus?.({ preventScroll: true }); };
   }, []);
   const send = async (msg) => {
+    primeAudio(); // inside the tap, so the reply may play on an iPhone
     const typing = document.activeElement === input.current;
     if (await talk.send(msg)) setText((current) => current === msg ? "" : current);
     if (typing || finePointer()) input.current?.focus({ preventScroll: true });
@@ -1365,6 +1449,7 @@ function TalkBar({ state, talk, busy, open }) {
     <section ref={section} className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
       <div className="talk-links">
         <button className="link" onClick={() => open("chat")}>See our chat</button>
+        <button className="round-btn small" aria-label={talk.muted ? "Sound off" : "Sound on"} title={talk.muted ? "Sound off" : "Sound on"} aria-pressed={Boolean(talk.muted)} onClick={talk.toggleMute}><Icon name={talk.muted ? "speakerOff" : "speaker"} size={20} /></button>
         <button className="round-btn small" onClick={talk.close} aria-label="Close talk bar"><Icon name="close" size={16} /></button>
       </div>
       <div className="chips scroll">{suggestions.map((s) => <button type="button" key={s} className="chip" disabled={busy} onClick={() => send(s)}>{s}</button>)}</div>

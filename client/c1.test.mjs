@@ -11,7 +11,7 @@ import * as catalog from "../server/catalog.js";
 import { childView } from "../server/index.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
-  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog, Devices, WalletLedger, AppleCashTracking", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
+  const extra = { "Child.jsx": "speak, Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog, Devices, WalletLedger, AppleCashTracking", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
   const result = await build({
     stdin: { contents: await readFile(new URL(`src/${name}`, import.meta.url), "utf8") + (extra ? `\nexport { ${extra} };` : ""), resolveDir: new URL("src/", import.meta.url).pathname, loader: "jsx" },
     bundle: true, write: false, format: "cjs", external: ["react"], jsxFactory: "h", jsxFragment: "Fragment", define: { "import.meta.env.PROD": "false" },
@@ -2122,4 +2122,83 @@ test("W3.6: money inputs offer decimal keyboards while lesson counts stay numeri
     assert.ok(decimal.every((n) => n.props.type === "number"));
     if (component === "Goals") assert.equal(nodes(tree, (n) => n.type === "input" && n.props.value === catalog.LESSONS.length && n.props.max === catalog.LESSONS.length)[0].props.inputMode, undefined);
   }
+});
+
+test("0.8.8: speech tries Cartesia token then proxy then browser; a muted reply sends no voice requests", async () => {
+  const h = harness("Child.jsx"), calls = [], spoken = [];
+  h.window.speechSynthesis = { cancel: noop, speak: (u) => spoken.push(u.text) };
+  h.fetch = async (url) => { calls.push(url); return new Response("unavailable", { status: 503 }); };
+  await h.exports.speak("A little *saving*!", "cartesia");
+  assert.deepEqual(calls, ["/api/voice/token", "/api/buddy/speak"]);
+  assert.deepEqual(spoken, ["A little saving!"]);
+  calls.length = 0; spoken.length = 0;
+  await h.exports.speak("Plain browser voice", "browser");
+  assert.deepEqual(calls, []); assert.deepEqual(spoken, ["Plain browser voice"]);
+  spoken.length = 0;
+  h.storage.set("mq_muted", "true");
+  const props = { state: stateFixture(), run: async () => ({ reply: "A little saving!" }) };
+  const talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  assert.equal(talk.muted, true);
+  await talk.send("Hi");
+  assert.equal(calls.length, 0); assert.equal(spoken.length, 0);
+});
+
+test("0.8.8: a late voice fallback is suppressed after mute or leaving the turn; mute persists and stops sound", async () => {
+  const h = harness("Child.jsx"), spoken = [], cancelled = [];
+  h.window.speechSynthesis = { cancel: () => cancelled.push(1), speak: (u) => spoken.push(u.text) };
+  let enabled = true, finish;
+  h.fetch = () => new Promise((r) => { finish = r; });
+  const speech = h.exports.speak("A late reply", "cartesia", () => enabled);
+  enabled = false;
+  finish(new Response("unavailable", { status: 503 }));
+  await speech;
+  assert.equal(spoken.length, 0);
+  const props = { state: stateFixture(), run: async () => ({ reply: "Hello!" }) };
+  let talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  assert.equal(talk.muted, false);
+  talk.toggleMute(); assert.equal(h.storage.get("mq_muted"), "true"); assert.ok(cancelled.length >= 1, "muting stops any sound");
+  talk = h.render(h.exports.useMapleTalk, props); assert.equal(talk.muted, true);
+  talk.toggleMute(); assert.equal(h.storage.get("mq_muted"), "false");
+});
+
+test("0.8.8: legible sound toggle in the talk bar", () => {
+  for (const muted of [false, true]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    let toggles = 0;
+    const tree = h.render(h.exports.TalkBar, { state, talk: { muted, toggleMute: () => toggles++, close: noop, send: noop }, open: noop });
+    const button = nodes(tree, (n) => n.type === "button" && n.props["aria-label"] === (muted ? "Sound off" : "Sound on"))[0];
+    assert.equal(button.props["aria-pressed"], muted);
+    assert.equal(button.props.title, muted ? "Sound off" : "Sound on");
+    assert.equal(nodes(button, (n) => n.type?.name === "Icon")[0].props.name, muted ? "speakerOff" : "speaker");
+    button.props.onClick(); assert.equal(toggles, 1);
+  }
+});
+
+test("0.8.8: closing the talk bar, dismissing the bubble or leaving Home drops the reply in flight and stops sound", async (t) => {
+  const h = harness("Child.jsx"), spoken = [], cancelled = [];
+  h.window.speechSynthesis = { cancel: () => cancelled.push(1), speak: (u) => spoken.push(u.text) };
+  let finish;
+  const props = { state: stateFixture(), run: () => new Promise((r) => { finish = r; }), tab: "home" };
+  let talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+  const pending = talk.send("Hi"); talk = h.render(h.exports.useMapleTalk, props);
+  assert.equal(talk.bubble, "…");
+  talk.close(); finish({ reply: "Too late!" }); assert.equal(await pending, false);
+  talk = h.render(h.exports.useMapleTalk, props);
+  assert.equal(talk.bubble, ""); assert.equal(talk.isOpen, false); assert.equal(spoken.length, 0);
+  talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+  const second = talk.send("Again"); talk = h.render(h.exports.useMapleTalk, props);
+  talk.dismiss(); finish({ reply: "Too late again!" }); assert.equal(await second, false);
+  talk = h.render(h.exports.useMapleTalk, props); assert.equal(talk.bubble, "");
+  talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+  const third = talk.send("Once more"); talk = h.render(h.exports.useMapleTalk, props);
+  talk = h.render(h.exports.useMapleTalk, { ...props, tab: "map" }); h.flush();
+  finish({ reply: "From another tab" }); assert.equal(await third, false);
+  talk = h.render(h.exports.useMapleTalk, { ...props, tab: "map" });
+  assert.equal(talk.isOpen, false); assert.equal(talk.bubble, ""); assert.equal(spoken.length, 0);
+  assert.ok(cancelled.length >= 3, "each close/dismiss/leave stops sound");
+  talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+  const fourth = talk.send("Back home"); finish({ reply: "Hello again!" }); assert.equal(await fourth, true);
+  talk = h.render(h.exports.useMapleTalk, props); assert.equal(talk.bubble, "Hello again!");
 });

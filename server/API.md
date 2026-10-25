@@ -447,3 +447,16 @@ child document during the retry prevents stale replies from being saved.
 Paired kids can use Me → This device → Sign out, then inline confirmation. A successful `POST /api/auth/logout` clears cached identity, selected child, navigation and per-child album/reveal keys, returns to Welcome and asks for a new kid code. A failed request retains the session and confirmation. Parent-session Kid mode keeps its Grown-ups lock switch.
 
 Chat is text only. Child transcript, typewritten speech bubble and parent Buddy log render paragraphs, line breaks, bold, italic, short ordered/unordered lists and inline code. Raw HTML is escaped, URLs remain text, and other syntax is left as text. No external rendering dependency is used.
+
+## Read-aloud (0.8.8)
+
+The bear's replies can be read out loud. With `CARTESIA_API_KEY` set, `integrations.voice`
+is `"cartesia"` and the browser fetches a short-lived TTS-only token, then calls
+`https://api.cartesia.ai/tts/bytes` itself (the CSP allows that origin); if that fails it uses
+the server proxy. Without a key both routes answer 404 and the client uses the browser's own
+speech synthesis. The kid can mute with the sound button in the talk bar (stored per device).
+
+| Route | Body | Result |
+| --- | --- | --- |
+| `POST /api/voice/token` | `{}` | `{token, version, request}`: 60-second Cartesia token plus the request fields (model, voice, format). Kid session, Buddy enabled, 20 per 10 minutes per child. 404 when voice is not configured. |
+| `POST /api/buddy/speak` | `{text}` | `audio/mpeg` bytes for up to 500 characters (server-side proxy). Kid session, Buddy enabled, 60/hour per child. 404 when voice is not configured. |

@@ -10,6 +10,8 @@ Tip: Saving helps <bear> grow. Your savings milestones stay yours.
 2. Try **How do I…?** for help using MoneyQuest. Open **Chat** to read **Our chat**.
 Tip: Your grown-up can read your chats. Keep passwords, addresses, and phone numbers private. Chat rests while <bear> is away, chatting is switched off, or your device is offline.
 
+Sound: <bear> reads each reply out loud. Tap **Sound on** in the talk bar to switch the voice off (it then says **Sound off**). In **Our chat**, tap **Read aloud** under any reply to hear it again.
+
 ## Saving and spending
 1. Tap **Save money** or **Spent money** on **Home** to open **My money**.
 2. In **Save**, choose an amount and tap **Save it**. This moves spending money into savings.

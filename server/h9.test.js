@@ -181,14 +181,23 @@ for (const who of ["A", "B", "kid"]) test(`H9.3 early decline by ${who} closes b
   assert.doesNotMatch(JSON.stringify((await b.browser.call("GET", "/api/parent/state")).body), /Ava|Smith|Private reason/);
 });
 
-test("H9.4 voice routes, actions, limits and integration status are removed", async () => {
+test("H9.4 / 0.8.8 read-aloud routes are back for kids only and answer 404 until Cartesia is configured", async () => {
   const a = await family("Mia"), kid = await pair(a.browser, a.id);
-  for (const browser of [a.browser, kid, device()]) for (const path of ["/api/buddy/speak", "/api/voice/token"]) {
-    assert.equal((await browser.call("POST", path, { text: "Hi" })).status, 404);
+  for (const path of ["/api/buddy/speak", "/api/voice/token"]) {
+    const res = await kid.call("POST", path, { text: "Hi" });
+    assert.equal(res.status, 404); assert.match(res.body.error, /Voice is not configured/);
+    for (const [who, browser] of [["parent", a.browser], ["device", device()]]) { const status = (await browser.call("POST", path, { text: "Hi" })).status; assert.ok([401, 403, 404].includes(status), `${who} ${path} -> ${status}`); }
   }
-  assert.equal("voice" in policies, false); assert.equal("speak" in policies, false);
-  assert.equal("speakText" in actions, false);
-  assert.deepEqual(Object.keys((await kid.call("GET", "/api/state")).body.integrations).sort(), ["bank", "buddy"]);
+  assert.equal((await kid.call("POST", "/api/buddy/speak", { text: "" })).status, 400);
+  for (let i = 0; i < 25; i++) assert.equal((await kid.call("POST", "/api/voice/token", {})).status, 404, "an unconfigured voice never eats the quota");
+  assert.ok("voice" in policies); assert.ok("speak" in policies);
+  assert.equal(typeof actions.speakText, "function");
+  assert.deepEqual(Object.keys((await kid.call("GET", "/api/state")).body.integrations).sort(), ["bank", "buddy", "voice"]);
+  assert.equal((await kid.call("GET", "/api/state")).body.integrations.voice, "browser");
+  // Read-aloud plays blob: audio (Cartesia bytes) and a data: primer clip; the CSP must allow both.
+  const csp = (await kid.call("GET", "/api/state")).headers?.["content-security-policy"] || "";
+  assert.match(csp, /media-src 'self' blob: data:/);
+  assert.match(csp, /connect-src 'self' https:\/\/api\.cartesia\.ai/);
 });
 
 test("H9.5 Buddy prompt requests the safe formatting subset", () => {

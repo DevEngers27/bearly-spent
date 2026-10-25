@@ -450,18 +450,31 @@ test("a throwing guard blocks the chat reply", async (t) => {
   assert.ok(!read().buddy.chat.some((m) => m.text === blocked));
 });
 
-test("only an exact OK from the guard lets a chat reply pass unchanged", async (t) => {
+test("only OK from the guard (surrounding whitespace allowed) lets a chat reply pass unchanged", async (t) => {
   const reply = "You have $20 saved. Want to save a little more?";
   t.mock.method(_internals, "runClaude", async () => ({ reply }));
   for (const verdict of ["OK", "OK.", " OK", "OK\n", "okay", "", null, undefined]) {
     _setForTest(seed(Date.now()));
     const guard = t.mock.method(_internals, "runGuard", async () => verdict);
-    const expected = verdict === "OK" ? reply : guardFallback;
-    assert.equal((await chat("How much have I saved?")).reply, expected);
+    const passes = typeof verdict === "string" && verdict.trim() === "OK";
+    const expected = passes ? reply : guardFallback;
+    assert.equal((await chat("How much have I saved?")).reply, expected, JSON.stringify(verdict));
     assert.equal(read().buddy.chat.at(-1).text, expected);
-    assert.equal(read().audit.some((a) => a.action === "buddy_guard_blocked"), verdict !== "OK");
+    assert.equal(read().audit.some((a) => a.action === "buddy_guard_blocked"), !passes);
     guard.mock.restore();
   }
+});
+
+test("an empty guard verdict is retried once; two empties still block", async (t) => {
+  let calls = 0;
+  t.mock.method(_internals, "callGuard", async () => ({ content: calls++ === 0 ? [] : [{ type: "text", text: " OK\n" }] }));
+  assert.equal(await runGuard("Save a little."), "OK"); assert.equal(calls, 2);
+  calls = 0;
+  t.mock.method(_internals, "callGuard", async () => { calls++; return { content: [{ type: "text", text: "  " }] }; });
+  assert.equal(await runGuard("Save a little."), ""); assert.equal(calls, 2);
+  calls = 0;
+  t.mock.method(_internals, "callGuard", async () => { calls++; return { content: [{ type: "text", text: "BLOCK" }] }; });
+  assert.equal(await runGuard("Save a little."), "BLOCK"); assert.equal(calls, 1, "a real verdict is never retried");
 });
 
 test("guard request uses its own model, strict prompt, five tokens and no thinking", async (t) => {
@@ -480,8 +493,8 @@ test("guard request uses its own model, strict prompt, five tokens and no thinki
   assert.deepEqual(requests[1].messages, [{ role: "user", content: "Save with [email removed]" }]);
   for (const params of requests) {
     assert.equal(params.max_tokens, 5);
-    assert.equal(params.system, "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, real-money promises, or anything a careful parent would not want a 9-year-old to read. Plain instructions for using the MoneyQuest app are always OK: friend codes and friend requests, postcard swaps, the bear's trips, savings goals, missions, lessons, the weekly budget, Apple Cash receipts, dressing the bear, the Me sheet, signing out, or what a parent sees. Otherwise OK.");
-    for (const allowed of ["friend codes", "trips", "savings goals", "missions", "lessons", "dressing the bear", "signing out", "what a parent sees"]) assert.ok(params.system.includes(allowed), allowed);
+    assert.equal(params.system, "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, promises that the bear or the app will give, send or win real money, or anything a careful parent would not want a 9-year-old to read. Talking about the child's own allowance, savings, spending, goals, prices, points and budgets is the whole point of the game and is always OK, numbers included. Plain instructions for using the MoneyQuest app are always OK: friend codes and friend requests, postcard swaps, the bear's trips, savings goals, missions, lessons, the weekly budget, Apple Cash receipts, dressing the bear, the Me sheet, signing out, or what a parent sees. Otherwise OK.");
+    for (const allowed of ["friend codes", "trips", "savings goals", "missions", "lessons", "dressing the bear", "signing out", "what a parent sees", "allowance, savings, spending, goals, prices, points and budgets", "numbers included"]) assert.ok(params.system.includes(allowed), allowed);
     for (const key of ["thinking", "output_config", "tools", "betas", "fallbacks"]) assert.ok(!(key in params), key);
   }
 });

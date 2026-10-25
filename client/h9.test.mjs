@@ -209,15 +209,18 @@ test("H9.3 incoming anonymous and named friend cards retain consent and waiting 
   assert.match(normalized(render()), /Ben \(from The Joneses\) wants to be friends/);
 });
 
-test("H9.4 text chat has no voice controls or browser speech code", async () => {
+test("H9.4 / 0.8.8 speech-to-text stays out; read-aloud controls are back", async () => {
   const h = harness("Child.jsx"), state = stateFixture();
+  state.chat = [{ id: "m1", role: "assistant", text: "Hello!" }, { id: "m2", role: "user", text: "Hi" }];
   h.window.SpeechRecognition = class { constructor() { throw new Error("removed"); } };
-  for (const name of ["TalkBar", "Buddy"]) {
-    const tree = h.render(h.exports[name], { state, talk: { close: noop, send: noop }, open: noop });
-    assert.equal(nodes(tree, (n) => /Hold to talk|Sound on|Sound off|Read aloud/.test(n.props["aria-label"] || "")).length, 0);
-  }
+  const bar = h.render(h.exports.TalkBar, { state, talk: { close: noop, send: noop, muted: false, toggleMute: noop }, open: noop });
+  assert.equal(nodes(bar, (n) => n.props["aria-label"] === "Hold to talk").length, 0);
+  assert.equal(nodes(bar, (n) => n.props["aria-label"] === "Sound on").length, 1);
+  const chat = h.render(h.exports.Buddy, { state, open: noop, run: noop, startTalk: noop });
+  assert.equal(nodes(chat, (n) => n.props["aria-label"] === "Read aloud").length, 1, "one Read aloud per bear reply, none for the kid's line");
   const source = await readFile(new URL("src/Child.jsx", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /SpeechRecognition|speechSynthesis|SpeechSynthesisUtterance|Cartesia|voice\/token|buddy\/speak|toggleMute/);
+  assert.doesNotMatch(source, /SpeechRecognition|Hold to talk/);
+  assert.match(source, /voice\/token/); assert.match(source, /buddy\/speak/);
 });
 
 function markdown(value) {

@@ -299,22 +299,29 @@ async function callClaude(params) {
 
 const textOf = (content) => content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 
-const GUARD_PROMPT = "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, real-money promises, or anything a careful parent would not want a 9-year-old to read. Plain instructions for using the MoneyQuest app are always OK: friend codes and friend requests, postcard swaps, the bear's trips, savings goals, missions, lessons, the weekly budget, Apple Cash receipts, dressing the bear, the Me sheet, signing out, or what a parent sees. Otherwise OK.";
+const GUARD_PROMPT = "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, promises that the bear or the app will give, send or win real money, or anything a careful parent would not want a 9-year-old to read. Talking about the child's own allowance, savings, spending, goals, prices, points and budgets is the whole point of the game and is always OK, numbers included. Plain instructions for using the MoneyQuest app are always OK: friend codes and friend requests, postcard swaps, the bear's trips, savings goals, missions, lessons, the weekly budget, Apple Cash receipts, dressing the bear, the Me sheet, signing out, or what a parent sees. Otherwise OK.";
 const guardFallback = (bearName) => `Hmm, let's talk about your savings or ${bearName}'s next trip instead! Want to see how close you are to your goal?`;
 
 async function runGuard(reply) {
-  const res = await _internals.callGuard({
+  const params = {
     model: process.env.BUDDY_GUARD_MODEL || "claude-haiku-5-5",
     system: GUARD_PROMPT,
     messages: [{ role: "user", content: redact(reply).text }],
     max_tokens: 5,
-  });
-  return res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  };
+  // The classifier now and then returns no text at all (seen live on a plain allowance answer);
+  // one retry keeps a good reply from being swapped for the fallback line. Still only "OK" passes.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await _internals.callGuard(params);
+    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 async function screenReply(reply, canWrite = () => true, childId) {
   try {
-    if (await _internals.runGuard(reply) === "OK") return reply;
+    if (String((await _internals.runGuard(reply)) ?? "").trim() === "OK") return reply;
   } catch {
     // A failed check must never let an unchecked model reply through.
   }
