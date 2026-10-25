@@ -11,13 +11,14 @@ const POSES = {
 };
 
 // x/y = centre of the item, w = width; all in % of the front pose.
-// z orders the layers: outfit < neck < held < eyes < hat < friend.
+// z orders the layers: outfit < neck < held < eyes < hat < friend; below 0
+// sits behind the bear (the umbrella, so the paw is drawn over its stem).
 export const ITEMS = {
   // hats
-  knit_beanie: { slot: "hat", x: 50, y: -1, w: 66, z: 5 },
-  ranger_hat: { slot: "hat", x: 50, y: 4, w: 92, z: 5 },
-  flower_sunhat: { slot: "hat", x: 50, y: 6, w: 104, z: 5 },
-  flower_crown: { slot: "hat", x: 50, y: 9, w: 76, z: 5 },
+  knit_beanie: { slot: "hat", x: 50, y: -3, w: 70, z: 5 },
+  ranger_hat: { slot: "hat", x: 50, y: 0, w: 86, z: 5 },
+  flower_sunhat: { slot: "hat", x: 50, y: 2, w: 100, z: 5 },
+  flower_crown: { slot: "hat", x: 50, y: 4, w: 64, z: 5 },
   sleeping_cap: { slot: "hat", x: 55, y: -1, w: 82, z: 5 },
   yellow_bow: { slot: "hat", x: 76, y: 6, w: 36, z: 5, rot: 14 },
   // eyes
@@ -25,22 +26,92 @@ export const ITEMS = {
   heart_glasses: { slot: "eyes", x: 50, y: 29.5, w: 58, z: 4 },
   // neck
   red_bow_tie: { slot: "neck", x: 50, y: 50, w: 32, z: 3 },
-  red_scarf: { slot: "neck", x: 50, y: 56, w: 76, z: 3 },
-  camera: { slot: "neck", x: 50, y: 60, w: 70, z: 3 },
+  red_scarf: { slot: "neck", x: 50, y: 61, w: 72, z: 3 },
+  camera: { slot: "neck", x: 50, y: 61, w: 66, z: 3 },
   // outfits
-  striped_shirt: { slot: "outfit", x: 50, y: 71, w: 96, z: 1 },
-  green_hoodie: { slot: "outfit", x: 50, y: 71, w: 98, z: 1 },
+  striped_shirt: { slot: "outfit", x: 50, y: 70, w: 88, z: 1 },
+  green_hoodie: { slot: "outfit", x: 50, y: 69, w: 96, z: 1 },
   // held items (bear's left paw, our right)
-  adventure_map: { slot: "held", x: 50, y: 72, w: 64, z: 3, rot: -4 },
+  adventure_map: { slot: "held", x: 82, y: 70, w: 50, z: 3, rot: -8 },
   magnifying_glass: { slot: "held", x: 94, y: 60, w: 36, z: 3, rot: 12 },
   green_book: { slot: "held", x: 90, y: 74, w: 38, z: 3, rot: 6 },
   honey_jar: { slot: "held", x: 92, y: 76, w: 32, z: 3 },
   picnic_basket: { slot: "held", x: 96, y: 80, w: 44, z: 3 },
-  leaf_umbrella: { slot: "held", x: 86, y: 40, w: 70, z: 6 },
-  // little friends that float nearby
-  bee_friend: { slot: "friend", x: 98, y: 14, w: 44, z: 7, float: true },
-  butterfly_friend: { slot: "friend", x: 2, y: 12, w: 42, z: 7, float: true, flip: true },
+  leaf_umbrella: { slot: "held", x: 100, y: 46, w: 66, z: -1 },
+  // little friends that float by the shoulder (the side away from held items)
+  bee_friend: { slot: "friend", x: -4, y: 40, w: 44, z: 7, float: true, flip: true },
+  butterfly_friend: { slot: "friend", x: -2, y: 38, w: 42, z: 7, float: true, flip: true },
 };
+
+// The other poses reuse the same art, so each one says where an item sits
+// from that angle, in % of that pose's own box (any of x/y/w/z/rot/flip
+// replaces the front value). An item left out is hidden in that pose: glasses
+// and bow ties are on the face, and a shirt would paint over the backpack.
+// Side is not drawn through BearFigure today (the map walker is a plain image)
+// but is kept tuned so it can be.
+const POSE_ITEMS = {
+  threeQuarter: {
+    knit_beanie: { x: 48, y: 2, w: 66, rot: 10 },
+    ranger_hat: { x: 48, y: -1, w: 84, rot: 8 },
+    flower_sunhat: { x: 48, y: 2, w: 98, rot: 8 },
+    flower_crown: { x: 48, y: 6, w: 64, rot: 10 },
+    sleeping_cap: { x: 52, y: -2, w: 80, rot: 10 },
+    yellow_bow: { x: 80, y: 14, w: 34, rot: 30 },
+    red_bow_tie: { x: 22, y: 50, w: 26, rot: -8 },
+    red_scarf: { x: 34, y: 58, w: 54, rot: -4 },
+    camera: { x: 28, y: 62, w: 50, rot: -6 },
+    adventure_map: { x: 12, y: 66, w: 44, rot: -10 },
+    magnifying_glass: { x: 0, y: 50, w: 30 },
+    green_book: { x: 10, y: 68, w: 32, rot: -6 },
+    honey_jar: { x: 10, y: 70, w: 28 },
+    picnic_basket: { x: 8, y: 74, w: 38 },
+    leaf_umbrella: { x: 88, y: 28, w: 56, rot: 25 },
+    bee_friend: { x: 88, y: 34, flip: false },
+    butterfly_friend: { x: 88, y: 32, flip: false },
+  },
+  side: {
+    knit_beanie: { x: 52, y: 1, w: 70, rot: 6 },
+    ranger_hat: { x: 52, y: -1, w: 86, rot: 4 },
+    flower_sunhat: { x: 52, y: 2, w: 100, rot: 4 },
+    flower_crown: { x: 52, y: 6, w: 66, rot: 6 },
+    sleeping_cap: { x: 58, y: -2, w: 82, rot: 6 },
+    yellow_bow: { x: 60, y: 3, w: 34, rot: 20 },
+    red_bow_tie: { x: 26, y: 51, w: 26 },
+    red_scarf: { x: 40, y: 59, w: 54 },
+    camera: { x: 34, y: 63, w: 50 },
+    adventure_map: { x: 42, y: 70, w: 44, rot: -6 },
+    magnifying_glass: { x: 46, y: 60, w: 30, rot: 10 },
+    green_book: { x: 44, y: 72, w: 32 },
+    honey_jar: { x: 44, y: 74, w: 28 },
+    picnic_basket: { x: 44, y: 78, w: 38 },
+    leaf_umbrella: { x: 94, y: 28, w: 60, rot: 25 },
+    bee_friend: { x: 100, y: 38, flip: false },
+    butterfly_friend: { x: 100, y: 36, flip: false },
+  },
+  back: {
+    knit_beanie: { x: 51, y: -2, w: 70 },
+    ranger_hat: { x: 51, y: 0, w: 86 },
+    flower_sunhat: { x: 51, y: 2, w: 100, flip: true },
+    flower_crown: { x: 51, y: 4, w: 64 },
+    sleeping_cap: { x: 46, y: -1, w: 82, flip: true },
+    yellow_bow: { x: 27, y: 7, w: 36, rot: -14, flip: true },
+    adventure_map: { x: 4, y: 70, w: 44, z: -1, flip: true },
+    magnifying_glass: { x: 6, y: 60, w: 34, z: -1, rot: -12, flip: true },
+    green_book: { x: 8, y: 72, w: 36, z: -1, flip: true },
+    honey_jar: { x: 6, y: 74, w: 30, z: -1, flip: true },
+    picnic_basket: { x: 4, y: 78, w: 42, z: -1, flip: true },
+    leaf_umbrella: { x: 10, y: 32, w: 52, rot: -18, flip: true },
+    bee_friend: { x: 94, y: 36, flip: false },
+    butterfly_friend: { x: 94, y: 34, flip: false },
+  },
+};
+
+function placeItem(id, pose) {
+  const item = ITEMS[id];
+  if (!item || pose === "front") return item;
+  const at = POSE_ITEMS[pose]?.[id];
+  return at ? { ...item, ...at } : null;
+}
 
 const SLOTS = ["outfit", "neck", "held", "eyes", "hat", "friend"];
 
@@ -76,9 +147,10 @@ export function BearFigure({ bear, pose = "front", mood = "idle", size = 200, fl
     <div className={`bear pose-${pose} mood-${mood} ${className}`} style={{ width: size, aspectRatio: `${p.w} / ${p.h}` }} role="img" aria-label={`${bear.name} the bear, ${label}`}>
       <div className="bear-body" style={{ transform: flip ? "scaleX(-1)" : undefined }}>
         <img className="bear-base" src={p.src} alt="" draggable="false" />
-        {pose === "front" && SLOTS.map((slot) => {
+        {SLOTS.map((slot) => {
           const id = worn[slot];
-          return id && ITEMS[id] ? <Layer key={slot} id={id} item={ITEMS[id]} /> : null;
+          const item = id && placeItem(id, pose);
+          return item ? <Layer key={slot} id={id} item={item} /> : null;
         })}
       </div>
       {mood === "thinking" && <div className="thought-dots" aria-hidden="true"><i /><i /><i /></div>}
