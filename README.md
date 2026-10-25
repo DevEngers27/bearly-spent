@@ -53,6 +53,7 @@ Choose **Create family** on Welcome. Enter the parent's name, email, password (a
 - **Link a kid device:** Parent → Children → Generate kid code. In a separate browser profile or on the child's device, choose **I have a kid code** and enter the six-character code. It works once, expires in 15 minutes, and a new code cancels earlier unused codes for that child. The paired device sees only its child and has no parent entry or Sign out control; parents can unlink it in Children → Devices.
 - **Use a shared device:** Parent → Security sets an optional 4–8 digit PIN. Kid mode and Lock clear this session's server unlock. Returning through Grown-ups requires the PIN; an unlock lasts 15 minutes. Five failed attempts lock that session for 15 minutes. Forgot PIN? verifies the parent's password and clears the family PIN. A PIN cannot turn a paired kid session into a parent session.
 - **Add siblings:** Children → Add child, then use the header switcher. Each child has their own funding, savings and spending accounts, allowance rules, goals, approvals, Buddy settings/history, game progress and postcards. The family identity, parent PIN and parent access are shared; funding is **per child**, not pooled. Time-zone game settings are also stored per child, despite the current “Family time zone” label.
+- **Add money:** Parent → Allowance → Add money records funding for the selected child so allowance and approved rewards can be paid in the ledger; it does not move real money.
 - **End access:** Sign out ends the current parent session. Security → **Sign out everywhere** asks for confirmation, then revokes every parent and kid session in the family, including the current device. Kid devices need new codes afterward. Other families stay signed in.
 
 Passwords and PINs are salted **scrypt** hashes. Sessions use **HttpOnly, SameSite=Lax** cookies (`Secure` in production/HTTPS); only token hashes are stored server-side. Parent sessions slide for 30 days, with a 90-day maximum; paired kid sessions last 180 days. Login, registration, pairing, PIN attempts, Buddy and voice have rate limits. Per-child retention caps are **200 chat messages, 500 diary entries, 2,000 audit entries, 5,000 transactions and 200 notifications per recipient**. Cached child state is stored on the device for offline reading, so use a trusted device and clear site data when retiring it.
@@ -111,7 +112,7 @@ The configured defaults are **claude-opus-5-5** with adaptive thinking at low ef
 
 | Area | Implemented now | Boundary |
 | --- | --- | --- |
-| Accounts and ledger | SQLite persistence, scoped sessions, approvals, idempotency, reconciliation and audit | All dollars/funding are simulated; no real bank transfer or card feed |
+| Accounts and ledger | SQLite persistence, scoped sessions, approvals, idempotency, reconciliation and audit | Ledger records only; no app-initiated bank or Apple Cash transfer |
 | Trips and postcards | 15 illustrated places: 8 common, 4 rare, 1 autumn seasonal, 2 secret bonuses; 30-point surprise draw | Destination selection is random; eligibility and secret bonus conditions are deterministic; no paid draws |
 | Friends | Practice friends, approval-gated linking and configurable trade approval | Friends' collections and team progress are simulated; no real multiplayer; friend views exclude balances, transactions and allowance |
 | Claude | Optional Messages/tool loop, redaction and Haiku output screening | Mock-tested; live-key service/model availability was not verified for this documentation pass |
@@ -128,11 +129,11 @@ The UI uses hand-drawn SVGs in `client/src/Icons.jsx` plus illustrated PNGs. Cus
 ## Known limitations
 
 - Run **one API process per database**. Document caches, rate windows, chat locks and SSE lists are process-local; restarting resets rate windows. SSE allows four connections per family, closes the oldest fifth connection and drops backpressured streams. Parent updates include all siblings; clients filter by child ID.
-- Funding accounts are per child. New non-demo families have zero funding, and the current UI/API exposes top-ups only for the demo family, so a newly registered family cannot fund allowance/reward payouts through the app yet.
-- Spending is manually recorded, and the cash diary does not change balances. Savings cannot yet be withdrawn or used for an actual purchase; Buddy's savings-purchase simulation is hypothetical.
+- Funding accounts are per child. New families start at zero; Add money records funding for ledger payouts, while demo-only top-ups simulate deposits.
+- Spending outside Apple Cash is manually recorded, and the cash diary does not change balances. Savings cannot yet be withdrawn or used for an actual purchase; Buddy's savings-purchase simulation is hypothetical.
 - Friends and their team contributions are simulated. Team progress has no completion reward, and some aspirational milestone effects in the catalog are not rendered.
 - Browser speech and press-and-hold recognition depend on browser support and permissions. External integration badges reflect configuration, not a successful live connection.
-- Apple Cash tracking is coming in the next release.
+- [Apple Cash tracking](docs/apple-cash-shortcut.md) records money parents mark as sent and purchases logged manually or by an iPhone Shortcut. MoneyQuest cannot send Apple Cash or read the actual Wallet balance; check the tracked balance against Wallet and avoid logging a purchase twice.
 
 ## Testing and review
 

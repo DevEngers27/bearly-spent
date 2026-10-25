@@ -122,7 +122,11 @@ export function createParentGoal(db, { title, type, count, reward }) {
   count = Number(count);
   const passed = LESSONS.filter((l) => db.child.lessonsDone.includes(l.id)).length;
   const remaining = LESSONS.length - passed;
-  if (type === "lessons" && count > remaining) throw new GameError(`${db.child.name} has already passed ${passed} lessons — pick ${remaining} or fewer, or choose tasks`);
+  if (type === "lessons" && count > remaining) {
+    if (remaining === 0) throw new GameError(`${db.child.name} has already passed all lessons — choose tasks`);
+    if (passed === 0) throw new GameError(`Pick up to ${remaining} lessons for ${db.child.name}, or choose tasks`);
+    throw new GameError(`${db.child.name} has already passed ${passed} lessons — pick ${remaining} or fewer, or choose tasks`);
+  }
   reward = Math.round(Number(reward) * 100);
   const g = { id: uid("pg"), title: title.trim(), type, count, reward, progress: 0, status: "active", createdAt: Date.now() };
   db.parentGoals.push(g);

@@ -86,7 +86,7 @@ export const actions = {
     if (Object.hasOwn(body, "spendLimit")) update.spendLimit = money(body.spendLimit);
     if (Object.hasOwn(body, "rewardDestination")) update.rewardDestination = oneOf(body.rewardDestination, ["spending", "savings"]);
     const a = Object.assign(db.allowance, update);
-    game.audit(db, "parent", "allowance_updated", `Allowance ${(a.amount / 100).toFixed(2)}/wk, ${a.savePct}% saved, purchase limit $${(a.spendLimit / 100).toFixed(2)}`);
+    game.audit(db, "parent", "allowance_updated", `Allowance $${(a.amount / 100).toFixed(2)}/wk, ${a.savePct}% saved, purchase limit $${(a.spendLimit / 100).toFixed(2)}`);
   }),
   fundingAdd: action((db, body) => {
     const amount = money(body.amount, { min: 100, max: 100000 });
@@ -116,7 +116,9 @@ export const actions = {
       }
     }
     Object.assign(db.settings, update);
-    game.audit(db, "parent", "settings", `Updated settings: ${JSON.stringify(update)}`);
+    const labels = { requireTradeApproval: "Trade approval", buddyEnabled: "Buddy", coopChallenge: "Team challenge" };
+    const detail = Object.entries(update).map(([key, value]) => key === "timezone" ? `Time zone set to ${value}` : `${labels[key]} turned ${value ? "on" : "off"}`).join(". ");
+    game.audit(db, "parent", "settings", detail || "Settings unchanged");
   }),
   savingsGoal: action((db, body) => {
     const update = {};

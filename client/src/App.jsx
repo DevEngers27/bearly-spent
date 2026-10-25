@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, cachedChildSession, cachedParentSession, formatTime, clearSessionCache, OFFLINE_MESSAGE, rememberSession, setSelectedChild, useAction, useLiveState } from "./api.js";
+import { api, cachedChildSession, cachedParentSession, formatTime, clearSessionCache, offlineMessage, rememberSession, setSelectedChild, useAction, useLiveState } from "./api.js";
 import Child, { Sheet } from "./Child.jsx";
 import Parent from "./Parent.jsx";
 import { SketchDefs } from "./Bear.jsx";
@@ -32,8 +32,9 @@ export default function App() {
       selected = localStorage.getItem("mq_selected_child");
       if (restoring) savedMode = localStorage.getItem("mq_parent_mode");
     } catch {}
-    clearSessionCache();
     const activeChild = next.children.find((c) => c.id === selected) || next.activeChild;
+    const previous = cachedParentSession() || cachedChildSession();
+    clearSessionCache({ preserveChildPreferences: restoring && previous?.role === next.role && previous?.activeChild.id === activeChild.id });
     next = { ...next, activeChild };
     setSelectedChild(activeChild.id);
     rememberSession(next);
@@ -248,9 +249,10 @@ function SignOut({ onSignOut, toast }) {
 function ChildRoot({ childId, toast, onGrownUps }) {
   const { state, error, offline, refresh } = useLiveState("child", childId);
   const hasState = Boolean(state);
+  const bearName = state?.child.bear.name;
   useEffect(() => {
-    if (offline && hasState) toast(OFFLINE_MESSAGE);
-  }, [offline, hasState, toast]);
+    if (offline && hasState) toast(offlineMessage(bearName));
+  }, [offline, hasState, bearName, toast]);
   if (!state) return <Loading error={error} onRetry={refresh} onGrownUps={onGrownUps} />;
   return <Child state={state} toast={toast} offline={offline} onGrownUps={onGrownUps} />;
 }

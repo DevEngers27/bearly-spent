@@ -9,8 +9,31 @@ merged by Claude (see `docs/VERSIONING.md`).
 ## [Unreleased]
 
 ### In progress (branches)
-- `feat/f2-apple-cash` — Apple Cash tracking via an iOS Shortcut, parent
-  "sent via Apple Cash" entries and a wallet account per child.
+- (none)
+
+## [0.5.0] — 2026-10-25
+
+Apple Cash tracking and the post-0.4.0 polish. 241 server tests and
+110 client tests.
+
+### Added
+- Apple Cash tracking: each child has an Apple Cash wallet account; parents
+  record money they sent over Apple Cash (an inflow from the parent that
+  never touches the funding record); the child's iPhone can post every
+  Wallet transaction through a Shortcuts "Transaction" automation using a
+  long-lived, PIN-gated, rotatable token that appears in the Devices list
+  and can be unlinked. Spends are idempotent on `external_id`, flagged when
+  the wallet is short, covered by the Guardian's unusual-spend notice and
+  over-limit alert, and rate-limited. The kid Home shows an Apple Cash
+  pill, ledgers tag wallet entries, the spend sheet has "Paid with Apple
+  Cash", and `docs/apple-cash-shortcut.md` walks through the Shortcut.
+
+### Fixed
+- Kid copy uses the child's bear name everywhere (it said "Maple" for every
+  family); tall speech bubbles keep their outline around the text; no extra
+  toast on PIN lockout; clearer lesson-goal and Guardian activity copy;
+  per-child browser keys clear when a kid session ends; money inputs use
+  the decimal keypad; the README demo starts with Fast-forward.
 
 ## [0.4.0] — 2026-10-25
 
@@ -136,7 +159,8 @@ First hardening wave after the eight-way review. 148 server tests and
 
 Baseline: the Cal Hacks demo as reviewed. 11 rule tests.
 
-[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/DevEngers27/moneyquest/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/DevEngers27/moneyquest/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/DevEngers27/moneyquest/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/DevEngers27/moneyquest/compare/v0.3.0...v0.3.1

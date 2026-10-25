@@ -668,9 +668,9 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .sign-time { font: 800 20px var(--body); fill: var(--ink); }
 @keyframes sign-sway { 0%, 100% { transform: rotate(-1.5deg); } 50% { transform: rotate(1.5deg); } }
 .scene:has(.bear-bubble) { padding-top: 150px; min-height: 430px; aspect-ratio: auto; min-width: 0; }
-.bear-bubble { position: absolute; z-index: 4; top: 68px; left: 6%; width: 88%; max-width: calc(100% - 24px); overflow-wrap: anywhere; word-break: break-word; padding: 15px 18px 30px; font-size: 14px; line-height: 1.45; max-height: 210px; overflow-y: auto; isolation: isolate; }
-.bear-bubble > svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
-.bear-bubble > span:not(.sr-only) { display: block; min-height: 42px; }
+.bear-bubble { position: absolute; z-index: 4; top: 68px; left: 6%; width: 88%; max-width: calc(100% - 24px); overflow-wrap: anywhere; word-break: break-word; padding: 15px 18px; font-size: 14px; line-height: 1.45; background: #FFFDF7; border: 2px solid var(--ink); border-radius: 22px 24px 20px 18px; isolation: isolate; }
+.bear-bubble::after { content: ""; position: absolute; bottom: -11px; left: 42%; width: 18px; height: 18px; background: #FFFDF7; border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); transform: rotate(45deg); pointer-events: none; }
+.bear-bubble-text { display: block; min-height: 42px; max-height: 176px; overflow-y: auto; white-space: pre-wrap; }
 .thought-dots { position: absolute; top: -8%; right: -10%; display: flex; gap: 5px; background: var(--paper-card); padding: 10px; border: 2px solid var(--ink); border-radius: 50%; }
 .thought-dots i { width: 6px; height: 6px; background: var(--ink); border-radius: 50%; animation: thought-hop 1s ease-in-out infinite; }
 .thought-dots i:nth-child(2) { animation-delay: .15s; }

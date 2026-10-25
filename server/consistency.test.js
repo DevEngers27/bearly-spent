@@ -43,7 +43,7 @@ test("D2: lesson goals respect remaining unique lessons and cancellation stops p
   assert.throws(() => actions.cancelGoal(db, goal.id), game.GameError);
   assert.ok(routeActions.some((r) => r.method === "POST" && r.path === "/api/parent/goal/:id/cancel" && r.access === "parent"));
   db.child.lessonsDone = catalog.LESSONS.map((l) => l.id);
-  assert.throws(() => actions.goal(db, { title: "Learn", type: "lessons", count: 1, reward: 5 }), /pick 0 or fewer/);
+  assert.throws(() => actions.goal(db, { title: "Learn", type: "lessons", count: 1, reward: 5 }), /has already passed all lessons — choose tasks/);
 });
 
 test("D3: both views share trip-place, all-card and catalog-total metrics", () => {

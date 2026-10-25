@@ -212,7 +212,7 @@ function Goals({ state, run, busy }) {
                 <option value="save_actions">Times saved</option>
               </select></label>
               <label>How many{g.type === "lessons" && <small>{remaining} lessons remaining</small>}<input type="number" min="1" max={g.type === "lessons" ? remaining : 50} value={g.count} onChange={(e) => setG({ ...g, count: e.target.value })} /></label>
-              <label>Reward ($)<input type="number" min="0" max="100" step="0.5" value={g.reward} onChange={(e) => setG({ ...g, reward: e.target.value })} /></label>
+              <label>Reward ($)<input type="number" inputMode="decimal" min="0" max="100" step="0.5" value={g.reward} onChange={(e) => setG({ ...g, reward: e.target.value })} /></label>
             </div>
             <button disabled={busy || (g.type === "lessons" && (remaining === 0 || Number(g.count) > remaining))} className="pbtn primary">Create goal</button>
           </form>
@@ -259,7 +259,7 @@ function SavingsGoal({ state, run, busy }) {
       {!state.goals[0] && <p>Pick something your child would love to save for.</p>}
       <form className="pform pform-row" onSubmit={(e) => { e.preventDefault(); run("parent/savings-goal", sg, "Savings goal updated"); }}>
         <label>Saving for<input value={sg.title} onChange={(e) => setSg({ ...sg, title: e.target.value })} /></label>
-        <label>Target ($)<input type="number" min="1" value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
+        <label>Target ($)<input type="number" inputMode="decimal" min="1" value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
         <button disabled={busy} className="pbtn">Update</button>
       </form>
     </section>
@@ -285,9 +285,9 @@ function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
       <p className="p-muted">The Ledger Guardian pays the allowance on schedule, splits it between savings and spending, and holds purchases over your limit for approval. Next payout: {formatDateTime(a.nextRun)}.</p>
       <form className="p-card pform" onSubmit={(e) => { e.preventDefault(); run("parent/allowance", f, "Allowance rules saved"); }}>
         <div className="pform-row">
-          <label>Weekly allowance ($)<input type="number" min="0" max="100" step="0.5" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
+          <label>Weekly allowance ($)<input type="number" inputMode="decimal" min="0" max="100" step="0.5" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
           <label>Saved automatically (%)<input type="number" min="0" max="100" value={f.savePct} onChange={(e) => setF({ ...f, savePct: e.target.value })} /></label>
-          <label>Purchase limit without approval ($)<input type="number" min="0" step="1" value={f.spendLimit} onChange={(e) => setF({ ...f, spendLimit: e.target.value })} /></label>
+          <label>Purchase limit without approval ($)<input type="number" inputMode="decimal" min="0" step="1" value={f.spendLimit} onChange={(e) => setF({ ...f, spendLimit: e.target.value })} /></label>
           <label>Rewards go to<select value={f.rewardDestination} onChange={(e) => setF({ ...f, rewardDestination: e.target.value })}>
             <option value="savings">Savings</option><option value="spending">Spending</option>
           </select></label>
@@ -299,7 +299,7 @@ function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
         <p>{money(state.accounts.parent.balance)} recorded as set aside</p>
         <p className="p-muted" id="funding-explanation">This is a record of money you have set aside; MoneyQuest never moves real money.</p>
         <form className="pform" onSubmit={addMoney} aria-label="Add money" aria-describedby="funding-explanation">
-          <label>Amount ($)<input ref={fundingAmount} type="number" required min="1" max="1000" step="0.01" disabled={busy} value={funding.amount} onChange={(e) => setFunding({ ...funding, amount: e.target.value })} /></label>
+          <label>Amount ($)<input ref={fundingAmount} type="number" inputMode="decimal" required min="1" max="1000" step="0.01" disabled={busy} value={funding.amount} onChange={(e) => setFunding({ ...funding, amount: e.target.value })} /></label>
           <label>Note (optional)<input maxLength={120} disabled={busy} value={funding.note} onChange={(e) => setFunding({ ...funding, note: e.target.value })} /></label>
           <button disabled={busy} className="pbtn primary">Add money</button>
         </form>
@@ -337,6 +337,17 @@ function Activity({ state }) {
   );
 }
 
+// Older audit entries used raw settings JSON and omitted the allowance currency.
+function auditDetail(entry) {
+  if (entry.action === "allowance_updated") return entry.detail.replace(/^Allowance (?=\d)/, "Allowance $");
+  if (entry.action !== "settings" || !entry.detail.startsWith("Updated settings:")) return entry.detail;
+  try {
+    const update = JSON.parse(entry.detail.slice("Updated settings:".length));
+    const labels = { requireTradeApproval: "Trade approval", buddyEnabled: "Buddy", coopChallenge: "Team challenge" };
+    return Object.entries(update).map(([key, value]) => key === "timezone" ? `Time zone set to ${value}` : labels[key] ? `${labels[key]} turned ${value ? "on" : "off"}` : "").filter(Boolean).join(". ") || "Settings unchanged";
+  } catch { return "Settings updated"; }
+}
+
 function Guardian({ state, run, demo, busy }) {
   const [all, setAll] = useState(false);
   const rows = state.audit.filter((a) => all || a.actor === "guardian" || a.actor === "buddy");
@@ -365,7 +376,7 @@ function Guardian({ state, run, demo, busy }) {
           <li key={a.id} className={`actor-${a.actor}`}>
             <time>{formatTime(a.ts, { second: "2-digit" })}</time>
             <span className="actor">{a.actor}</span>
-            <span>{a.detail}</span>
+            <span>{auditDetail(a)}</span>
           </li>
         ))}
         {rows.length === 0 && <li className="p-muted">No decisions yet.</li>}
@@ -508,7 +519,7 @@ function WalletLedger({ state, run, busy }) {
       <p>Send in Wallet first, then record it here. This form records the transfer; it does not send money.</p>
       <p>The money comes from your own pocket. Recording it does not change the funding record.</p>
       <div className="pform-row">
-        <label>Amount sent ($)<input type="number" min="0.01" max="10000" step="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+        <label>Amount sent ($)<input type="number" inputMode="decimal" min="0.01" max="10000" step="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
         <label>Note<input maxLength={120} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
       </div>
       <button className="pbtn primary" disabled={busy}>Record sent money</button>

@@ -65,3 +65,16 @@ Automated socket-free coverage: `node --test server/*.test.js` and `node --test 
 - [ ] Enter $25.50 and an optional note; Add money sends one `parent/funding/add` request for the selected child. Inputs/button disable while pending. A failed request preserves the draft; success clears it and refreshes funding, Transactions and Guardian log. No money moves outside the ledger. The child sees no funding note/notification; a due allowance may generate its normal payout notification.
 - [ ] Check $1/$1,000 boundaries, cent precision, required amount and 120-character note. Funding copy explains that MoneyQuest never moves real money. After funding is positive, the Overview nudge disappears. With allowance zero it is absent.
 - [ ] With a PIN, lock parent mode: direct funding requests fail until unlock. A paired kid gets 403. Real families retain Add money but have no Add $50 or Fast-forward; demo keeps both one-tap controls alongside the form.
+
+
+## W3 polish
+
+Socket-free regressions cover named-bear rendering, bubble structure/CSS, lockout notices, readable audit copy, session cleanup, decimal inputs and demo documentation. The browser checks below remain pending.
+
+- [ ] **W3.1 — Bear names:** Use a real child whose bear is Bo. Check Home, Album/card stories, Chat, Ask for extra, Buddy task ideas and a traded place's visit note. Disconnect after caching: both the offline notice and blocked actions name Bo. Return from a trip and trigger the offline helper; newly generated copy uses Bo.
+- [ ] **W3.2 — Tall bubbles:** At 390px, show a 12-line reply and a very long/unbroken reply with reduced motion both on and off. Every visible line stays inside the rounded border; long text scrolls inside it while the outline and tail stay fixed. Short replies still fit naturally.
+- [ ] **W3.3 — Lockout:** Fail the parent PIN five times. The inline lockout deadline and disabled Unlock button remain visible without a second toast covering the sheet controls. Other rate-limited actions still show their normal notices.
+- [ ] **W3.4 — Goal/audit copy:** Request too many lessons before any passes, after some passes and after all passes. The messages say pick up to five, the remaining count, and choose tasks respectively. In Guardian → Show all activity, change time zone/Buddy and allowance: readable sentences and $10.00/wk appear, including older stored settings entries.
+- [ ] **W3.5 — Session cleanup:** Visit Album, open cards and mute speech, then unlink that kid device or Sign out everywhere. After its next authenticated 401, navigation, reveal/album receipts and mute keys are removed alongside identity/state. Re-link: Home opens. An ordinary reload of the same valid session retains navigation; failed global sign-out retains it too.
+- [ ] **W3.6 — Amount keyboard:** On a phone, check Add money, Allowance, purchase limit, goal reward, savings target, Save/Spent and Send via Apple Cash: each amount input offers the decimal keyboard.
+- [ ] **W3.7/8 — Demo/docs:** On a fresh demo follow the README's payday step before Post a duplicate. Accounts explains Add money; Known limitations links the Apple Cash Shortcut guide and explains tracking boundaries.
