@@ -126,6 +126,99 @@ test("login rejects wrong passwords, accepts normalized email, and logout invali
   assert.equal((await device().call("POST", "/api/parent/login", { pin: "1234" })).status, 404);
 });
 
+test("logout-all revokes every current-user cookie and bearer session but preserves other families and paired children", async () => {
+  const parent = device();
+  const account = await parent.call("POST", "/api/auth/register", form());
+  const cookieDevice = device("cookie-device"), bearerDevice = device("bearer-device");
+  const credentials = { email: form().email, password: form().password };
+  for (const browser of [cookieDevice, bearerDevice]) {
+    assert.equal((await browser.call("POST", "/api/auth/login", credentials)).status, 200);
+  }
+  const revokedCookies = [parent.cookie, cookieDevice.cookie, bearerDevice.cookie];
+  const link = await parent.call("POST", `/api/parent/children/${account.body.activeChild.id}/link`, {});
+  const child = device("child");
+  assert.equal((await child.call("POST", "/api/auth/link", { code: link.body.code })).status, 200);
+  const other = device("other-family"), otherDevice = device("other-family-device");
+  assert.equal((await other.call("POST", "/api/auth/register", form("other@example.test"))).status, 200);
+  assert.equal((await otherDevice.call("POST", "/api/auth/login", { ...credentials, email: "other@example.test" })).status, 200);
+  const result = await parent.call("POST", "/api/auth/logout-all");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { ok: true });
+  assert.equal(result.headers["set-cookie"], "mq_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+  assert.equal(parent.cookie, "mq_session=");
+  for (const cookie of revokedCookies) {
+    for (const headers of [{ cookie }, { authorization: `Bearer ${cookie.slice(11)}` }]) {
+      assert.equal((await device().call("GET", "/api/auth/me", undefined, { headers })).status, 401);
+    }
+  }
+  assert.equal((await other.call("GET", "/api/auth/me")).status, 200);
+  assert.equal((await device().call("GET", "/api/auth/me", undefined, { headers: { authorization: `Bearer ${otherDevice.cookie.slice(11)}` } })).status, 200);
+  assert.equal((await child.call("GET", "/api/auth/me")).status, 200);
+  assert.equal(database().prepare("SELECT count(*) AS n FROM sessions WHERE user_id = ?").get(database().prepare("SELECT id FROM users WHERE email = ?").get(form().email).id).n, 0);
+});
+
+test("logout-all requires parent auth and PIN unlock and clears a Secure cookie when called with bearer auth", async () => {
+  const now = Date.now();
+  const parent = device();
+  const account = await parent.call("POST", "/api/auth/register", form(), { now });
+  const link = await parent.call("POST", `/api/parent/children/${account.body.activeChild.id}/link`, {}, { now });
+  const child = device("child");
+  assert.equal((await child.call("POST", "/api/auth/link", { code: link.body.code }, { now })).status, 200);
+  assert.equal((await device("guest").call("POST", "/api/auth/logout-all", {}, { now })).status, 401);
+  assert.equal((await child.call("POST", "/api/auth/logout-all", {}, { now })).status, 403);
+  assert.equal((await parent.call("POST", "/api/parent/pin", { pin: "2468" }, { now })).status, 200);
+  const token = parent.cookie.slice(11);
+  const headers = { authorization: `Bearer ${token}` };
+  const lockedAt = now + 15 * MINUTE;
+  assert.equal((await device().call("POST", "/api/auth/logout-all", {}, { now: lockedAt, headers })).status, 403);
+  assert.equal((await parent.call("GET", "/api/auth/me", undefined, { now: lockedAt })).status, 200);
+  assert.equal((await parent.call("POST", "/api/parent/unlock", { pin: "2468" }, { now: lockedAt })).status, 200);
+  const result = await device().call("POST", "/api/auth/logout-all", {}, { now: lockedAt, headers, secure: true });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { ok: true });
+  assert.equal(result.headers["set-cookie"], "mq_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; Secure");
+  assert.equal((await parent.call("GET", "/api/auth/me", undefined, { now: lockedAt })).status, 401);
+  assert.equal((await device().call("GET", "/api/auth/me", undefined, { now: lockedAt, headers })).status, 401);
+  assert.equal((await child.call("GET", "/api/auth/me", undefined, { now: lockedAt })).status, 200);
+});
+
+test("auth/me advertises demo availability to authenticated parents, PIN-locked parents and paired children", async () => {
+  const parent = device();
+  const account = await parent.call("POST", "/api/auth/register", form());
+  const link = await parent.call("POST", `/api/parent/children/${account.body.activeChild.id}/link`, {});
+  const child = device("child");
+  assert.equal((await child.call("POST", "/api/auth/link", { code: link.body.code })).status, 200);
+  assert.equal((await parent.call("POST", "/api/parent/pin", { pin: "2468" })).status, 200);
+  const locked = device("locked-parent");
+  assert.equal((await locked.call("POST", "/api/auth/login", { email: form().email, password: form().password })).status, 200);
+  for (const mode of [undefined, "0", "true", "1"]) {
+    if (mode === undefined) delete process.env.MQ_DEMO; else process.env.MQ_DEMO = mode;
+    for (const browser of [parent, locked, child]) {
+      const result = await browser.call("GET", "/api/auth/me");
+      assert.equal(result.status, 200);
+      assert.equal(result.body.demo, mode === "1");
+    }
+  }
+});
+
+test("unauthenticated auth/me returns only error and demo for missing, invalid and expired sessions", async () => {
+  const now = Date.now();
+  const parent = device();
+  assert.equal((await parent.call("POST", "/api/auth/register", form(), { now })).status, 200);
+  const expiredCookie = parent.cookie;
+  for (const mode of [undefined, "0", "true", "1"]) {
+    if (mode === undefined) delete process.env.MQ_DEMO; else process.env.MQ_DEMO = mode;
+    for (const headers of [{}, { cookie: "mq_session=bad" }, { authorization: `Bearer ${"a".repeat(43)}` }, { cookie: expiredCookie }]) {
+      const result = await device().call("GET", "/api/auth/me", undefined, { headers, now: now + 30 * DAY });
+      assert.equal(result.status, 401);
+      assert.equal(typeof result.body.error, "string");
+      assert.deepEqual(result.body, { error: result.body.error, demo: mode === "1" });
+      assert.equal(result.headers["cache-control"], "no-store");
+      assert.equal(result.headers["set-cookie"], undefined);
+    }
+  }
+});
+
 test("parent sessions slide for 30 days, stop at 90 days and delete expired rows", async () => {
   const now = Date.now();
   const browser = device();
@@ -177,6 +270,49 @@ test("child link codes are single-use, expire at 15 minutes and create fixed 180
   assert.equal((await child.call("GET", "/api/state", undefined, { now: expiry })).status, 401);
   const expired = await parent.call("POST", `/api/parent/children/${id}/link`, {}, { now });
   assert.equal((await device().call("POST", "/api/auth/link", { code: expired.body.code }, { now: now + 15 * MINUTE })).status, 400);
+});
+
+test("link generation allows five attempts per child across parent sessions and resets after 15 minutes", async () => {
+  const now = Date.now();
+  const parent = device();
+  const account = await parent.call("POST", "/api/auth/register", form(), { now });
+  const id = account.body.activeChild.id;
+  const otherParent = device("other-parent");
+  assert.equal((await otherParent.call("POST", "/api/auth/login", { email: form().email, password: form().password }, { now })).status, 200);
+  const url = `/api/parent/children/${id}/link`;
+  for (let i = 0; i < 5; i++) {
+    const link = await (i % 2 ? otherParent : parent).call("POST", url, {}, { now });
+    assert.equal(link.status, 200);
+    if (i === 0) assert.equal((await device("child").call("POST", "/api/auth/link", { code: link.body.code }, { now })).status, 200);
+  }
+  const before = database().prepare("SELECT * FROM kid_links ORDER BY code").all();
+  for (const time of [now, now + 15 * MINUTE - 1]) {
+    const limited = await parent.call("POST", url, {}, { now: time });
+    assert.equal(limited.status, 429);
+    assert.equal(limited.body.error, "Let's take a little break. Try again soon!");
+    assert.deepEqual(database().prepare("SELECT * FROM kid_links ORDER BY code").all(), before);
+  }
+  const sibling = await parent.call("POST", "/api/parent/children", { name: "Sibling", age: 7, bearName: "Bear" }, { now });
+  assert.equal(sibling.status, 200);
+  assert.equal((await parent.call("POST", `/api/parent/children/${sibling.body.id}/link`, {}, { now })).status, 200);
+  assert.equal((await otherParent.call("POST", url, {}, { now: now + 15 * MINUTE })).status, 200);
+});
+
+test("new link generation purges expired and used rows across families while preserving active unused codes", async () => {
+  const now = Date.now();
+  const parent = device();
+  const account = await parent.call("POST", "/api/auth/register", form(), { now });
+  const other = await device("other-family").call("POST", "/api/auth/register", form("other@example.test"), { now });
+  assert.equal(account.status, 200);
+  assert.equal(other.status, 200);
+  const insert = database().prepare("INSERT INTO kid_links (code, family_id, child_id, expires_at, used_at) VALUES (?, ?, ?, ?, ?)");
+  insert.run("expired-before", account.body.family.id, account.body.activeChild.id, now - 1, null);
+  insert.run("expired-boundary", other.body.family.id, other.body.activeChild.id, now, null);
+  insert.run("used", other.body.family.id, other.body.activeChild.id, now + MINUTE, now - 1);
+  insert.run("active", other.body.family.id, other.body.activeChild.id, now + MINUTE, null);
+  const link = await parent.call("POST", `/api/parent/children/${account.body.activeChild.id}/link`, {}, { now });
+  assert.equal(link.status, 200);
+  assert.deepEqual(database().prepare("SELECT code FROM kid_links").all().map((r) => r.code).sort(), ["active", link.body.code].sort());
 });
 
 test("PIN set and unlock require parent credentials; hashes, expiry and per-session lockout survive database state", async () => {

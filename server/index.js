@@ -152,6 +152,11 @@ register("POST", "/api/auth/logout", "session", (req, ctx, res, now) => {
   res.set("Set-Cookie", auth.cookieHeader(req, ctx.session, null, now));
   return { ok: true };
 });
+register("POST", "/api/auth/logout-all", "parent", (req, ctx, res, now) => {
+  auth.logoutAll(ctx.session);
+  res.set("Set-Cookie", auth.cookieHeader(req, ctx.session, null, now));
+  return { ok: true };
+});
 register("GET", "/api/auth/me", "session", (req, ctx) => auth.me(ctx));
 register("POST", "/api/demo/login", "public", (req, ctx, res, now) => signedIn(req, res, auth.demoLogin(options(req, now)), now));
 register("POST", "/api/parent/pin", "parent", (req, ctx, res, now) => auth.setPin(ctx, req.body, now));
@@ -312,7 +317,11 @@ export async function dispatch(method, pathname, req, res, now = Date.now()) {
     }
     throw new GameError("Not found", 404);
   } catch (e) {
-    if (e instanceof GameError) return res.status(e.status).json({ error: e.message });
+    if (e instanceof GameError) {
+      const body = { error: e.message };
+      if (method === "GET" && pathname === "/api/auth/me" && e.status === 401) body.demo = process.env.MQ_DEMO === "1";
+      return res.status(e.status).json(body);
+    }
     console.error(e);
     res.status(500).json({ error: "Something went wrong" });
   }

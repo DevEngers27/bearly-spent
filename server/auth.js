@@ -144,6 +144,7 @@ export function me(context) {
   const { family, session, role, childId } = context;
   const children = listChildren(family.id).filter((c) => role === "parent" || c.id === childId);
   return {
+    demo: process.env.MQ_DEMO === "1",
     family: { id: family.id, name: family.name, timezone: family.timezone, pinSet: Boolean(family.parentPin) },
     role, children, activeChild: children.find((c) => c.id === childId) || null,
     unlockedUntil: session.unlocked_until,
@@ -154,17 +155,25 @@ export function logout(session) {
   database().prepare("DELETE FROM sessions WHERE token_hash = ?").run(session.token_hash);
 }
 
+export function logoutAll(session) {
+  database().prepare("DELETE FROM sessions WHERE user_id = ?").run(session.user_id);
+}
+
 export function createLink(context, childId, now = Date.now()) {
   const row = childRecord(childId);
   if (!row || row.family_id !== context.family.id) throw new GameError("Child not found", 404);
-  const alphabet = "BCDFGHJKMNPQRTVWXY346789";
-  for (let i = 0; i < 10; i++) {
-    const code = Array.from({ length: 6 }, () => alphabet[crypto.randomInt(alphabet.length)]).join("");
-    const result = database().prepare("INSERT OR IGNORE INTO kid_links (code, family_id, child_id, expires_at) VALUES (?, ?, ?, ?)")
-      .run(code, context.family.id, childId, now + 15 * MINUTE);
-    if (result.changes) return { code, expiresAt: now + 15 * MINUTE };
-  }
-  throw new GameError("Try making a new code in a moment", 429);
+  takeLimit("kidLink", childId, now);
+  return transaction((db) => {
+    db.prepare("DELETE FROM kid_links WHERE expires_at <= ? OR used_at IS NOT NULL").run(now);
+    const alphabet = "BCDFGHJKMNPQRTVWXY346789";
+    for (let i = 0; i < 10; i++) {
+      const code = Array.from({ length: 6 }, () => alphabet[crypto.randomInt(alphabet.length)]).join("");
+      const result = db.prepare("INSERT OR IGNORE INTO kid_links (code, family_id, child_id, expires_at) VALUES (?, ?, ?, ?)")
+        .run(code, context.family.id, childId, now + 15 * MINUTE);
+      if (result.changes) return { code, expiresAt: now + 15 * MINUTE };
+    }
+    throw new GameError("Try making a new code in a moment", 429);
+  });
 }
 
 export function redeemLink(body, { ua, ip = "unknown", now = Date.now() } = {}) {
