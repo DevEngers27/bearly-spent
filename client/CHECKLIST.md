@@ -175,7 +175,7 @@ walker and excludes the real trail. No server behavior changed.
 
 Browser/device checks below remain pending; no listening server was started.
 
-- [ ] At 360/390px and desktop widths, send the bear on a surprise trip. It follows the same closed mystery loop for every destination, with a small ? cloud, sparkle tail and correct facing. Destination pin names/thumbnails are generic while away; normal names return afterward. Tap/keyboard pin exploration remains read-only.
+- [ ] At 360/390px and desktop widths, send the bear on a surprise trip. It follows the same closed mystery loop for every destination, with a small ? cloud, sparkle tail and correct facing. Destination pins remain normally labelled while away without indicating the target. Tap/keyboard pin exploration remains read-only.
 - [ ] Reload halfway through a trip: the bear stays at the same real-time position. Let the timer reach zero before the server return arrives: the bear waits at Home. Drag/touch-scroll the map and confirm auto-scroll waits until the interaction has ended for two seconds.
 - [ ] Complete Add to album, then open Map. The revealed trail marches while the bear walks from the destination to Home over about 2.5 seconds. The destination pulses “New postcard!” briefly, then only a faint dotted latest-trip trail remains. Polling, reopening Map and reloading never replay it; leaving halfway through consumes it too. Repeat with a new trip and a sibling.
 - [ ] With an unseen returned postcard, no real trip trail appears before the reveal receipt. Try both a local offline receipt and a server-revealed return from another device. A newer unseen return must not show an older seen trip as the latest trail.
