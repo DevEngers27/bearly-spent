@@ -90,22 +90,11 @@ test("allowance accepts boundaries and valid partial updates", () => {
   assert.equal(db.allowance.rewardDestination, "savings");
 });
 
-test("savings-goal target NaN returns 400 without changing the title", () => {
+test("deprecated savings-goal action returns 410 without changing state", () => {
   const db = fresh();
-  rejectsUnchanged(db, () => actions.savingsGoal(db, { title: "New goal", target: "NaN" }));
-});
-
-test("savings-goal validates title and target limits and supports partial edits", () => {
-  const db = fresh();
-  for (const body of [{ title: {} }, { title: "" }, { title: "a".repeat(121) }, { target: 0 }, { target: 0.99 }, { target: 10000.01 }, { target: null }]) {
-    rejectsUnchanged(db, () => actions.savingsGoal(db, body));
-  }
-  actions.savingsGoal(db, { title: " Bicycle ", target: "10000" });
-  assert.equal(db.savingsGoals[0].title, "Bicycle");
-  assert.equal(db.savingsGoals[0].target, 1000000);
-  actions.savingsGoal(db, { target: 1 });
-  assert.equal(db.savingsGoals[0].title, "Bicycle");
-  assert.equal(db.savingsGoals[0].target, 100);
+  const before = structuredClone(db);
+  assert.throws(() => actions.savingsGoal(db, { title: "Bicycle", target: 100 }), { status: 410 });
+  assert.deepEqual(db, before);
 });
 
 test("journal -100 returns 400 without awarding points or recording an entry", () => {

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { database, transaction } from "./db.js";
-import { GameError, dueAdventures } from "./domain.js";
+import { GameError, dueAdventures, normalizeGoals } from "./domain.js";
 import { hasDueWork } from "./guardian.js";
 import { str, integer, object } from "./validate.js";
 
@@ -24,6 +24,7 @@ export function seed(now = Date.now()) {
     version: 1,
     family: { parentName: "Jordan" },
     child: {
+      currentGoalId: "goal_bike",
       name: "Mia",
       age: 9,
       points: 40,
@@ -41,7 +42,7 @@ export function seed(now = Date.now()) {
       wallet: { id: "acct_wallet", label: "Apple Cash", balance: 0 },
     },
     savingsGoals: [
-      { id: "goal_bike", title: "New bicycle", icon: "bike", target: 10000, createdAt: now - 10 * DAY },
+      { id: "goal_bike", title: "New bicycle", icon: "bike", status: "active", activeFlag: true, target: 10000, createdAt: now - 10 * DAY },
     ],
     transactions: [
       {
@@ -108,6 +109,7 @@ export function seed(now = Date.now()) {
 // Older saves used the first bear's slots (backpack color, hat, accessory).
 // Map them onto the illustrated wardrobe so existing progress keeps working.
 export function migrate(d) {
+  if (d.child) normalizeGoals(d);
   if (d.accounts && !d.accounts.wallet) d.accounts.wallet = { id: uid("acct"), label: "Apple Cash", balance: 0 };
   const HATS = { beanie: "knit_beanie", ranger: "ranger_hat", flowers: "flower_crown" };
   const fix = (b) => {

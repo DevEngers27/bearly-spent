@@ -68,6 +68,7 @@ function placesView(db, now = Date.now()) {
 }
 
 export function childView(db, now = Date.now()) {
+  game.normalizeGoals(db);
   const day = dayKey(now, db.settings.timezone);
   const week = weekKey(now, db.settings.timezone);
   return {
@@ -80,7 +81,8 @@ export function childView(db, now = Date.now()) {
     child: db.child,
     balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance, wallet: db.accounts.wallet.balance },
     walletLastTransaction: db.transactions.findLast((t) => ["wallet_in", "wallet_spend"].includes(t.kind)) || null,
-    goals: db.savingsGoals.map((g) => ({ ...g, weeksLeft: game.weeksToGoal(db, g) })),
+    currentGoalId: db.child.currentGoalId,
+    goals: db.savingsGoals.map((g) => ({ ...g, current: g.id === db.child.currentGoalId, weeksLeft: game.weeksToGoal(db, g) })),
     allowance: { amount: db.allowance.amount, savePct: db.allowance.savePct, nextRun: db.allowance.nextRun, spendLimit: db.allowance.spendLimit },
     parentGoals: db.parentGoals,
     missions: db.missions,
@@ -91,7 +93,7 @@ export function childView(db, now = Date.now()) {
     metrics: { postcards: game.postcardMetrics(db) },
     friends: db.friends.filter((f) => f.status !== "declined").map(game.friendView),
     trades: db.trades.slice(-10).reverse(),
-    pendingRequests: db.approvals.filter((a) => a.status === "pending" && ["spend", "extra", "reward", "task", "friend", "trade"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.title })),
+    pendingRequests: db.approvals.filter((a) => (a.status === "pending" || (a.kind === "goal_purchase" && a.status === "approved" && !a.paidTxnId)) && ["spend", "extra", "reward", "task", "friend", "trade", "goal_purchase"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.title, ...(a.goalId ? { goalId: a.goalId } : {}) })),
     plan: db.buddy.plan,
     chat: db.buddy.chat.slice(-30),
     settings: db.settings,
@@ -237,6 +239,15 @@ const childActions = {
 for (const [path, action] of Object.entries(childActions)) {
   register("POST", `/api/child/${path}`, "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now));
 }
+for (const role of ["child", "parent"]) {
+  register("POST", `/api/${role}/goals`, role, (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.goalSave(db, req.body, null, role), "savings_goal_created", now));
+  register("POST", `/api/${role}/goals/:id`, role, (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.goalSave(db, req.body, req.params.id, role), "savings_goal_edited", now));
+  for (const [suffix, action] of [["current", "goalCurrent"], ["archive", "goalArchive"]]) {
+    register("POST", `/api/${role}/goals/:id/${suffix}`, role, (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.params.id, role), action, now));
+  }
+}
+register("DELETE", "/api/parent/goals/:id", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.goalDelete(db, req.params.id), "savings_goal_deleted", now));
+register("POST", "/api/child/goals/:id/purchase", "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.goalPurchase(db, req.params.id), "goal_purchase", now));
 // Surprise destinations stay private in action responses as well as state.
 for (const action of ["trip", "adventure"]) {
   register("POST", `/api/child/${action}`, "child", (req, ctx, res, now) => {
