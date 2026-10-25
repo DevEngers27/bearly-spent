@@ -184,10 +184,18 @@ test("H4.4 locked clothes require Buy; cancel, insufficient points and failed pu
   state.catalog.cosmetics = [{ id: "flower", kind: "hat", value: "flower", label: "Flower crown", cost: 40, unlocked: false }];
   let success = false;
   const render = () => h.render(h.exports.DressSheet, { state, run: async (...args) => { calls.push(args); return success ? {} : null; }, close: noop });
+  const crown = () => nodes(render(), (n) => n.type === "button" && /\bswatch\b/.test(n.props.className || "") && /\blocked\b/.test(n.props.className))[0];
+  assert.doesNotMatch(crown().props.className, /\bpending\b/); assert.equal(crown().props["aria-pressed"], false);
   byText(render(), "Flower crown").props.onClick();
   assert.equal(calls.length, 0);
   assert.match(normalized(render()), /Spend 40 points on the Flower crown\s*\? You have 500/);
+  assert.match(crown().props.className, /\bpending\b/); assert.equal(crown().props["aria-pressed"], true);
+  assert.match(normalized(render()), /Flower crown\s*Buy this\?/); assert.doesNotMatch(normalized(render()), /Flower crown\s*40/);
   byText(render(), "Not now").props.onClick(); assert.equal(byText(render(), "Buy"), undefined);
+  assert.doesNotMatch(crown().props.className, /\bpending\b/); assert.match(normalized(render()), /Flower crown\s*40/);
+  byText(render(), "Flower crown").props.onClick(); assert.ok(byText(render(), "Buy"));
+  byText(render(), "Flower crown").props.onClick(); assert.equal(byText(render(), "Buy"), undefined, "tapping the lit card again cancels");
+  assert.doesNotMatch(crown().props.className, /\bpending\b/);
   byText(render(), "Flower crown").props.onClick();
   state.child.points = 10; assert.equal(byText(render(), "Earn 30 more points").props.disabled, true);
   state.child.points = 500;
