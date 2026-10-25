@@ -11,6 +11,19 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.0] — 2026-10-25
+
+### Changed
+- A brand-new wardrobe. Twenty-six pieces (six hats, two pairs of glasses,
+  four neckwear, six outfits, a camera and a purse, four things to hold, two
+  little friends) are cut from one illustration so every piece shares the
+  bear's canvas and lines up exactly, however many are worn at once. Things
+  held with both paws (map, magnifying glass, leaf, mug) swap in the whole
+  bear and set outfits aside until put down. The old pieces are retired and
+  every child's wardrobe starts fresh; milestone rewards come back
+  automatically for milestones already reached. 339 server tests and
+  205 client tests.
+
 ## [0.7.2] — 2026-10-25
 
 ### Added
