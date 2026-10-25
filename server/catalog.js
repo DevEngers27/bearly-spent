@@ -184,7 +184,7 @@ export const LESSONS = [
   },
 ];
 
-// Wardrobe slots for the bear (art in client/public/bear/items).
+// Wardrobe slots for the bear (art in client/public/bear/w2/items).
 export const SLOTS = ["hat", "eyes", "neck", "outfit", "bag", "held", "friend", "background"];
 const c = (kind, value, label, cost, milestone) => ({ id: `${kind}:${value}`, kind, value, label, cost, ...(milestone ? { milestone } : {}) });
 export const COSMETICS = [

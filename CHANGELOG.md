@@ -11,6 +11,14 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.1] — 2026-10-25
+
+### Fixed
+- Phones that still had the old wardrobe in their offline cache showed the old
+  bear under the new clothes. The new art now lives under its own path
+  (`/bear/w2/…`), so an old cache can never serve it, and a new build reloads
+  the app by itself unless the kid is typing.
+
 ## [0.8.0] — 2026-10-25
 
 ### Changed

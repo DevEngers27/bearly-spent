@@ -80,7 +80,13 @@ export default function App() {
         if (version === authVersion.current && err.status !== 401) toast(err.message, "error");
       } finally { resettingChild.current = false; }
     };
-    const onUpdate = () => { if (hadControllerAtLoad) setUpdated(true); };
+    // A new build may ship new art under new paths; reload right away unless the kid is typing.
+    const onUpdate = () => {
+      if (!hadControllerAtLoad) return;
+      const typing = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
+      if (typing || typeof location.reload !== "function") setUpdated(true);
+      else setTimeout(() => location.reload(), 600);
+    };
     window.addEventListener("mq:unauthorized", unauthorized);
     window.addEventListener("mq:locked", locked);
     window.addEventListener("mq:rate-limit", limited);
@@ -210,7 +216,7 @@ export default function App() {
       <a className="skip" href="#main">Skip to content</a>
       {me?.role === "parent" && view === "parent" && (
         <header className="appbar">
-          <div className="brand"><img className="brand-mark" src="/bear/poses/bear_front.png" alt="" /><span>MoneyQuest</span><span className="brand-sub">for grown-ups</span><strong className="parent-account-label">{me.activeChild.name}'s account</strong></div>
+          <div className="brand"><img className="brand-mark" src="/bear/w2/poses/bear_front.png" alt="" /><span>MoneyQuest</span><span className="brand-sub">for grown-ups</span><strong className="parent-account-label">{me.activeChild.name}'s account</strong></div>
           <label className={`child-switcher${me.children.length === 1 ? " only-child" : ""}`}><span>Child</span><select aria-label="Child" value={me.activeChild.id} onChange={(e) => selectChild(e.target.value)}>{me.children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}</select></label>
           {parentOffline && <span className="offline-pill" role="status">Offline</span>}
           <div className="appbar-actions">
@@ -234,7 +240,7 @@ export default function App() {
 }
 
 function Loading({ error, onRetry, onGrownUps }) {
-  return <div className="loading"><img className="loading-bear" src="/bear/poses/bear_front.png" alt="" />{error ? <>
+  return <div className="loading"><img className="loading-bear" src="/bear/w2/poses/bear_front.png" alt="" />{error ? <>
     <p role="alert">Can't reach MoneyQuest right now. Check your connection and try again.</p>
     <button className="btn honey" onClick={onRetry || (() => location.reload())}>Try again</button>
     {onGrownUps && <button className="btn" onClick={onGrownUps}>Back to grown-ups</button>}
@@ -292,7 +298,7 @@ function AuthScreen({ screen, navigate, demo, onSession, error }) {
   return (
     <main className="pin-page auth-page" id="main">
       <section className="pin-card auth-card">
-        <img className="auth-bear" src="/bear/poses/bear_front.png" alt="" />
+        <img className="auth-bear" src="/bear/w2/poses/bear_front.png" alt="" />
         <h1>{screen === "welcome" ? "Welcome to MoneyQuest" : screen === "create" ? "Create your family" : screen === "link" ? "Your adventure starts here" : "Welcome back"}</h1>
         {screen === "welcome" ? <>
           <p>Save a little. Learn a lot. Grow together.</p>

@@ -9,10 +9,10 @@ const s = { stroke: INK, strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoi
 
 // Illustrated assets from the bear pack, used where a picture reads better.
 const ART = {
-  magnifier: "/bear/thumbs/magnifying_glass.png",
-  map: "/bear/thumbs/map.png",
-  bear: "/bear/poses/bear_front.png",
-  bee: "/bear/thumbs/bee_friend.png",
+  magnifier: "/bear/w2/thumbs/magnifying_glass.png",
+  map: "/bear/w2/thumbs/map.png",
+  bear: "/bear/w2/poses/bear_front.png",
+  bee: "/bear/w2/thumbs/bee_friend.png",
 };
 
 const PATHS = {

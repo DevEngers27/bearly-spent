@@ -358,7 +358,7 @@ test("C1 / C3: static cache excludes failures and API; snapshot art warms withou
   assert.equal(await w.request("/api/state"), undefined);
   assert.equal(await w.request("/postcards/chicago.png", "cors", "POST"), undefined);
   w.fetch = async () => new Response("postcard");
-  await w.trigger("message", { data: { type: "mq:cache-art", images: ["/postcards/chicago.png", "/bear/poses/bear_front.png", "/api/state", "https://other.test/postcards/test.png"] } });
+  await w.trigger("message", { data: { type: "mq:cache-art", images: ["/postcards/chicago.png", "/bear/w2/poses/bear_front.png", "/api/state", "https://other.test/postcards/test.png"] } });
   assert.equal(w.entries.size, 2);
   w.fetch = async () => { throw new Error("Offline"); };
   assert.equal(await (await w.request("/postcards/chicago.png")).text(), "postcard");
@@ -437,10 +437,19 @@ test("C6 / C16 / C3: App returns to Welcome on unauthorized; controllerchange of
   assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen")[0].props.screen, "welcome");
   let reloads = 0;
   h.location.reload = () => reloads++;
+  // Nobody is typing: a new build reloads by itself (new art may live under new paths).
+  h.navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
+  tree = h.render(h.exports.default); h.flush();
+  assert.equal(byText(tree, "Updated! Tap to reload"), undefined);
+  const scheduled = h.timeouts.filter(Boolean); assert.equal(scheduled.length >= 1, true);
+  scheduled.at(-1)(); assert.equal(reloads, 1);
+  // While the kid is typing, the update waits behind an explicit button.
+  h.document.activeElement = { tagName: "INPUT" };
   h.navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
   tree = h.render(h.exports.default); h.flush();
   byText(tree, "Updated! Tap to reload").props.onClick();
-  assert.equal(reloads, 1);
+  assert.equal(reloads, 2);
+  h.document.activeElement = null;
   const loading = h.render(h.exports.Loading, { error: new Error("Failed to fetch") });
   assert.match(text(loading), /Can't reach MoneyQuest right now\. Check your connection and try again\./);
   assert.ok(byText(loading, "Try again"));

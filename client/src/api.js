@@ -101,8 +101,8 @@ export async function api(path, body, options) {
     try { localStorage.setItem("mq_last_state", JSON.stringify(data)); } catch {}
     if (import.meta.env.PROD && "serviceWorker" in navigator) {
       const images = [...Object.values(data.catalog.places).map((p) => p.image),
-        ...data.catalog.cosmetics.flatMap((c) => c.kind === "background" ? [] : [`/bear/items/${c.value}.png`, `/bear/thumbs/${c.value}.png`]),
-        ...["front", "side", "back", "three_quarter"].map((pose) => `/bear/poses/bear_${pose}.png`)].filter(Boolean);
+        ...data.catalog.cosmetics.flatMap((c) => c.kind === "background" ? [] : [`/bear/w2/items/${c.value}.png`, `/bear/w2/thumbs/${c.value}.png`]),
+        "/bear/w2/poses/bear_front.png", ...["side", "back", "three_quarter"].map((pose) => `/bear/poses/bear_${pose}.png`)].filter(Boolean);
       navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage({ type: "mq:cache-art", images })).catch(() => {});
     }
   }
