@@ -171,7 +171,7 @@ function SheetRouter({ sheet, ...ctx }) {
   const { state, close } = ctx;
   switch (sheet.type) {
     case "chat": return <Sheet title="Our chat" onClose={close} tall><Buddy {...ctx} transcriptOnly /></Sheet>;
-    case "money": return <MoneySheet {...ctx} start={sheet.start} />;
+    case "money": return <MoneySheet {...ctx} start={sheet.start} startWallet={sheet.wallet} />;
     case "dress": return <DressSheet {...ctx} />;
     case "lesson": return <LessonSheet {...ctx} lesson={sheet.lesson} />;
     case "budget": return <BudgetSheet {...ctx} />;
@@ -274,6 +274,10 @@ function Home({ state, setTab, open, run, busy, talk }) {
         <button className="chip" onClick={() => talk?.open()}>Talk to {state.child.bear.name}</button>
         <button className="chip" onClick={() => open("dress")}><Icon name="hat" size={18} /> Dress up</button>
       </div>
+      <button className="wallet-pill" onClick={() => open("money", { start: "spend", wallet: true })}>
+        <strong>Apple Cash · {money(state.balances.wallet ?? 0)}</strong>
+        <small>{state.walletLastTransaction ? `${state.walletLastTransaction.memo} · ${money(state.walletLastTransaction.amount)} · ${formatTime(state.walletLastTransaction.ts)}` : "No Apple Cash activity yet"}</small>
+      </button>
       <button className="btn honey wide trip-launch" disabled={busy || Boolean(away) || short > 0} onClick={() => run("child/trip", {}, `${state.child.bear.name} packed a little bag!`)}>
         {away ? "On a trip" : short > 0 ? `Earn ${short} more points` : <>Send {state.child.bear.name} on a trip · <Icon name="sparkle" size={19} art={false} />{tripCost}</>}
       </button>
@@ -350,17 +354,18 @@ function Jar({ pct }) {
 }
 
 // ------------------------------------------------------------------ money sheet
-function MoneySheet({ state, run, close, start, busy }) {
+function MoneySheet({ state, run, close, start, startWallet = false, busy }) {
   const [mode, setMode] = useState(start || "save");
   const [amount, setAmount] = useState(mode === "save" ? "2" : "");
   const [memo, setMemo] = useState("");
   const [direction, setDirection] = useState("received");
+  const [appleCash, setAppleCash] = useState(startWallet);
   const submit = async (e) => {
     e.preventDefault();
     const a = Number(amount);
     let r;
     if (mode === "save") r = await run("child/save", { amount: a }, `Saved ${money(Math.round(a * 100))}! ${state.child.bear.name} grew a little.`);
-    if (mode === "spend") r = await run("child/spend", { amount: a, memo }, (x) => (x.held ? "That's a big buy. We asked your grown-up first." : "Recorded. Nice tracking!"));
+    if (mode === "spend") r = await run(appleCash ? "child/wallet/spend" : "child/spend", appleCash ? { amount: a, merchant: memo } : { amount: a, memo }, (x) => (x.held ? "That's a big buy. We asked your grown-up first." : "Recorded. Nice tracking!"));
     if (mode === "log") r = await run("child/journal", { direction, amount: a || 0, note: memo }, "Added to your money diary.");
     if (mode === "ask") r = await run("child/extra", { amount: a, reason: memo }, "Sent to your grown-up!");
     if (r) { setMemo(""); if (mode !== "save") close(); }
@@ -371,6 +376,7 @@ function MoneySheet({ state, run, close, start, busy }) {
       <div className="money-pots">
         <div className="pot honey"><span>Savings</span><b>{money(state.balances.savings)}</b></div>
         <div className="pot sage"><span>Spending</span><b>{money(state.balances.spending)}</b></div>
+        <div className="pot wallet-pot"><span>Apple Cash</span><b>{money(state.balances.wallet ?? 0)}</b></div>
       </div>
       <div className="segmented" role="tablist">
         {modes.map(([id, label]) => (
@@ -378,6 +384,7 @@ function MoneySheet({ state, run, close, start, busy }) {
         ))}
       </div>
       <form className="form" onSubmit={submit}>
+        {mode === "spend" && <label className="toggle"><input type="checkbox" checked={appleCash} disabled={busy} onChange={(e) => setAppleCash(e.target.checked)} /> Paid with Apple Cash</label>}
         {mode === "log" && (
           <label>What happened?
             <select value={direction} onChange={(e) => setDirection(e.target.value)}>
@@ -388,7 +395,7 @@ function MoneySheet({ state, run, close, start, busy }) {
           </label>
         )}
         <label htmlFor="money-amount">How much?</label>
-        <div className="money-input"><span>$</span><input id="money-amount" type="number" min="0" step="0.25" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required={mode !== "log"} /></div>
+        <div className="money-input"><span>$</span><input id="money-amount" type="number" min="0" step={mode === "spend" && appleCash ? "0.01" : "0.25"} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required={mode !== "log"} /></div>
         {mode === "save" && (
           <div className="chips">{[1, 2, 5].map((v) => <button type="button" key={v} className="chip" onClick={() => setAmount(String(v))}>{moneyShort(v * 100)}</button>)}</div>
         )}
@@ -400,7 +407,7 @@ function MoneySheet({ state, run, close, start, busy }) {
         )}
         <p className="fine">
           {mode === "save" && `Moves money from spending (${money(state.balances.spending)}) into savings.`}
-          {mode === "spend" && `Buys over ${moneyShort(state.allowance.spendLimit)} need your grown-up's OK first.`}
+          {mode === "spend" && (appleCash ? "Already paid? Log it here only if your Shortcut hasn't recorded it." : `Buys over ${moneyShort(state.allowance.spendLimit)} need your grown-up's OK first.`)}
           {mode === "log" && "For cash that isn't in the app. It goes in your diary."}
           {mode === "ask" && "Your grown-up decides. Maple can't move money."}
         </p>
@@ -410,7 +417,7 @@ function MoneySheet({ state, run, close, start, busy }) {
       <ul className="ledger">
         {state.transactions.slice(0, 8).map((t) => (
           <li key={t.id} className={t.status !== "posted" ? "reversed" : ""} aria-label={t.status === "reversed" ? `${t.memo}, ${money(t.amount)}, reversed` : undefined}>
-            <span>{t.memo}{t.status === "reversed" && <small className="reversed-tag">reversed</small>}</span>
+            <span>{t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.status === "reversed" && <small className="reversed-tag">reversed</small>}</span>
             <b className={t.to === "merchant" ? "minus" : t.from === "spending" ? "" : "plus"}>{t.to === "merchant" ? "−" : t.from === "spending" ? "→ " : "+"}{money(t.amount)}</b>
           </li>
         ))}

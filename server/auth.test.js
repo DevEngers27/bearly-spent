@@ -74,7 +74,7 @@ test("register normalizes email, hashes credentials, sets a private cookie and c
   assert.equal(session.token_hash, tokenHash(browser.cookie.slice(11)));
   assert.ok(!JSON.stringify(session).includes(browser.cookie.slice(11)));
   const d = readChild(result.body.activeChild.id);
-  assert.deepEqual(Object.values(d.accounts).map((a) => a.balance), [0, 0, 0]);
+  assert.deepEqual(Object.values(d.accounts).map((a) => a.balance), [0, 0, 0, 0]);
   for (const key of ["postcards", "adventures", "transactions", "friends", "approvals"]) assert.deepEqual(d[key], []);
   assert.equal(d.child.points, 0);
   assert.equal(d.child.bear.name, "Pip");

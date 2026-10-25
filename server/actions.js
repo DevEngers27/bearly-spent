@@ -18,10 +18,18 @@ function clearFundingEscalations(db) {
 }
 
 export const actions = {
+  walletPing: action(() => ({ ok: true })),
   save: action((db, body) => game.childSave(db, money(body.amount, { min: 100 }))),
   spend: action((db, body) => game.childSpend(db, {
     amount: money(body.amount, { min: 1 }), memo: str(body.memo),
   }, spendPolicy)),
+  walletSpend: action((db, body) => game.childWalletSpend(db, {
+    amount: money(body.amount, { min: 1 }), merchant: str(body.merchant),
+    at: body.at, external_id: body.external_id,
+  }, spendPolicy)),
+  walletSend: action((db, body) => game.parentWalletSend(db, {
+    amount: money(body.amount, { min: 1 }), note: optionalNote(body),
+  })),
   extra: action((db, body) => game.requestExtraAllowance(db, {
     amount: money(body.amount, { min: 100, max: 5000 }), reason: str(body.reason),
   })),

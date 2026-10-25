@@ -11,7 +11,7 @@ import * as catalog from "../server/catalog.js";
 import { childView } from "../server/index.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
-  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog, Devices", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
+  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog, Devices, WalletLedger, AppleCashTracking", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
   const result = await build({
     stdin: { contents: await readFile(new URL(`src/${name}`, import.meta.url), "utf8") + (extra ? `\nexport { ${extra} };` : ""), resolveDir: new URL("src/", import.meta.url).pathname, loader: "jsx" },
     bundle: true, write: false, format: "cjs", external: ["react"], jsxFactory: "h", jsxFragment: "Fragment", define: { "import.meta.env.PROD": "false" },
@@ -1921,4 +1921,114 @@ test("W2.7: explicit lock avoids a protected-state refresh and late locked error
   h.tree();
   h.window.dispatchEvent(new Event("mq:locked"));
   assert.equal(nodes(h.tree(), (n) => n.type?.name === "PinGate").length, 0);
+});
+
+test("F2: child Home shows Apple Cash balance and last transaction, and Recent tags wallet entries", () => {
+  const state = stateFixture();
+  state.balances.wallet = -225;
+  state.walletLastTransaction = { id: "wallet", memo: "Corner shop", amount: 425, ts: Date.now(), kind: "wallet_spend", status: "posted", to: "merchant" };
+  state.transactions.unshift(state.walletLastTransaction);
+  const h = harness("Child.jsx");
+  let opened;
+  const tree = h.render(h.exports.Home, { state, open: (...args) => { opened = args; } });
+  const pill = nodes(tree, (n) => n.props.className === "wallet-pill")[0];
+  assert.match(text(pill), /Apple Cash.*-\$2.25.*Corner shop.*\$4.25/);
+  pill.props.onClick();
+  assert.equal(JSON.stringify(opened), JSON.stringify(["money", { start: "spend", wallet: true }]));
+  const sheet = harness("Child.jsx");
+  assert.equal(nodes(sheet.render(sheet.exports.MoneySheet, { state }), (n) => n.props.className === "wallet-tag").length, 1);
+});
+
+test("F2: Paid with Apple Cash routes manual spending to the wallet and keeps ordinary spending intact", async () => {
+  for (const appleCash of [false, true]) {
+    const h = harness("Child.jsx"), calls = [];
+    const props = { state: stateFixture(), start: "spend", close: noop, run: async (...args) => { calls.push(args); return {}; } };
+    const render = () => h.render(h.exports.MoneySheet, props);
+    nodes(render(), (n) => n.type === "input" && n.props.id === "money-amount")[0].props.onChange({ target: { value: "4.25" } });
+    changeField(render(), "What did you buy?", "Corner shop");
+    if (appleCash) nodes(render(), (n) => n.type === "input" && n.props.type === "checkbox")[0].props.onChange({ target: { checked: true } });
+    assert.equal(nodes(render(), (n) => n.type === "input" && n.props.id === "money-amount")[0].props.step, appleCash ? "0.01" : "0.25");
+    await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+    assert.equal(calls[0][0], appleCash ? "child/wallet/spend" : "child/spend");
+    assert.equal(JSON.stringify(calls[0][1]), JSON.stringify(appleCash ? { amount: 4.25, merchant: "Corner shop" } : { amount: 4.25, memo: "Corner shop" }));
+    if (appleCash) assert.match(text(render()), /only if your Shortcut hasn't recorded it/);
+  }
+});
+
+test("F2: parent wallet ledger records sent money and distinguishes uncovered historical spending", async () => {
+  const h = harness("Parent.jsx"), calls = [];
+  const state = stateFixture();
+  state.accounts.wallet.balance = -425;
+  state.walletTransactions = [{ id: "wallet", ts: Date.now(), kind: "wallet_spend", amount: 425, memo: "Corner shop", uncovered: true }];
+  const props = { state, run: async (...args) => { calls.push(args); return {}; } };
+  const render = () => h.render(h.exports.WalletLedger, props);
+  changeField(render(), "Amount sent ($)", "10");
+  changeField(render(), "Note", "Lunch money");
+  assert.match(text(render()), /Mia.*Apple Cash.*-\$4.25.*does not send money.*Uncovered/);
+  assert.match(text(render()), /own pocket.*does not change the funding record/);
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.equal(calls[0][0], "parent/wallet/send");
+  assert.equal(calls[0][2], "Apple Cash transfer recorded — this does not change the funding record");
+  assert.equal(JSON.stringify(calls[0][1]), JSON.stringify({ amount: "10", note: "Lunch money" }));
+  assert.equal(nodes(render(), (n) => n.type === "input")[0].props.value, "");
+  const activity = harness("Parent.jsx");
+  state.transactions = state.walletTransactions.map((t) => ({ ...t, from: "wallet", to: "merchant", status: "posted" }));
+  assert.match(text(activity.render(activity.exports.Activity, { state })), /Apple Cash.*Store.*uncovered/);
+});
+
+test("F2: Shortcut setup gates token creation on a PIN, scopes rotation and tests Bearer without parent cookies", async () => {
+  const h = harness("Parent.jsx"), calls = [], copies = [];
+  let unauthorized = 0;
+  h.window.addEventListener("mq:unauthorized", () => unauthorized++);
+  h.navigator.clipboard = { writeText: async (token) => copies.push(token) };
+  const props = { childId: "child-two", pinSet: true };
+  const render = () => h.render(h.exports.AppleCashTracking, props);
+  const token = "a".repeat(43);
+  h.fetch = async (url, options) => {
+    calls.push([url, options]);
+    if (url.includes("/ping")) return new Response('{"ok":true,"childId":"child-two"}');
+    return new Response(JSON.stringify({ token: options.method === "POST" ? token : null, id: options.method === "POST" ? "device" : null, expiresAt: options.method === "POST" ? h.now + 180 * 86400000 : null }));
+  };
+  render(); h.flush(); await new Promise(setImmediate);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "/api/child/wallet/token?child=child-two");
+  assert.equal(calls[0][1].method, "GET");
+  await byText(render(), "Generate Shortcut token").props.onClick();
+  assert.equal(calls[1][1].method, "POST");
+  assert.equal(nodes(render(), (n) => n.type === "input" && n.props.readOnly)[0].props.value, token);
+  assert.ok(byText(render(), "Rotate Shortcut token"));
+  await byText(render(), "Copy token").props.onClick();
+  assert.deepEqual(copies, [token]);
+  await byText(render(), "Test connection").props.onClick();
+  assert.equal(calls[2][0], "/api/child/wallet/ping?child=child-two");
+  assert.equal(calls[2][1].credentials, "omit");
+  assert.equal(calls[2][1].headers.Authorization, `Bearer ${token}`);
+  assert.match(text(render()), /Connected!.*child's iPhone/);
+  assert.match(text(render()), /60 requests per hour per child session.*429.*retry after the Retry-After delay.*same transaction ID/);
+  assert.ok(![...h.storage.values(), ...h.session.values()].some((value) => value.includes(token)));
+  h.fetch = async () => new Response('{"error":"Please sign in again"}', { status: 401 });
+  await byText(render(), "Test connection").props.onClick();
+  assert.equal(unauthorized, 0, "an expired Shortcut does not sign out the parent browser");
+  assert.match(text(render()), /Please sign in again/);
+  const noPin = harness("Parent.jsx");
+  const noPinTree = noPin.render(noPin.exports.AppleCashTracking, { childId: "child-two", pinSet: false });
+  assert.match(text(noPinTree), /Set a parent PIN in Security/);
+  assert.equal(nodes(noPinTree, (n) => n.type === "button").length, 0);
+});
+
+test("F2: token endpoints trigger the parent PIN gate and do not store credentials in cached state", async () => {
+  const h = harness("api.js");
+  let locked = 0;
+  h.window.addEventListener("mq:locked", () => locked++);
+  h.fetch = async () => new Response('{"error":"Please unlock parent mode"}', { status: 403 });
+  await assert.rejects(h.exports.api("child/wallet/token?child=child-two"), { status: 403 });
+  assert.equal(locked, 1);
+  h.exports.setSelectedChild("child-one");
+  h.fetch = async (url, options) => {
+    assert.equal(url, "/api/parent/wallet/send?child=child-one");
+    assert.equal(options.credentials, "same-origin");
+    return new Response('{"ok":true}');
+  };
+  await h.exports.api("parent/wallet/send", { amount: 10 });
+  assert.equal(h.storage.size, 0);
 });

@@ -246,16 +246,18 @@ function escalate(db, kind, title, detail, data = {}, now = Date.now()) {
 }
 
 // G4 — spending policy, consulted synchronously when the child logs a purchase.
-export function spendPolicy(db, amount, memo) {
+export function spendPolicy(db, amount, memo, { alreadyPaid = false } = {}) {
   if (amount > db.allowance.spendLimit) {
-    return { hold: true, policy: "G4.limit", reason: `G4: ${dollars(amount)} is above the ${dollars(db.allowance.spendLimit)} per-purchase limit the parent set — held for approval.` };
+    if (!alreadyPaid) return { hold: true, policy: "G4.limit", reason: `G4: ${dollars(amount)} is above the ${dollars(db.allowance.spendLimit)} per-purchase limit the parent set — held for approval.` };
+    notify(db, "parent", `${db.child.name} spent ${dollars(amount)} via Apple Cash at "${memo}", above the ${dollars(db.allowance.spendLimit)} purchase limit. Already paid; recorded without a hold.`, "guardian");
+    audit(db, "guardian", "wallet_limit_notice", `G4: Apple Cash purchase above the limit; already paid, parent informed.`, { policy: "G4.limit" });
   }
-  const recent = db.transactions.filter((t) => t.kind === "spend" && t.status === "posted").slice(-5);
+  const recent = db.transactions.filter((t) => ["spend", "wallet_spend"].includes(t.kind) && t.status === "posted").slice(-5);
   if (recent.length >= 3) {
     const avg = recent.reduce((s, t) => s + t.amount, 0) / recent.length;
     if (amount > 3 * avg && amount >= 500) {
       notify(db, "parent", `FYI: ${db.child.name} spent ${dollars(amount)} on "${memo}", bigger than usual (avg ${dollars(Math.round(avg))}).`, "guardian");
-      audit(db, "guardian", "unusual_spend", `G4: ${dollars(amount)} is >3× the recent average (${dollars(Math.round(avg))}). Allowed (under limit) but parent informed.`, { policy: "G4.anomaly" });
+      audit(db, "guardian", "unusual_spend", `G4: ${dollars(amount)} is >3× the recent average (${dollars(Math.round(avg))}). Recorded; parent informed.`, { policy: "G4.anomaly" });
     }
   }
   return { hold: false };

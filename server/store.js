@@ -38,6 +38,7 @@ export function seed(now = Date.now()) {
       parent: { id: "acct_parent", label: "Parent funding account", balance: 25000 },
       savings: { id: "acct_savings", label: "Mia's savings", balance: 2000 },
       spending: { id: "acct_spending", label: "Mia's spending", balance: 1000 },
+      wallet: { id: "acct_wallet", label: "Apple Cash", balance: 0 },
     },
     savingsGoals: [
       { id: "goal_bike", title: "New bicycle", icon: "bike", target: 10000, createdAt: now - 10 * DAY },
@@ -107,6 +108,7 @@ export function seed(now = Date.now()) {
 // Older saves used the first bear's slots (backpack color, hat, accessory).
 // Map them onto the illustrated wardrobe so existing progress keeps working.
 export function migrate(d) {
+  if (d.accounts && !d.accounts.wallet) d.accounts.wallet = { id: uid("acct"), label: "Apple Cash", balance: 0 };
   const HATS = { beanie: "knit_beanie", ranger: "ranger_hat", flowers: "flower_crown" };
   const fix = (b) => {
     if (!b || !("color" in b || "accessory" in b)) return;
@@ -194,7 +196,7 @@ export function createChild(familyId, input) {
   for (const [key, account] of Object.entries(d.accounts)) {
     account.id = uid("acct");
     account.balance = 0;
-    if (key !== "parent") account.label = `${name}'s ${key}`;
+    if (key !== "parent" && key !== "wallet") account.label = `${name}'s ${key}`;
   }
   for (const key of ["transactions", "postcards", "adventures", "friends", "approvals", "notifications"]) d[key] = [];
   d.allowance.amount = 0;

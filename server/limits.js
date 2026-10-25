@@ -11,15 +11,20 @@ export const policies = {
   register: [5, HOUR], unlock: [5, 15 * MINUTE],
   kidLink: [5, 15 * MINUTE],
   chat: [30, HOUR], speak: [60, HOUR], voice: [20, 10 * MINUTE],
+  walletPing: [60, HOUR], walletSpend: [60, HOUR],
 };
 
-export function takeLimit(policy, key, now = Date.now()) {
+export function takeLimit(policy, key, now = Date.now(), { retryAfter = false } = {}) {
   const [max, duration] = policies[policy];
   for (const [k, value] of windows) if (now >= value.until) windows.delete(k);
   const fullKey = `${policy}:${key}`;
   let window = windows.get(fullKey);
   if (!window) windows.set(fullKey, window = { until: now + duration, count: 0 });
-  if (window.count >= max) throw new GameError("Let's take a little break. Try again soon!", 429);
+  if (window.count >= max) {
+    const error = new GameError("Let's take a little break. Try again soon!", 429);
+    if (retryAfter) error.retryAfterSeconds = Math.ceil((window.until - now) / 1000);
+    throw error;
+  }
   window.count += 1;
   return { remaining: max - window.count, until: window.until };
 }
