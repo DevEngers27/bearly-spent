@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { money, moneyShort, useAction } from "./api.js";
+import { api, apiResponse, money, moneyShort, useAction } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import MapView from "./MapView.jsx";
@@ -63,9 +63,9 @@ export default function Child({ state, toast, onGrownUps, offline }) {
           <button className="round-btn" disabled={pending} onClick={() => { open("news"); if (!offline) run("child/notifications/read", {}); }} aria-label={`News${unread ? `, ${unread} new` : ""}`}>
             <Icon name="bell" size={22} />{unread > 0 && <span className="dot" />}
           </button>
-          <button className="round-btn" onClick={onGrownUps} aria-label="Grown-ups">
+          {onGrownUps && <button className="round-btn" onClick={onGrownUps} aria-label="Grown-ups">
             <Icon name="lock" size={22} />
-          </button>
+          </button>}
         </div>
       </header>
 
@@ -93,7 +93,7 @@ export default function Child({ state, toast, onGrownUps, offline }) {
 }
 
 // ------------------------------------------------------------------ sheets
-function Sheet({ title, onClose, children, tall }) {
+export function Sheet({ title, onClose, children, tall }) {
   const ref = useRef(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -869,24 +869,21 @@ async function playBlob(blob) {
 // Cartesia: get a short-lived token from our server, call Cartesia directly
 // from the browser; if that fails, use the server proxy; then browser speech.
 async function speak(text, mode) {
-  const clean = text.replace(/[*_#]/g, "").slice(0, 600);
+  const clean = text.replace(/[*_#]/g, "").slice(0, 500);
   if (mode === "cartesia") {
     try {
-      const t = await fetch("/api/voice/token", { method: "POST" });
-      if (t.ok) {
-        const { token, version, request } = await t.json();
-        const res = await fetch("https://api.cartesia.ai/tts/bytes", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Cartesia-Version": version, "Content-Type": "application/json" },
-          body: JSON.stringify({ ...request, transcript: clean }),
-        });
-        if (res.ok) return await playBlob(await res.blob());
-      }
-    } catch {}
-    try {
-      const res = await fetch("/api/buddy/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: clean }) });
+      const { token, version, request } = await api("voice/token", {});
+      const res = await fetch("https://api.cartesia.ai/tts/bytes", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Cartesia-Version": version, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...request, transcript: clean }),
+      });
       if (res.ok) return await playBlob(await res.blob());
-    } catch {}
+    } catch (err) { if ([401, 403, 423, 429].includes(err.status)) throw err; }
+    try {
+      const res = await apiResponse("buddy/speak", { text: clean });
+      if (res.ok) return await playBlob(await res.blob());
+    } catch (err) { if ([401, 403, 423, 429].includes(err.status)) throw err; }
   }
   speakBrowser(clean);
 }

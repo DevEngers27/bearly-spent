@@ -628,3 +628,24 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .offline-pill { border: 1px solid var(--ink); border-radius: 999px; padding: 4px 9px; background: #F7DDD7; font-size: 13px; font-weight: 800; }
 button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .pbtn:disabled, .chip:disabled, .swatch:disabled, .speak:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Family entry and pairing keep the same paper-and-bear language as the game. */
+.auth-page { min-height: 100dvh; padding: 32px 16px; }
+.auth-card { width: min(480px, 100%); }
+.auth-bear { width: 104px; height: 104px; object-fit: contain; justify-self: center; }
+.auth-form { display: grid; gap: 14px; }
+.auth-form input, .auth-form select { width: 100%; min-height: 48px; }
+.auth-form select, .child-switcher select { border: 2px solid var(--line); border-radius: 10px; background: #FFFDF7; padding: 9px 11px; }
+.kid-code { font-family: var(--hand); font-size: 32px !important; font-weight: 700; text-align: center; letter-spacing: 0.18em; width: 100%; }
+.code-keys { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.code-keys .pbtn { min-height: 48px; padding: 6px; font-size: 20px; }
+.code-keys .pbtn:last-child { grid-column: span 2; font-size: 16px; }
+.child-switcher { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; }
+.child-switcher select { max-width: 180px; }
+.kid-signout { position: fixed; bottom: calc(80px + env(safe-area-inset-bottom)); right: 8px; z-index: 15; }
+.appbar { flex-wrap: wrap; }
+@media (max-width: 420px) {
+  .auth-card { padding: 22px 18px; }
+  .auth-card h1 { font-size: 32px; }
+  .appbar .brand-sub { display: none; }
+}

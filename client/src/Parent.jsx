@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { money, useAction } from "./api.js";
+import { api, money, useAction } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 
 const SECTIONS = [
@@ -11,15 +11,18 @@ const SECTIONS = [
   ["guardian", "Guardian log"],
   ["buddy", "Buddy chats"],
   ["settings", "Friends & privacy"],
+  ["children", "Children"],
+  ["security", "Security"],
 ];
 
 const KIND_LABEL = { reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
 const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
-export default function Parent({ state, toast }) {
+export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignOutAll, offline }) {
   const [sec, setSec] = useState("inbox");
-  const [run, busy] = useAction(toast);
+  const [run, pendingAction] = useAction(toast, offline);
+  const busy = pendingAction || offline;
   const timezoneAttempted = useRef(false);
   useEffect(() => {
     if (state.settings.timezone) {
@@ -58,6 +61,8 @@ export default function Parent({ state, toast }) {
         {sec === "guardian" && <Guardian {...ctx} />}
         {sec === "buddy" && <BuddyLog {...ctx} />}
         {sec === "settings" && <Settings {...ctx} />}
+        {sec === "children" && <Children me={me} refreshMe={refreshMe} {...ctx} />}
+        {sec === "security" && <Security me={me} refreshMe={refreshMe} onSignOut={onSignOut} onSignOutAll={onSignOutAll} {...ctx} />}
       </main>
     </div>
   );
@@ -334,14 +339,26 @@ function Guardian({ state, run, busy }) {
   );
 }
 
-function BuddyLog({ state }) {
+function BuddyLog({ state, run, busy }) {
+  const [older, setOlder] = useState([]);
+  const [cursor, setCursor] = useState(undefined);
+  const before = cursor === undefined ? state.chatNextBefore : cursor;
+  const messages = [...new Map([...older, ...state.chat].map((message) => [message.id, message])).values()];
+  const loadOlder = async () => {
+    const page = await run(() => api(`parent/state?before=${encodeURIComponent(before)}`));
+    if (page) {
+      setOlder((current) => [...page.chat, ...current]);
+      setCursor(page.chatNextBefore);
+    }
+  };
   return (
     <div className="p-stack">
       <h1>Money Buddy chats</h1>
       <p className="p-muted">Everything {state.child.name} and Money Buddy said. Personal details like phone numbers are removed before messages reach the AI. Buddy can't move money; any mission it suggests comes to you first.</p>
+      {before && <button className="pbtn" disabled={busy} onClick={loadOlder}>Load older</button>}
       <ol className="transcript">
-        {state.chat.length === 0 && <li className="p-muted">No conversations yet.</li>}
-        {state.chat.map((m) => (
+        {messages.length === 0 && <li className="p-muted">No conversations yet.</li>}
+        {messages.map((m) => (
           <li key={m.id} className={m.role}>
             <b>{m.role === "user" ? state.child.name : m.auto ? "Buddy (automatic update)" : "Buddy"}</b>
             <span>{m.text}</span>
@@ -388,4 +405,86 @@ function Settings({ state, run, busy }) {
       </section>
     </div>
   );
+}
+
+
+function Children({ me, refreshMe, run, busy }) {
+  const [child, setChild] = useState({ name: "", age: "9", bearName: "" });
+  const [links, setLinks] = useState({});
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const add = async (event) => {
+    event.preventDefault();
+    const result = await run(async () => {
+      const result = await api("parent/children", { ...child, age: Number(child.age) });
+      await refreshMe();
+      return result;
+    }, undefined, "Child added. Set their allowance to get started.");
+    if (result) setChild({ name: "", age: "9", bearName: "" });
+  };
+  const generate = async (id) => {
+    const link = await run(() => api(`parent/children/${encodeURIComponent(id)}/link?child=${encodeURIComponent(id)}`, {}));
+    if (link) { setLinks((current) => ({ ...current, [id]: link })); setNow(Date.now()); }
+  };
+  const field = (key) => ({ value: child[key], onChange: (event) => setChild({ ...child, [key]: event.target.value }) });
+  return <div className="p-stack">
+    <h1>Children</h1>
+    <p className="p-muted">Each saver has their own allowance, bear and adventures. Kid codes work once and last 15 minutes.</p>
+    {me.children.map((summary) => {
+      const link = links[summary.id];
+      const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
+      return <section className="p-card" key={summary.id}>
+        <div className="row"><div><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></div><button className="pbtn" disabled={busy} onClick={() => generate(summary.id)}>Generate kid code</button></div>
+        {link && <div className="p-stack">
+          {seconds > 0 ? <>
+            <label className="pform">Kid code<input className="kid-code" readOnly value={link.code} onFocus={(event) => event.target.select()} /></label>
+            <p role="status">Expires in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}. Open “I have a kid code” on your child's device.</p>
+            <button className="pbtn" disabled={busy || !navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(link.code), undefined, "Kid code copied")}>Copy code</button>
+          </> : <p role="status">This code expired. Generate a new one.</p>}
+        </div>}
+      </section>;
+    })}
+    <form className="p-card pform" onSubmit={add}>
+      <h2>Add a child</h2>
+      <label>Child's name<input required maxLength={24} {...field("name")} /></label>
+      <label>Age<select {...field("age")}>{[7, 8, 9, 10, 11, 12].map((age) => <option key={age} value={age}>{age}</option>)}</select></label>
+      <label>Bear's name<input required maxLength={24} {...field("bearName")} /></label>
+      <button className="pbtn primary" disabled={busy}>Add child</button>
+    </form>
+  </div>;
+}
+
+function Security({ me, refreshMe, onSignOut, onSignOutAll, run, busy }) {
+  const [pin, setPin] = useState("");
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const save = async (event) => {
+    event.preventDefault();
+    const result = await run(async () => {
+      const result = await api("parent/pin", { pin });
+      await refreshMe();
+      return result;
+    }, undefined, "PIN saved");
+    if (result) setPin("");
+  };
+  return <div className="p-stack">
+    <h1>Security</h1>
+    <form className="p-card pform" onSubmit={save}>
+      <h2>{me.family.pinSet ? "Change your PIN" : "Set a parent PIN"}</h2>
+      <p className="p-muted">A PIN protects grown-up switches on this device. Keep your password for signing in.</p>
+      <label>New PIN<input type="password" inputMode="numeric" autoComplete="new-password" required pattern="[0-9]{4,8}" minLength={4} maxLength={8} value={pin} onChange={(event) => setPin(event.target.value)} /></label>
+      <button className="pbtn primary" disabled={busy}>Save PIN</button>
+    </form>
+    <section className="p-card">
+      <h2>Signed-in devices</h2>
+      <button className="pbtn" disabled={busy} onClick={() => run(onSignOut)}>Sign out</button>
+      <button className="pbtn" disabled={busy} onClick={() => setConfirmSignOut(true)}>Sign out everywhere</button>
+      {confirmSignOut && <div className="p-stack">
+        <p>Sign out of all your parent sessions, including this device? Paired kid devices stay signed in.</p>
+        <div className="row"><button className="pbtn" disabled={busy} onClick={() => setConfirmSignOut(false)}>Cancel</button><button className="pbtn primary" disabled={busy} onClick={() => run(onSignOutAll)}>Confirm sign out everywhere</button></div>
+      </div>}
+    </section>
+  </div>;
 }
