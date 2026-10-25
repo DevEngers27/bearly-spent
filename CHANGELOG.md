@@ -11,6 +11,21 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.7.2] — 2026-10-25
+
+### Added
+- Put-away savings goals can be brought back or edited; goal pictures are
+  picked from icons instead of a dropdown.
+- The weekly budget can be opened again in the same week to change the plan
+  (no extra points).
+- Friend requests show where they are ("Waiting for your grown-up to say
+  yes", then "Sent to your friend's family"), the toast explains that a
+  grown-up must approve first, and the requester's parent is told that
+  approving sends the request.
+- Buddy's suggested questions come from the child's real goal and balance,
+  always go to the AI (one retry before any fallback), and a fallback reply
+  offers "Ask again". 333 server tests and 198 client tests.
+
 ## [0.7.1] — 2026-10-25
 
 ### Added
