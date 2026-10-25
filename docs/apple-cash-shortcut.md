@@ -9,7 +9,7 @@ Use only the Apple Cash card in your automation, not every card in Wallet.
 ## Create the child's Shortcut token
 
 1. Sign in as a parent, set a PIN in Security if needed, and unlock parent mode.
-2. Open Children → the child's Apple Cash tracking card → Generate Shortcut token.
+2. Open Parent → Kids → Children → the child's Apple Cash tracking card → Generate Shortcut token.
 3. Copy the token into the child's Shortcut. It is displayed only after creation
    or rotation and is never saved in browser storage. After leaving this screen,
    rotate to obtain a new token; the old one stops working immediately.
@@ -17,11 +17,10 @@ Use only the Apple Cash card in your automation, not every card in Wallet.
 The token is a normal child session bound to this child, with device kind
 `shortcut`, a fixed 180-day lifetime and the same child-route permissions as a
 paired kid device. It cannot access parent routes or siblings. Keep it private.
-Children → Devices lists **Apple Cash Shortcut**; Unlink revokes it. Family-wide
+The tracking card and Children → Devices both offer **Unlink** to revoke it. Family-wide
 sign-out also revokes it. Rotation affects only this child's Shortcut sessions,
 not paired browsers or siblings. The database stores a hash, never the raw token.
 
-<!-- Screenshot placeholder: Children → Apple Cash tracking, token controls. -->
 
 ## iPhone automation
 
@@ -74,20 +73,18 @@ timestamp; check the ledger against Wallet. Available transaction fields and
 eligible cards vary by device/iOS: verify them on the child's phone. If Apple Cash
 or the required fields are unavailable, use manual tracking instead.
 
-<!-- Screenshot placeholder: Transaction trigger, Apple Cash, Run Immediately. -->
-<!-- Screenshot placeholder: Get Contents of URL, headers, mapped JSON fields. -->
 
 ## Test the connection
 
-The card's **Test connection** button uses the displayed child Bearer token to
-POST `{}` to `/api/child/wallet/ping`. It does not replace your parent cookie or
-create a transaction. For an end-to-end phone test, run a temporary Shortcut with
-the same headers, POST method and empty JSON object, targeting that ping URL.
+Run a temporary Shortcut on the child's iPhone using the same headers, POST
+method and empty JSON object, targeting
+`https://YOUR_MONEYQUEST_SITE/api/child/wallet/ping`. This checks the connection
+without creating a transaction.
 Success returns `{ "ok": true, "childId": "child_...", "at": 1792860000000 }`
 (time varies); the parent wallet card shows the last successful ping time.
 
-The browser test verifies the token and server; only a run on the child's phone
-verifies the automation wiring. Check the next real purchase against the ledger.
+A successful phone ping checks the token and connection. Check the next real
+purchase against the ledger to verify the transaction automation too.
 401 means revoked/expired credentials; generate a new token and update the phone.
 
 ## Funding and manual purchases
@@ -130,10 +127,12 @@ the change.
 ## Token API
 
 - `GET /api/child/wallet/token?child=...`: unlocked parent **with a configured
-  PIN**; returns `{token:null,id,expiresAt}` for an active Shortcut, or null ID/time.
-  GET never creates or rotates a credential.
+  PIN**; returns `{token:null,id,expiresAt,lastPing,connected}` for an active Shortcut, or null ID/time.
+  GET never creates or rotates a credential. `lastPing` is a timestamp or null;
+  `connected` requires a ping since the active token was issued. Rotation starts
+  disconnected until the next phone test.
 - `POST /api/child/wallet/token?child=...` with `{}`: same authorization;
-  atomically revokes prior Shortcut sessions and returns `{token,id,expiresAt}`.
+  atomically revokes prior Shortcut sessions and returns `{token,id,expiresAt,lastPing,connected}`.
   This is the only response that exposes the raw token. Store only the hash.
 - `POST /api/child/wallet/ping` with `{}`: ordinary child authorization, including
   a child's Bearer token. Tests credentials and records connection time only.

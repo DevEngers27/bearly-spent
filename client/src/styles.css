@@ -877,3 +877,14 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .mission-exit, .mission-enter { animation: none; }
 }
+
+/* H6: pairing is the first, full-width action in each child card. */
+.child-card { min-width: 0; height: auto; max-height: none; overflow: visible; }
+.child-card > header { overflow-wrap: anywhere; }
+.kid-signin { margin: 16px 0; min-width: 0; }
+.kid-signin h3 { overflow-wrap: anywhere; }
+.kid-code-button { display: block; width: 100%; min-height: 48px; white-space: normal; }
+.friend-code-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.auth-child { display: grid; gap: 14px; margin: 0; padding: 14px; min-width: 0; border: 1px solid var(--line); border-radius: 14px; }
+.auth-child legend { font-weight: 800; padding: 0 6px; }
+.trip-countdown { font-variant-numeric: tabular-nums; }

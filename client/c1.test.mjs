@@ -527,10 +527,10 @@ test("B5b: create-family and sign-in submit the contract fields and use the retu
     assert.equal(body.email, "parent@test.com");
     assert.equal(body.password, "a password");
     if (screen === "create") {
-      assert.equal(body.childAge, 10);
+      assert.equal(body.children[0].age, 10);
       assert.equal(body.parentName, "Jordan");
-      assert.equal(body.childName, "Mia");
-      assert.equal(body.bearName, "Maple");
+      assert.equal(body.children[0].name, "Mia");
+      assert.equal(body.children[0].bearName, "Maple");
       assert.equal(typeof body.timezone, "string");
       assert.equal("code" in body, false);
     }
@@ -643,13 +643,14 @@ test("B5b: Children pairs the path child consistently, counts down expiry, and a
   };
   const render = () => h.render(h.exports.Children, props);
   let tree = render(); h.flush();
-  await nodes(tree, (n) => n.type === "button" && text(n).includes("Generate kid code"))[1].props.onClick();
+  await nodes(tree, (n) => n.type === "button" && text(n).includes("Get a kid code"))[1].props.onClick();
   tree = render();
   assert.equal(requests[0][0], "/api/parent/children/child-two/link?child=child-two");
   assert.match(text(tree), /Expires in\s+15\s*:\s*00/);
   assert.equal(nodes(tree, (n) => n.type === "input" && n.props.readOnly)[0].props.value, "BC3467");
   h.now += 900001; h.timers[0]();
   assert.match(text(render()), /This code expired/);
+  byText(render(), "Add a child").props.onClick();
   for (const [label, value] of [["Child's name", "Leo"], ["Age", "8"], ["Bear's name", "Pip"]]) changeField(render(), label, value);
   await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
   assert.deepEqual(requests[1], ["/api/parent/children", { name: "Leo", age: 8, bearName: "Pip" }]);
@@ -1108,7 +1109,7 @@ test("F6: talk guards Buddy-off, away and offline with warm bubbles and no reque
     let talk = h.render(h.exports.useMapleTalk, props); h.flush();
     talk.open(); talk = h.render(h.exports.useMapleTalk, props);
     assert.equal(talk.isOpen, false);
-    assert.match(talk.bubble, mode === "off" ? /grown-up switched chatting off/ : mode === "away" ? /on a trip — back soon!/ : /can't chat while we're offline/);
+    assert.match(talk.bubble, mode === "off" ? /grown-up switched chatting off/ : mode === "away" ? /is on a trip!/ : /can't chat while we're offline/);
     assert.equal(await talk.send("Hello"), false);
     assert.equal(calls, 0);
   }
@@ -1284,7 +1285,7 @@ test("F36.1: bubble containment", async () => {
     const component = nodes(scene, (n) => n.type?.name === "SpeechBubble")[0];
     const rendered = harness("Child.jsx");
     const markup = rendered.render(rendered.exports.SpeechBubble, component.props);
-    assert.match(text(markup), away ? /Maple is on a trip — back soon!/ : /A long reply/);
+    assert.match(text(markup), away ? /Maple is on a trip!.*Back in 0:42/ : /A long reply/);
     assert.equal(markup.props.style?.width, undefined);
   }
 });
@@ -1968,7 +1969,7 @@ test("H1: parent Apple Cash activity shows funding and historical purchase flags
   assert.match(text(activity.render(activity.exports.Activity, { state })), /Apple Cash.*Funding.*Store.*uncovered/);
 });
 
-test("F2: Shortcut setup gates token creation on a PIN, scopes rotation and tests Bearer without parent cookies", async () => {
+test("F2: Shortcut card gates token creation on a PIN, scopes rotation and unlink without storing tokens", async () => {
   const h = harness("Parent.jsx"), calls = [], copies = [];
   let unauthorized = 0;
   h.window.addEventListener("mq:unauthorized", () => unauthorized++);
@@ -1991,17 +1992,14 @@ test("F2: Shortcut setup gates token creation on a PIN, scopes rotation and test
   assert.ok(byText(render(), "Rotate Shortcut token"));
   await byText(render(), "Copy token").props.onClick();
   assert.deepEqual(copies, [token]);
-  await byText(render(), "Test connection").props.onClick();
-  assert.equal(calls[2][0], "/api/child/wallet/ping?child=child-two");
-  assert.equal(calls[2][1].credentials, "omit");
-  assert.equal(calls[2][1].headers.Authorization, `Bearer ${token}`);
-  assert.match(text(render()), /Connected!.*child's iPhone/);
-  assert.match(text(render()), /60 requests per hour per child session.*429.*retry after the Retry-After delay.*same transaction ID/);
+  assert.equal(nodes(render(), (n) => n.type === "a")[0].props.href, "/help/apple-cash");
+  assert.equal(nodes(render(), (n) => n.type === "ol" || n.type === "pre").length, 0);
   assert.ok(![...h.storage.values(), ...h.session.values()].some((value) => value.includes(token)));
-  h.fetch = async () => new Response('{"error":"Please sign in again"}', { status: 401 });
-  await byText(render(), "Test connection").props.onClick();
-  assert.equal(unauthorized, 0, "an expired Shortcut does not sign out the parent browser");
-  assert.match(text(render()), /Please sign in again/);
+  await byText(render(), "Unlink").props.onClick();
+  assert.equal(calls[2][0], "/api/parent/children/child-two/devices/device?child=child-two");
+  assert.equal(calls[2][1].method, "DELETE");
+  assert.equal(unauthorized, 0);
+  assert.equal(nodes(render(), (n) => n.type === "input").length, 0);
   const noPin = harness("Parent.jsx");
   const noPinTree = noPin.render(noPin.exports.AppleCashTracking, { childId: "child-two", pinSet: false });
   assert.match(text(noPinTree), /Set a parent PIN in Security/);

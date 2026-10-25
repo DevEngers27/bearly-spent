@@ -265,7 +265,9 @@ function ParentRoot({ childId, me, refreshMe, onSignOut, onSignOutAll, toast, on
 }
 
 function AuthScreen({ screen, navigate, demo, onSession, error }) {
-  const [fields, setFields] = useState({ parentName: "", email: "", password: "", childName: "", childAge: "9", bearName: "", code: "" });
+  const [fields, setFields] = useState({ parentName: "", email: "", password: "", code: "" });
+  const [children, setChildren] = useState([{ id: 0, name: "", age: "9", bearName: "" }]);
+  const nextChildId = useRef(1);
   const [err, setErr] = useState("");
   const [run, busy] = useAction((message) => setErr(message));
   const field = (key) => ({ value: fields[key], onChange: (e) => setFields({ ...fields, [key]: e.target.value }) });
@@ -283,8 +285,7 @@ function AuthScreen({ screen, navigate, demo, onSession, error }) {
   const submit = (event) => {
     event.preventDefault();
     if (screen === "create") {
-      const { code, ...body } = fields;
-      return login("auth/register", { ...body, childAge: Number(fields.childAge), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
+      return login("auth/register", { parentName: fields.parentName, email: fields.email, password: fields.password, children: children.map(({ name, age, bearName }) => ({ name, age: Number(age), bearName })), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
     } else if (screen === "link") return login("auth/link", { code: fields.code.toUpperCase() });
     else return login("auth/login", { email: fields.email, password: fields.password });
   };
@@ -298,7 +299,8 @@ function AuthScreen({ screen, navigate, demo, onSession, error }) {
           {error && <p role="alert">Can't connect right now. Check your connection and try again.</p>}
           <button className="btn honey wide" onClick={() => navigate("signin")}>Sign in</button>
           <button className="btn sage wide" onClick={() => navigate("create")}>Create family</button>
-          <button className="btn wide" onClick={() => navigate("link")}>I have a kid code</button>
+          <button className="btn wide" aria-describedby="kid-code-hint" onClick={() => navigate("link")}>I have a kid code</button>
+          <p className="fine" id="kid-code-hint">Ask your grown-up for a 6-letter kid code (Parent → Kids)</p>
           {demo && <button className="link" disabled={busy} onClick={() => login("demo/login", {})}>Try the demo family</button>}
         </> : <form className="auth-form" onSubmit={submit}>
           {screen === "create" && <label>Your name<input autoComplete="name" required maxLength={64} {...field("parentName")} /></label>}
@@ -307,10 +309,16 @@ function AuthScreen({ screen, navigate, demo, onSession, error }) {
             <label>Password<input type="password" autoComplete={screen === "create" ? "new-password" : "current-password"} required minLength={screen === "create" ? 8 : undefined} maxLength={1024} {...field("password")} /></label>
           </>}
           {screen === "create" && <>
-            <p>Let's meet your first saver. You can add more children later.</p>
-            <label>Child's name<input required maxLength={24} {...field("childName")} /></label>
-            <label>Age<select {...field("childAge")}>{[7, 8, 9, 10, 11, 12].map((age) => <option key={age} value={age}>{age}</option>)}</select></label>
-            <label>Bear's name<input required maxLength={24} {...field("bearName")} /></label>
+            <p>Let's meet your savers. Add up to four children.</p>
+            {children.map((child, index) => <fieldset className="auth-child" key={child.id} disabled={busy}>
+              <legend>Child {index + 1}</legend>
+              {[["name", "Child's name"], ["age", "Age"], ["bearName", "Bear's name"]].map(([key, label]) => {
+                const props = { value: child[key], onChange: (event) => setChildren((rows) => rows.map((row) => row.id === child.id ? { ...row, [key]: event.target.value } : row)) };
+                return <label key={key}>{label}{key === "age" ? <select {...props}>{[7, 8, 9, 10, 11, 12].map((age) => <option key={age} value={age}>{age}</option>)}</select> : <input required maxLength={24} {...props} />}</label>;
+              })}
+              {children.length > 1 && <button type="button" className="btn" onClick={() => setChildren((rows) => rows.filter((row) => row.id !== child.id))}>Remove child {index + 1}</button>}
+            </fieldset>)}
+            <button type="button" className="btn sage wide" disabled={busy || children.length >= 4} onClick={() => { const id = nextChildId.current++; setChildren((rows) => rows.length < 4 ? [...rows, { id, name: "", age: "9", bearName: "" }] : rows); }}>Add another child</button>
           </>}
           {screen === "link" && <>
             <p>Ask your grown-up for your six-character kid code.</p>

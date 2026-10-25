@@ -151,15 +151,15 @@ test("W4.3: a consumed kid code and countdown disappear, leaving Linked ✓ for 
   h.fetch = async (url, options) => new Response(JSON.stringify(options.method === "POST" ? { code: url.includes("/one/") ? "BC3467" : "XY3467", expiresAt: h.now + 900000 } : { status: linked && url.includes("/one/") ? "linked" : "pending" }));
   const render = () => h.render(h.exports.Children, props);
   render(); h.flush();
-  await byText(render(), "Generate kid code").props.onClick();
+  await byText(render(), "Get a kid code").props.onClick();
   render(); h.flush(); await settle();
-  await nodes(render(), (n) => n.type === "button" && text(n) === "Generate kid code")[1].props.onClick();
+  await nodes(render(), (n) => n.type === "button" && text(n) === "Get a kid code")[1].props.onClick();
   render(); h.flush(); await settle();
   assert.equal(nodes(render(), (n) => n.props.className === "kid-code").length, 2);
   linked = true;
   h.timers.at(-1)(); await settle();
   const tree = render(); h.flush();
-  const cards = nodes(tree, (n) => n.type === "section");
+  const cards = nodes(tree, (n) => n.props.className === "p-card child-card");
   assert.match(text(cards[0]), /Linked ✓/);
   assert.doesNotMatch(text(cards[0]), /Expires in|Copy code/);
   assert.equal(nodes(cards[0], (n) => n.props.className === "kid-code").length, 0);
@@ -176,7 +176,7 @@ test("W4.3: failed status reads preserve a code; stale replies cannot consume it
   };
   const render = () => h.render(h.exports.Children, props);
   render(); h.flush();
-  await byText(render(), "Generate kid code").props.onClick();
+  await byText(render(), "Get a kid code").props.onClick();
   render(); h.flush(); await settle();
   assert.match(text(render()), /Expires in/);
   assert.doesNotMatch(text(render()), /Linked ✓/);
@@ -184,7 +184,7 @@ test("W4.3: failed status reads preserve a code; stale replies cannot consume it
   h.timers.at(-1)(); await settle();
   const old = finish;
   code = "XY3467";
-  await byText(render(), "Generate kid code").props.onClick();
+  await byText(render(), "Get a kid code").props.onClick();
   render(); h.flush();
   const newest = finish;
   old(new Response('{"status":"linked"}')); await settle();

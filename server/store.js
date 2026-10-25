@@ -238,6 +238,7 @@ export function createChild(familyId, input) {
   }
   for (const key of ["transactions", "postcards", "adventures", "friends", "approvals", "notifications"]) d[key] = [];
   d.allowance.amount = 0;
+  d.settings.timezone = database().prepare("SELECT timezone FROM families WHERE id = ?").get(familyId).timezone;
   d.settings.coopChallenge = familyId === DEMO_FAMILY_ID;
   for (const goal of d.savingsGoals) goal.createdAt = Date.now();
   const id = uid("child");

@@ -2,6 +2,8 @@
 
 This is the API contract for the v0.4.0 release candidate; the cookie-based client is implemented in `client/src`. The server requires Node >=22.9 (built-in `node:sqlite` and the existing env-file flags). Launch/reset scripts include `--experimental-sqlite` for early Node 22 compatibility. For direct test commands on Node 22.9–22.12, use `NODE_OPTIONS=--experimental-sqlite node --test server/*.test.js`; later supported versions can run `node --test server/*.test.js`. See [Node 22.9 SQLite docs](https://nodejs.org/download/release/v22.9.0/docs/api/sqlite.html) for the flag requirement. Run `npm run dev` or `npm start` with your environment; neither command enables demo mode automatically. `.env.example` sets `MQ_DEMO=1`. Storage is `MQ_DATA_DIR/moneyquest.sqlite`, default `data/moneyquest.sqlite`.
 
+`GET /help/apple-cash` is a public, server-rendered HTML guide loaded from `docs/apple-cash-shortcut.md` before static serving and the SPA fallback. It uses the request origin in example URLs, escapes all Markdown content and host text, and never includes session or Shortcut tokens.
+
 ## Conventions and authentication
 
 All successful JSON routes return HTTP 200. Actions without another result return `{ "ok": true }`. Errors are `{ "error": "short message" }` (except the `/api/auth/me` 401 shape below): 400 invalid input/game rule, 401 missing/invalid/expired credentials or wrong password/PIN, 403 child attempting parent access or parent mode locked, 404 unknown route/child or unavailable integration/demo control, 410 deprecated savings-goal route, 413 JSON body too large, 429 rate/concurrency limit. An unknown child and another family's child both return 404. Unexpected errors return a generic 500.
@@ -50,7 +52,7 @@ A paired child receives only its own summary in `children` and no `user` field; 
 
 | Method and route | Auth | Request | Response and limits |
 | --- | --- | --- | --- |
-| `POST /api/auth/register` | Public | `{email, password, parentName, childName, childAge, bearName, timezone?}`; age 7–12, timezone valid IANA name (default UTC) | `Me` + parent cookie. Creates family, parent user and first child atomically. 5 attempts/hour/IP. |
+| `POST /api/auth/register` | Public | `{email, password, parentName, children:[{name,age,bearName}], timezone?}`; 1–4 children, ages 7–12, timezone valid IANA name (default UTC). Legacy `{childName,childAge,bearName}` still accepted when `children` is omitted. | `Me` + parent cookie. Creates family, parent user and every child atomically; the first child is selected. 5 attempts/hour/IP. |
 | `POST /api/auth/login` | Public | `{email, password}` | `Me` + parent cookie. 10 attempts/15 minutes/IP and 5/15 minutes/normalized email. Invalid credentials return 401. |
 | `POST /api/auth/logout` | Session | No fields | `{ok:true}` + cleared cookie. Revokes the current cookie/bearer session. |
 | `POST /api/auth/logout-all` | Parent | No fields | `{ok:true}` + cleared cookie. Revokes every session of the family, including all parents, paired kid devices and the current cookie/bearer session. Requires PIN unlock when a PIN is set. Other families are untouched. Kid devices need new codes to pair again. |
@@ -186,8 +188,8 @@ Nessie instruction is made. No account may go negative.
 | `POST /api/child/wallet/spend` | Child | `{amount,merchant,at?,external_id?}` records `parent → merchant`, `kind:wallet_spend`; HTTP 200 returns the transaction plus `duplicate`. Amount $0.01–$10,000; merchant <=120 chars; date ISO 8601 with zone or Unix milliseconds; external ID <=64 chars. Over-limit purchases record and notify without an approval hold; G4 unusual-spend notices also apply. |
 | `POST /api/parent/wallet/pending/:id/record` | Parent | `{}` posts the saved receipt if funding covers it. Returns the transaction plus `duplicate`; repeating a successful record or the original external ID cannot debit twice. HTTP 409 if still short. |
 | `POST /api/parent/wallet/pending/:id/dismiss` | Parent | `{}` removes the pending receipt and audits the dismissal. External-ID retries return the dismissed receipt without a debit. |
-| `GET /api/child/wallet/token` | Parent + configured, unlocked PIN | `{token:null,id,expiresAt}` for the selected child's active Shortcut, null ID/time if absent; no mutation. |
-| `POST /api/child/wallet/token` | Parent + configured, unlocked PIN | `{}` rotates/revokes only that child's Shortcut sessions; returns `{token,id,expiresAt}`. Raw token is shown only in this response; hashes only in storage. |
+| `GET /api/child/wallet/token` | Parent + configured, unlocked PIN | `{token:null,id,expiresAt,lastPing,connected}` for the selected child's active Shortcut, null ID/time if absent; no mutation. |
+| `POST /api/child/wallet/token` | Parent + configured, unlocked PIN | `{}` rotates/revokes only that child's Shortcut sessions; returns `{token,id,expiresAt,lastPing,connected}`. Raw token is shown only in this response; hashes only in storage. |
 | `POST /api/child/wallet/ping` | Child | `{}` returns `{ok:true,childId,at}` and records the connection time without a transaction. |
 
 Short funding returns HTTP **409** with
@@ -361,3 +363,21 @@ Child and parent state include `missionsToday: {active, done, doneCount, cap:6}`
 Event missions finish with their existing game actions. Track/save keep their once-per-family-day bonuses; a first-time lesson uses its existing 20 points. These awards also complete an active mission without another payment. Reviews earn no points. Other daily missions award the pool points once and emit a `daily_mission_done` audit and child celebration notification. The six-completion cap limits daily mission rewards; existing track/save, lesson, milestone, weekly budget and parent-task rules continue separately.
 
 `POST /api/child/journal` also accepts optional `prices:[price1,price2]` in dollars, both $0.01–$10,000. The diary stores them in cents. A diary entry completes `journal`; one containing two validated prices can also complete an active `compare` mission. A note containing numbers alone does not count as comparing prices. Buddy's snapshot includes `missions_today` with active mission copy, rewards, done count and cap. Parent-assigned `missions` and weekly budgeting are separate.
+
+## H6 note and Shortcut status
+
+Child and parent state include `planPending:boolean`: true while an enabled
+Buddy replan is queued or running. Completion publishes a version change even
+when no new plan was written. `plan.updatedAt` is Unix milliseconds;
+`plan.goalId` identifies the plan's goal. The client formats Updated in the
+family time zone and immediately acknowledges a changed current goal while
+waiting for the new tip.
+
+Shortcut token GET/POST responses also include `lastPing` (Unix milliseconds or
+null), scoped to the selected child. `connected` is true only for an active
+credential with a ping since its issue time; rotation starts disconnected. GET
+still never returns the raw token;
+POST rotation is the only response that exposes it. The parent card keeps
+status, Generate/Rotate, Copy, Unlink and the `/help/apple-cash` link; setup and
+connection-test instructions are on the guide. The help page never reads a
+credential or echoes query parameters.

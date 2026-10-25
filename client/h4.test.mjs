@@ -159,7 +159,7 @@ test("H4.3 trip bubble stays static across ticks and Home never draws an away be
   state.adventures = [{ id: "trip-one", status: "away", returnsAt: h.now + 60000 }];
   let talk = h.render(h.exports.useMapleTalk, { state }); h.flush(); talk.open();
   talk = h.render(h.exports.useMapleTalk, { state });
-  assert.equal(talk.bubble, "Maple is on a trip — back soon!");
+  assert.equal(talk.bubble, "Maple is on a trip!");
   const home = harness("Child.jsx"), bubble = harness("Child.jsx");
   const render = () => home.render(home.exports.Home, { state, talk: { ...talk, isOpen: true, mood: "resting" }, open: noop });
   let tree = render(); home.flush();
@@ -242,14 +242,14 @@ test("H4.7 linked receipt survives Children remount and a new code replaces it",
   h.fetch = fetch;
   const props = { me, refreshMe: async () => {}, run: async (work) => work() };
   const render = () => { const tree = h.render(h.exports.Children, props); h.flush(); return tree; };
-  await byText(render(), "Generate kid code").props.onClick(); render();
+  await byText(render(), "Get a kid code").props.onClick(); render();
   await new Promise(setImmediate); render();
   assert.match(text(render()), /Linked ✓/);
   const remount = harness("Parent.jsx", { session: h.session }); remount.fetch = fetch;
   const again = () => remount.render(remount.exports.Children, props);
   assert.match(text(again()), /Linked ✓/);
   status = "pending";
-  await byText(again(), "Generate kid code").props.onClick();
+  await byText(again(), "Get a kid code").props.onClick();
   assert.doesNotMatch(text(again()), /Linked ✓/); assert.match(text(again()), /Expires in/);
   const other = harness("Parent.jsx", { session: h.session });
   assert.doesNotMatch(text(other.render(other.exports.Children, { ...props, me: { ...me, family: { id: "other" } } })), /Linked ✓/);

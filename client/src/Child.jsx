@@ -348,6 +348,13 @@ function Home({ state, setTab, open, run, busy, talk }) {
   }, []);
   const goal = currentSavingsGoal(state);
   const away = state.adventures.find((a) => a.status === "away");
+  const overdue = Boolean(away && now >= away.returnsAt + 5000);
+  useEffect(() => {
+    if (!overdue) return;
+    // Ask the existing live-state hook to finalize/refetch a delayed return.
+    dismissRef.current?.();
+    window.dispatchEvent(new Event("mq:changed"));
+  }, [away?.id, overdue]);
   const mood = talk?.mood || moodFor(state, now);
   const tripCost = state.catalog.trip?.cost ?? 30;
   const short = tripCost - state.child.points;
@@ -385,7 +392,7 @@ function Home({ state, setTab, open, run, busy, talk }) {
             <BearFigure bear={state.child.bear} mood={mood} size={196} />
           </button>
         )}
-        {talk?.bubble && <SpeechBubble key={talk.bubbleId} text={away ? `${state.child.bear.name} is on a trip — back soon!` : talk.bubble} thinking={mood === "thinking"} staticText={Boolean(away)} onClose={talk.dismiss} />}
+        {talk?.bubble && !overdue && (!talk.tripId || away?.id === talk.tripId) && <SpeechBubble key={talk.bubbleId} text={away ? `${state.child.bear.name} is on a trip!` : talk.bubble} countdownText={away ? countdown(away.returnsAt, now) : undefined} thinking={mood === "thinking"} staticText={Boolean(away)} onClose={talk.dismiss} />}
         <div className="name-sticker">
           <strong>{state.child.bear.name}</strong>
           <span>{stage ? `${stage.label} bear` : "Little cub"}</span>
@@ -463,8 +470,10 @@ function Home({ state, setTab, open, run, busy, talk }) {
       <section className="paper-card note-card">
         <span className="tape" aria-hidden="true" />
         <h3 className="hand">A note from {state.child.bear.name}</h3>
-        <p>{state.plan?.summary || "Ask me to help you make a saving plan!"}</p>
-        {state.plan?.steps?.length > 0 && <ul className="steps">{state.plan.steps.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}</ul>}
+        <p>{state.plan && (state.plan.goalId ?? null) !== (goal?.id ?? null) ? (goal ? `Now saving for ${goal.title}.` : "Let's pick your next saving goal!") : state.plan?.summary || "Ask me to help you make a saving plan!"}</p>
+        {state.plan?.steps?.length > 0 && (state.plan.goalId ?? null) === (goal?.id ?? null) && <ul className="steps">{state.plan.steps.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}</ul>}
+        {state.plan?.updatedAt && <p className="fine">Updated <time dateTime={new Date(state.plan.updatedAt).toISOString()}>{formatTime(state.plan.updatedAt, { timeZone: state.settings.timezone })}</time></p>}
+        {state.planPending && <p className="fine" role="status">Thinking of a new tip…</p>}
         <button className="link" onClick={() => talk?.open()}>Talk to {state.child.bear.name}</button>
       </section>
     </div>
@@ -1221,17 +1230,21 @@ function useMapleTalk({ state, run, busy, offline }) {
   const inflight = useRef(false);
   const latest = useRef(null);
   const away = state.adventures.find((a) => a.status === "away");
+  const previousTrip = useRef(away?.id);
   latest.current = { offline, away, enabled: state.settings.buddyEnabled, muted };
   const allowed = () => !latest.current.offline && !latest.current.away && latest.current.enabled;
   const close = () => { setOpen(false); dismiss(); };
   useEffect(() => {
+    const returned = previousTrip.current && !away;
+    previousTrip.current = away?.id;
+    if (returned) { setBubble(""); setMood(null); turn.current++; stopSpeaking(); }
     if (!offline && !away && state.settings.buddyEnabled) return;
     setOpen(false); setBubble(""); setMood(null); turn.current++; stopSpeaking();
   }, [offline, away?.id, state.settings.buddyEnabled]);
   useEffect(() => () => { turn.current++; stopSpeaking(); }, []);
   const open = () => {
     if (offline) { showBubble("I can't chat while we're offline, but your postcards are right here!"); setMood("resting"); return; }
-    if (away) { showBubble(`${state.child.bear.name} is on a trip — back soon!`); return; }
+    if (away) { showBubble(`${state.child.bear.name} is on a trip!`); return; }
     if (!state.settings.buddyEnabled) { showBubble("My grown-up switched chatting off for now."); setMood("resting"); return; }
     setOpen(true);
   };
@@ -1257,10 +1270,10 @@ function useMapleTalk({ state, run, busy, offline }) {
     setMuted(next); store.set("mq_muted", String(next));
     if (next) stopSpeaking();
   };
-  return { isOpen, bubble, bubbleId, mood, muted, open, close, dismiss, send, toggleMute };
+  return { isOpen, bubble, bubbleId, tripId: away?.id || previousTrip.current, mood, muted, open, close, dismiss, send, toggleMute };
 }
 
-function SpeechBubble({ text, thinking, staticText, onClose }) {
+function SpeechBubble({ text, thinking, staticText, countdownText, onClose }) {
   const [shown, setShown] = useState("");
   useEffect(() => {
     if (staticText || thinking || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { setShown(text); return; }
@@ -1276,7 +1289,7 @@ function SpeechBubble({ text, thinking, staticText, onClose }) {
   return (
     <div className="bear-bubble" aria-live="polite" aria-atomic="true">
       <button className="round-btn bubble-close" onClick={onClose} aria-label="Close speech bubble"><Icon name="close" size={18} /></button>
-      <span className="sr-only">{text}</span><span className="bear-bubble-text" aria-hidden="true">{shown || "\u00a0"}</span>
+      <span className="sr-only">{text}</span><span className="bear-bubble-text" aria-hidden="true">{staticText ? text : shown || "\u00a0"}</span>{countdownText && <> <span className="trip-countdown">{countdownText}</span></>}
     </div>
   );
 }
