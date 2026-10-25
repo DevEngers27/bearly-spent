@@ -7,7 +7,7 @@ import { read, mutate, reset, subscribe } from "./store.js";
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
 import { runGuardian, hasDueWork, injectDuplicatePosting, reconcileNow } from "./guardian.js";
-import { replan, buddyMode, offlinePlan } from "./buddy.js";
+import { replan, queueReplan, cancelReplan, buddyMode, offlinePlan } from "./buddy.js";
 import { actions } from "./actions.js";
 import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
@@ -22,16 +22,6 @@ app.use(express.json({ limit: "64kb" }));
 setNessieAuditHook((action, detail, data) => mutate((db) => game.audit(db, "bank", action, detail, data)));
 
 // Re-plan (debounced) whenever real money moves — child actions or guardian payouts.
-let replanTimer = null;
-const pendingReasons = [];
-function queueReplan(reason) {
-  pendingReasons.push(reason);
-  clearTimeout(replanTimer);
-  replanTimer = setTimeout(() => {
-    const why = pendingReasons.splice(0).join("; ");
-    if (read().settings.buddyEnabled) replan(why).catch((e) => console.error("[replan]", e.message));
-  }, 1500);
-}
 game.onMoneyChanged(queueReplan);
 
 const PAYOUT = /Paid|Executed|reversed/i;
@@ -230,6 +220,7 @@ app.post("/api/parent/inject-fault", route(() => mutate((db) => {
   // No guardian run here on purpose: the next tick has to find it on its own.
 })));
 app.post("/api/parent/reset", route(() => {
+  cancelReplan();
   reset();
   mutate((d) => (d.buddy.plan = offlinePlan(d, "starting plan")));
   return { ok: true };
