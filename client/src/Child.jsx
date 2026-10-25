@@ -252,9 +252,10 @@ function ProfileSheet({ state, run, busy, close, open, onGrownUps }) {
   const [bearName, setBearName] = useState(state.child.bear.name);
   useEffect(() => { setBearName(state.child.bear.name); }, [state.child.bear.name]);
   const profile = state.profile;
+  const metrics = postcardMetrics(state);
   const stats = profile?.stats || {
     points: state.child.points,
-    postcards: { collected: new Set(state.postcards.map((p) => p.defId)).size, total: Object.values(state.catalog.places).filter((p) => p.open).length },
+    postcards: { collected: metrics.places, total: metrics.total, cards: metrics.cards },
     tripsTaken: state.child.stats.adventures, lessonsFinished: state.child.lessonsDone.length,
     missionsDone: state.missions.filter((m) => m.status === "done").length,
   };
@@ -273,7 +274,7 @@ function ProfileSheet({ state, run, busy, close, open, onGrownUps }) {
     {typeof state.friendCode === "string" && <section><h3 className="hand">Friend code</h3><div className="row"><strong>{state.friendCode}</strong><button className="btn" disabled={!navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(state.friendCode), undefined, "Friend code copied")}>Copy</button></div></section>}
     <section><h3 className="hand">My numbers</h3><dl className="profile-numbers">
       <dt>Points</dt><dd>{stats.points}</dd>
-      <dt>Postcards collected / open places</dt><dd>{stats.postcards.collected} / {stats.postcards.total}</dd>
+      <dt>Places visited / all places</dt><dd>{metrics.places} / {metrics.total} · {metrics.cards} {plural(metrics.cards, "card")}</dd>
       <dt>Trips taken</dt><dd>{stats.tripsTaken}</dd>
       <dt>Lessons finished</dt><dd>{stats.lessonsFinished}</dd>
       <dt>Missions done</dt><dd>{stats.missionsDone}</dd>
@@ -317,6 +318,15 @@ function nextUp(state, now) {
 
 function Home({ state, setTab, open, run, busy, talk }) {
   const now = useNow();
+  const dismissRef = useRef(talk?.dismiss);
+  dismissRef.current = talk?.dismiss;
+  useEffect(() => {
+    const outside = (event) => { if (!event.target.closest?.(".scene")) dismissRef.current?.(); };
+    const escape = (event) => { if (event.key === "Escape") dismissRef.current?.(); };
+    window.addEventListener("pointerdown", outside);
+    window.addEventListener("keydown", escape);
+    return () => { window.removeEventListener("pointerdown", outside); window.removeEventListener("keydown", escape); };
+  }, []);
   const goal = currentSavingsGoal(state);
   const away = state.adventures.find((a) => a.status === "away");
   const mood = talk?.mood || moodFor(state, now);
@@ -351,7 +361,7 @@ function Home({ state, setTab, open, run, busy, talk }) {
             <BearFigure bear={state.child.bear} mood={mood} size={196} />
           </button>
         )}
-        {talk?.bubble && <SpeechBubble text={away && talk.bubble.startsWith(`${state.child.bear.name} is on a trip!`) ? `${state.child.bear.name} is on a trip! ${countdown(away.returnsAt, now)}` : talk.bubble} thinking={mood === "thinking"} />}
+        {talk?.bubble && <SpeechBubble key={talk.bubbleId} text={away ? `${state.child.bear.name} is on a trip — back soon!` : talk.bubble} thinking={mood === "thinking"} staticText={Boolean(away)} onClose={talk.dismiss} />}
         <div className="name-sticker">
           <strong>{state.child.bear.name}</strong>
           <span>{stage ? `${stage.label} bear` : "Little cub"}</span>
@@ -533,6 +543,7 @@ const SCENE_SWATCH = { forest: "#A8B894", meadow: "#E5EEF0", stars: "#4E5F7A" };
 function DressSheet({ state, run, close, busy }) {
   const [name, setName] = useState(state.child.bear.name);
   const [slot, setSlot] = useState("hat");
+  const [purchase, setPurchase] = useState(null);
   const bear = state.child.bear;
   const items = state.catalog.cosmetics.filter((c) => c.kind === slot);
   return (
@@ -544,7 +555,7 @@ function DressSheet({ state, run, close, busy }) {
       </form>
       <div className="wardrobe-tabs" role="tablist" aria-label="Wardrobe">
         {WARDROBE.map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={slot === k} className={slot === k ? "on" : ""} onClick={() => setSlot(k)}>{label}</button>
+          <button key={k} role="tab" aria-selected={slot === k} className={slot === k ? "on" : ""} onClick={() => { setSlot(k); setPurchase(null); }}>{label}</button>
         ))}
       </div>
       <div className="swatches">
@@ -559,7 +570,7 @@ function DressSheet({ state, run, close, busy }) {
           const locked = !c.unlocked;
           return (
             <button key={c.id} disabled={busy || (locked && c.cost == null)} className={`swatch ${on ? "on" : ""} ${locked ? "locked" : ""}`} aria-disabled={locked && c.cost == null}
-              onClick={() => (!locked ? run("child/cosmetic/equip", { kind: slot, value: c.value }) : c.cost != null ? run("child/cosmetic/buy", { id: c.id }, `Unlocked ${c.label}!`) : null)}>
+              onClick={() => (!locked ? run("child/cosmetic/equip", { kind: slot, value: c.value }) : c.cost != null ? setPurchase(c) : null)}>
               {slot === "background"
                 ? <span className="swatch-art scene" style={{ background: SCENE_SWATCH[c.value] }} aria-hidden="true" />
                 : <img className="swatch-art" src={`/bear/items/${c.value}.png`} alt="" loading="lazy" />}
@@ -569,6 +580,13 @@ function DressSheet({ state, run, close, busy }) {
           );
         })}
       </div>
+      {purchase && <div className="paper-card" role="group" aria-label="Buy clothing">
+        <p>Spend {purchase.cost} points on the {purchase.label}? You have {state.child.points}.</p>
+        <div className="btn-row">
+          <button className="btn honey" disabled={busy || state.child.points < purchase.cost} onClick={async () => { if (await run("child/cosmetic/buy", { id: purchase.id }, `Unlocked ${purchase.label}!`)) setPurchase(null); }}>{state.child.points < purchase.cost ? `Earn ${purchase.cost - state.child.points} more points` : "Buy"}</button>
+          <button className="btn" disabled={busy} onClick={() => setPurchase(null)}>Not now</button>
+        </div>
+      </div>}
       <p className="fine">Savings milestones unlock special items forever. Spending never takes them away.</p>
     </Sheet>
   );
@@ -688,22 +706,38 @@ function LessonSheet({ lesson, run, close, busy }) {
   );
 }
 
-function BudgetSheet({ run, close, busy }) {
-  const [a, setA] = useState({ save: 5, needs: 8, fun: 5, give: 2 });
-  const total = Object.values(a).reduce((s, v) => s + v, 0);
+function BudgetSheet({ state, run, close, busy }) {
+  const [amount, setAmount] = useState(() => String(state?.allowance?.amount > 0 ? Math.min(200, Math.max(1, state.allowance.amount / 100)) : 20));
+  const split = (cents, weights = [25, 40, 25, 10]) => {
+    const sum = weights.reduce((s, v) => s + v, 0) || 100;
+    const values = weights.map((v) => Math.floor(cents * v / sum));
+    values[3] += cents - values.reduce((s, v) => s + v, 0);
+    return Object.fromEntries(["save", "needs", "fun", "give"].map((k, i) => [k, values[i]]));
+  };
+  const [a, setA] = useState(() => split(Math.round(Number(amount) * 100)));
+  const total = Math.round(Number(amount) * 100);
+  const valid = /^\d+(?:\.\d{0,2})?$/.test(amount) && total >= 100 && total <= 20000;
+  const allocated = Object.values(a).reduce((s, v) => s + v, 0);
+  const ready = valid && allocated === total && a.save >= Math.ceil(total * 0.2) && a.needs >= Math.ceil(total * 0.25);
   const rows = [["save", "Save", "honey"], ["needs", "Needs", "basket"], ["fun", "Fun", "balloon"], ["give", "Give", "heart"]];
   return (
-    <Sheet title="Plan $20 for the week" onClose={close}>
-      <form className="form" onSubmit={async (e) => { e.preventDefault(); if (await run("child/budget", { allocations: a }, (x) => (x.pointsAwarded ? `Great budget! +${x.pointsAwarded} points` : "Great budget! (Points already earned this week)"))) close(); }}>
+    <Sheet title={`Plan ${valid ? moneyShort(total) : "your money"} for the week`} onClose={close}>
+      <form className="form" onSubmit={async (e) => { e.preventDefault(); if (!ready || busy) return; if (await run("child/budget", { allocations: Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v / 100])), total: total / 100 }, (x) => (x.pointsAwarded ? `Great budget! +${x.pointsAwarded} points` : "Great budget! (Points already earned this week)"))) close(); }}>
+        <label>Weekly amount ($)<input type="number" inputMode="decimal" min="1" max="200" step="0.01" required disabled={busy} value={amount} onChange={(e) => {
+          const value = e.target.value, cents = Math.round(Number(value) * 100);
+          setAmount(value);
+          if (cents >= 100 && cents <= 20000) setA(split(cents, Object.values(a).some(Boolean) ? Object.values(a) : undefined));
+        }} /></label>
         {rows.map(([k, label, emo]) => (
           <label key={k} className="slider-row">
             <span className="slider-label"><Icon name={emo} size={22} /> {label}</span>
-            <input type="range" min="0" max="20" step="1" value={a[k]} onChange={(e) => setA({ ...a, [k]: Number(e.target.value) })} />
-            <b>{moneyShort(a[k] * 100)}</b>
+            <input type="range" disabled={busy || !valid} min="0" max={valid ? total / 100 : 20} step="0.01" value={a[k] / 100} onChange={(e) => setA({ ...a, [k]: Math.round(Number(e.target.value) * 100) })} />
+            <b>{moneyShort(a[k])}</b>
           </label>
         ))}
-        <p className={`fine ${total === 20 ? "ok" : "warn"}`}>Total {moneyShort(total * 100)}: {total === 20 ? "perfect!" : total > 20 ? `${moneyShort((total - 20) * 100)} too much` : `${moneyShort((20 - total) * 100)} left to plan`}</p>
-        <button className="btn honey wide" type="submit" disabled={busy || total !== 20}>Finish my budget</button>
+        <p className={`fine ${ready ? "ok" : "warn"}`}>{!valid ? "Choose $1 to $200 for your week." : `Total ${money(allocated)}: ${allocated === total ? "perfect!" : allocated > total ? `${money(allocated - total)} too much` : `${money(total - allocated)} left to plan`}`}</p>
+        <p className="fine">Save at least 20% and plan at least 25% for needs.</p>
+        <button className="btn honey wide" type="submit" disabled={busy || !ready}>Finish my budget</button>
       </form>
     </Sheet>
   );
@@ -870,6 +904,7 @@ function Album({ state, open, goMap, run, busy, newCards = [], openCard }) {
   }, [state.postcards]);
   const places = state.catalog.places;
   const { places: found, cards, total } = postcardMetrics(state);
+  const stamps = Object.entries(places).filter(([id]) => counts[id]);
   return (
     <div className="page">
       <h1 className="page-title">Travel album</h1>
@@ -885,8 +920,8 @@ function Album({ state, open, goMap, run, busy, newCards = [], openCard }) {
               <p className="hand big-text">{found} of {total} {plural(total, "place")} · {cards} {plural(cards, "card")}</p>
             </div>
             <div className="stamp-strip" aria-label="Collected stamps">
-              {Object.entries(places).filter(([id]) => counts[id]).map(([id, p]) => <Stamp key={id} stamp={p.stamp} name={p.name} image={p.image} size="sm" />)}
-              {found === 0 && <p className="fine">Stamps from your trips land here.</p>}
+              {stamps.map(([id, p]) => <Stamp key={id} stamp={p.stamp} name={p.name} image={p.image} size="sm" />)}
+              {stamps.length === 0 && <p className="fine">Stamps from your trips land here.</p>}
             </div>
           </div>
           {GROUPS.map(([rarity, label]) => {
@@ -930,10 +965,14 @@ function Friends({ state, run, busy }) {
   const pending = state.friends.filter((f) => f.status.startsWith("pending_"));
   const incomingTrades = state.trades.filter((t) => t.real && t.status === "pending" && !t.initiator && !t.childAccepted);
   const [sel, setSel] = useState(approved[0]?.id);
+  const sentKey = `mq_friend_sent:${encodeURIComponent(state.childId || state.child.id || state.child.name)}`;
+  const [sent, setSent] = useState(() => { try { return sessionStorage.getItem(sentKey) === "true"; } catch { return false; } });
   const [code, setCode] = useState("");
   const [give, setGive] = useState("");
   const [get, setGet] = useState("");
   const friend = approved.find((f) => f.id === sel) || approved[0];
+  const latestHello = friend?.greetings?.filter((g) => g.from !== "me").at(-1);
+  const metrics = friend && (friend.metrics?.postcards || { places: new Set(friend.postcards).size, cards: friend.postcards.length, total: Object.keys(state.catalog.places).length });
   const places = state.catalog.places;
   const nameOf = (id) => places[id]?.name || "Secret";
   const myCards = [...new Set(state.postcards.filter((p) => !p.lockedForTrade && places[p.defId]?.rarity !== "secret").map((p) => p.defId))];
@@ -973,7 +1012,7 @@ function Friends({ state, run, busy }) {
             <BearFigure bear={friend.bear} size={96} />
             <div>
               <h2 className="hand">{friend.name}'s bear, {friend.bear.name}</h2>
-              <p className="fine">{friend.postcards.length} {plural(friend.postcards.length, "postcard")}</p>
+              <p className="fine">{metrics.places} of {metrics.total} places · {metrics.cards} {plural(metrics.cards, "card")}</p>
             </div>
           </div>
           <div className="mini-album">
@@ -1004,6 +1043,7 @@ function Friends({ state, run, busy }) {
               <button className="btn honey" disabled={busy}>Propose swap</button>
             </form>
           )}
+          {latestHello && <div><h3 className="hand">Latest hello</h3><p>{latestHello.text}</p></div>}
           <h3 className="hand">Send a note</h3>
           <div className="chips">
             {state.catalog.greetings.map((g, i) => <button key={i} className="chip" disabled={busy} onClick={() => run("child/greet", { friendId: friend.id, index: i }, `Sent to ${friend.name}!`)}>{g}</button>)}
@@ -1012,11 +1052,12 @@ function Friends({ state, run, busy }) {
       )}
       <section className="paper-card">
         <h3 className="hand">Add a friend</h3>
-        <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Request sent")) setCode(""); }}>
+        <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Request sent")) { setCode(""); setSent(true); try { sessionStorage.setItem(sentKey, "true"); } catch {} } }}>
           <label className="grow">Friend code<input required maxLength={state.demo === false ? 8 : 64} disabled={busy} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder={state.demo === false ? "8 letters and numbers" : "e.g. SAM-12"} /></label>
           <button className="btn small sage" disabled={busy}>Send</button>
         </form>
-        {pending.length > 0 && <p className="fine">Friend request waiting. Both friends and their grown-ups need to say yes.</p>}
+        {!sent && pending.length > 0 && <p className="fine">Both friends and their grown-ups need to say yes.</p>}
+        {sent && <p className="fine" role="status">Request sent. Both friends and their grown-ups need to say yes.</p>}
       </section>
     </div>
   );
@@ -1113,6 +1154,9 @@ function stopSpeaking() {
 function useMapleTalk({ state, run, busy, offline }) {
   const [isOpen, setOpen] = useState(false);
   const [bubble, setBubble] = useState("");
+  const [bubbleId, setBubbleId] = useState(0);
+  const showBubble = (text) => { setBubble(text); setBubbleId((id) => id + 1); };
+  const dismiss = () => { setBubble(""); stopSpeaking(); };
   const [mood, setMood] = useState(null);
   const [muted, setMuted] = useState(() => store.get("mq_muted", "false") === "true");
   const turn = useRef(0);
@@ -1121,28 +1165,28 @@ function useMapleTalk({ state, run, busy, offline }) {
   const away = state.adventures.find((a) => a.status === "away");
   latest.current = { offline, away, enabled: state.settings.buddyEnabled, muted };
   const allowed = () => !latest.current.offline && !latest.current.away && latest.current.enabled;
-  const close = () => setOpen(false);
+  const close = () => { setOpen(false); dismiss(); };
   useEffect(() => {
     if (!offline && !away && state.settings.buddyEnabled) return;
     setOpen(false); setBubble(""); setMood(null); turn.current++; stopSpeaking();
   }, [offline, away?.id, state.settings.buddyEnabled]);
   useEffect(() => () => { turn.current++; stopSpeaking(); }, []);
   const open = () => {
-    if (offline) { setBubble("I can't chat while we're offline, but your postcards are right here!"); setMood("resting"); return; }
-    if (away) { setBubble(`${state.child.bear.name} is on a trip! ${countdown(away.returnsAt, Date.now())}`); return; }
-    if (!state.settings.buddyEnabled) { setBubble("My grown-up switched chatting off for now."); setMood("resting"); return; }
+    if (offline) { showBubble("I can't chat while we're offline, but your postcards are right here!"); setMood("resting"); return; }
+    if (away) { showBubble(`${state.child.bear.name} is on a trip — back soon!`); return; }
+    if (!state.settings.buddyEnabled) { showBubble("My grown-up switched chatting off for now."); setMood("resting"); return; }
     setOpen(true);
   };
   const send = async (text) => {
     if (!text.trim() || busy || inflight.current || !allowed()) return false;
     inflight.current = true;
     const id = ++turn.current;
-    stopSpeaking(); setMood("thinking"); setBubble("…");
+    stopSpeaking(); setMood("thinking"); showBubble("…");
     try {
       const result = await run("buddy/chat", { text: text.trim() });
       if (id !== turn.current || !allowed()) return false;
-      if (!result) { setMood("resting"); setBubble("Let's try that again in a moment."); return false; }
-      setBubble(result.reply);
+      if (!result) { setMood("resting"); showBubble("Let's try that again in a moment."); return false; }
+      showBubble(result.reply);
       setMood(/Hmm|trusted grown-up|quick answer|ask.*again/i.test(result.reply) ? "resting" : "happy");
       const maySpeak = () => id === turn.current && allowed() && !latest.current.muted;
       if (maySpeak()) speak(result.reply, state.integrations.voice, maySpeak).catch(() => {});
@@ -1155,13 +1199,13 @@ function useMapleTalk({ state, run, busy, offline }) {
     setMuted(next); store.set("mq_muted", String(next));
     if (next) stopSpeaking();
   };
-  return { isOpen, bubble, mood, muted, open, close, send, toggleMute };
+  return { isOpen, bubble, bubbleId, mood, muted, open, close, dismiss, send, toggleMute };
 }
 
-function SpeechBubble({ text, thinking }) {
+function SpeechBubble({ text, thinking, staticText, onClose }) {
   const [shown, setShown] = useState("");
   useEffect(() => {
-    if (thinking || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { setShown(text); return; }
+    if (staticText || thinking || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { setShown(text); return; }
     setShown("");
     let n = 0;
     const timer = setInterval(() => {
@@ -1170,9 +1214,10 @@ function SpeechBubble({ text, thinking }) {
       if (n === text.length) clearInterval(timer);
     }, 18);
     return () => clearInterval(timer);
-  }, [text, thinking]);
+  }, [text]);
   return (
     <div className="bear-bubble" aria-live="polite" aria-atomic="true">
+      <button className="round-btn bubble-close" onClick={onClose} aria-label="Close speech bubble"><Icon name="close" size={18} /></button>
       <span className="sr-only">{text}</span><span className="bear-bubble-text" aria-hidden="true">{shown || "\u00a0"}</span>
     </div>
   );
@@ -1209,7 +1254,8 @@ function TalkBar({ state, talk, busy, open }) {
     session.onerror = session.onend = () => { recognition.current = null; setListening(false); };
     try { session.start(); setListening(true); } catch { recognition.current = null; setListening(false); }
   };
-  const suggestions = ["Can I buy a $15 toy?", "When will I get my bike?", "Make me a saving plan"];
+  const goal = currentSavingsGoal(state);
+  const suggestions = ["Can I buy a $15 toy?", ...(goal ? [`When can I reach my ${goal.title} goal?`] : []), "Make me a saving plan"];
   return (
     <section className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
       <div className="talk-links">

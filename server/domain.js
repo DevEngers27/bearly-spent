@@ -334,17 +334,21 @@ export function completeLesson(db, lessonId, answers) {
   return { passed, correct, total: lesson.questions.length, firstTime };
 }
 
-export function completeBudget(db, allocations, now = Date.now()) {
-  // allocations: { save, needs, fun, give } in cents, must total $20
-  const vals = ["save", "needs", "fun", "give"].map((k) => Math.round(Number(allocations?.[k]) || 0));
-  if (vals.some((v) => v < 0)) throw new GameError("No negative amounts");
-  const total = vals.reduce((a, b) => a + b, 0);
-  if (total !== 2000) throw new GameError(`Your budget adds up to ${dollars(total)} — it needs to be exactly $20.00`);
-  if (vals[0] < 400) throw new GameError("Try saving at least $4 (20%) — future you will say thanks!");
-  if (vals[1] < 500) throw new GameError("Don't forget needs! Put at least $5 there.");
+export function completeBudget(db, allocations, now = Date.now(), total = 2000) {
+  // Allocations and total are integer cents. Keep the existing clock argument.
+  if (!Number.isInteger(total) || total < 100 || total > 20000) throw new GameError("Plan $1 to $200 for your week");
+  const keys = ["save", "needs", "fun", "give"];
+  if (!allocations || Object.keys(allocations).length !== keys.length) throw new GameError("Fill in every part of your budget");
+  const vals = keys.map((k) => allocations[k]);
+  if (vals.some((v) => !Number.isInteger(v) || v < 0)) throw new GameError("Use positive amounts or zero in your budget");
+  const sum = vals.reduce((a, b) => a + b, 0);
+  if (sum !== total) throw new GameError(`Your budget adds up to ${dollars(sum)} — plan exactly ${dollars(total)}`);
+  if (vals[0] < Math.ceil(total * 0.2)) throw new GameError("Try saving at least 20% — future you will say thanks!");
+  if (vals[1] < Math.ceil(total * 0.25)) throw new GameError("Don't forget needs! Put at least 25% there.");
   const week = weekKey(now, db.settings.timezone);
   const repeat = db.child.lastBudgetWeek === week;
   db.child.lastBudgetWeek = week;
+  db.child.lastBudget = { total, allocations: Object.fromEntries(keys.map((k, i) => [k, vals[i]])), plannedAt: now };
   db.child.stats.budgetsDone += 1;
   if (!repeat) addPoints(db, POINTS.budget, "weekly budgeting challenge");
   audit(db, "child", "budget_done", `Weekly budget: save ${dollars(vals[0])}, needs ${dollars(vals[1])}, fun ${dollars(vals[2])}, give ${dollars(vals[3])}`);
@@ -782,9 +786,9 @@ export function friendView(f) {
     if (f.status !== "approved") return { id: f.id, real: true, status: f.status, incoming: !f.initiator, childAccepted: f.childAccepted, ...(f.initiator ? {} : { name: firstName(readChild(f.peerId)) }) };
     const peer = readChild(f.peerId);
     const bear = Object.fromEntries(["name", "hat", "eyes", "neck", "outfit", "held", "friend", "background"].map((key) => [key, peer.child.bear[key]]));
-    return { id: f.id, real: true, status: f.status, name: firstName(peer), bear, postcards: peer.postcards.map((p) => p.defId), greetings: f.greetings || [] };
+    return { id: f.id, real: true, status: f.status, name: firstName(peer), bear, postcards: peer.postcards.map((p) => p.defId), metrics: { postcards: postcardMetrics(peer) }, greetings: f.greetings || [] };
   }
-  return { id: f.id, name: f.name, status: f.status, bear: f.bear, postcards: f.postcards, greetings: f.greetings || [], coopLearning: f.coopLearning };
+  return { id: f.id, name: f.name, status: f.status, bear: f.bear, postcards: f.postcards, metrics: { postcards: { places: new Set(f.postcards).size, cards: f.postcards.length, total: Object.keys(PLACES).length } }, greetings: f.greetings || [], coopLearning: f.coopLearning };
 }
 
 export function weeksToGoal(db, goal = currentGoal(db), extraSaving = 0) {
@@ -982,7 +986,8 @@ export function runSocialAction(childId, action, input, recordId, now = Date.now
       else docs.forEach((doc, i) => {
         records[i].status = "declined";
         closeSocialApprovals(doc, record.id, "declined");
-        notify(doc, "child", "Your friend request didn't go through.", "info");
+        notify(doc, "child", records[i].initiator ? "Your friend request didn't go through." : "Request closed", "info");
+        if (records[i].initiator && !records[0].initiator) notify(doc, "parent", `${firstName(docs[1 - i])}'s family said not right now`, "info");
         audit(doc, "system", "friend_declined", "Friend request did not go through");
       });
     } else if (!isTrade) advanceFriend(docs, records);
@@ -1012,5 +1017,8 @@ export function isDemoChild(d) {
 }
 
 export function socialApprovalsView(d) {
-  return d.approvals.filter((a) => isDemoChild(d) || a.real || !["friend", "trade"].includes(a.kind));
+  return d.approvals.filter((a) => isDemoChild(d) || a.real || !["friend", "trade"].includes(a.kind)).map((a) => {
+    const friend = a.real && a.kind === "friend_request" && d.friends.find((f) => f.id === a.socialId);
+    return friend?.status === "declined" ? { ...a, status: "declined" } : a;
+  });
 }

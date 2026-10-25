@@ -121,6 +121,7 @@ test("G1 parent controls use selected goal IDs and protect bought/current/pendin
   await button(render(), "Archive").props.onClick();
   assert.equal(calls.at(-1)[0], "parent/goals/goal_bike/archive");
   await button(render(), "Delete").props.onClick();
+  await button(render(), "Confirm delete").props.onClick();
   assert.equal(calls.at(-1)[0], "parent/goals/goal_bike");
   assert.equal(calls.at(-1)[3].method, "DELETE");
   props.goal = state.goals[1]; assert.equal(button(render(), "Delete").props.disabled, true);

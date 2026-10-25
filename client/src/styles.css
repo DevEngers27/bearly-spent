@@ -677,7 +677,7 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .sign-time { font: 800 20px var(--body); fill: var(--ink); }
 @keyframes sign-sway { 0%, 100% { transform: rotate(-1.5deg); } 50% { transform: rotate(1.5deg); } }
 .scene:has(.bear-bubble) { padding-top: 150px; min-height: 470px; aspect-ratio: auto; min-width: 0; }
-.bear-bubble { position: absolute; z-index: 4; top: 68px; left: 6%; width: 88%; max-width: calc(100% - 24px); overflow-wrap: anywhere; word-break: break-word; padding: 15px 18px; font-size: 14px; line-height: 1.45; background: #FFFDF7; border: 2px solid var(--ink); border-radius: 22px 24px 20px 18px; isolation: isolate; }
+.bear-bubble { position: absolute; z-index: 4; top: 68px; left: 6%; width: 88%; max-width: calc(100% - 24px); overflow-wrap: anywhere; word-break: break-word; padding: 15px 58px 15px 18px; font-size: 14px; line-height: 1.45; background: #FFFDF7; border: 2px solid var(--ink); border-radius: 22px 24px 20px 18px; isolation: isolate; }
 .bear-bubble::after { content: ""; position: absolute; bottom: -11px; left: 42%; width: 18px; height: 18px; background: #FFFDF7; border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); transform: rotate(45deg); pointer-events: none; }
 .bear-bubble-text { display: block; min-height: 42px; max-height: 96px; overflow-y: auto; white-space: pre-wrap; }
 .thought-dots { position: absolute; top: -8%; right: -10%; display: flex; gap: 5px; background: var(--paper-card); padding: 10px; border: 2px solid var(--ink); border-radius: 50%; }
@@ -858,3 +858,5 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
   .role-parent .sheet, .sheet[aria-label="Grown-ups only"] { max-width: 100%; max-height: calc(100dvh - env(safe-area-inset-top)); overflow-wrap: anywhere; }
   .sheet[aria-label="Grown-ups only"] button, .sheet[aria-label="Grown-ups only"] input { min-height: 44px; min-width: 44px; }
 }
+
+.bubble-close { position: absolute; top: 4px; right: 4px; min-width: 44px; min-height: 44px; }

@@ -1108,7 +1108,7 @@ test("F6: talk guards Buddy-off, away and offline with warm bubbles and no reque
     let talk = h.render(h.exports.useMapleTalk, props); h.flush();
     talk.open(); talk = h.render(h.exports.useMapleTalk, props);
     assert.equal(talk.isOpen, false);
-    assert.match(talk.bubble, mode === "off" ? /grown-up switched chatting off/ : mode === "away" ? /on a trip! Back in 0:42/ : /can't chat while we're offline/);
+    assert.match(talk.bubble, mode === "off" ? /grown-up switched chatting off/ : mode === "away" ? /on a trip — back soon!/ : /can't chat while we're offline/);
     assert.equal(await talk.send("Hello"), false);
     assert.equal(calls, 0);
   }
@@ -1284,7 +1284,7 @@ test("F36.1: bubble containment", async () => {
     const component = nodes(scene, (n) => n.type?.name === "SpeechBubble")[0];
     const rendered = harness("Child.jsx");
     const markup = rendered.render(rendered.exports.SpeechBubble, component.props);
-    assert.match(text(markup), away ? /Maple is on a trip!/ : /A long reply/);
+    assert.match(text(markup), away ? /Maple is on a trip — back soon!/ : /A long reply/);
     assert.equal(markup.props.style?.width, undefined);
   }
 });
@@ -2064,7 +2064,7 @@ test("W3.2: a 12-line reply stays in a bordered bubble with a separate inner scr
   const inner = css.match(/\.bear-bubble-text\s*\{([^}]+)\}/)[1];
   assert.match(outer, /border: 2px solid/);
   assert.match(outer, /border-radius:/);
-  assert.match(outer, /padding: 15px 18px/);
+  assert.match(outer, /padding: 15px 58px 15px 18px/);
   assert.doesNotMatch(outer, /(?:^|;)\s*(?:max-)?height:|overflow-y:/, "border grows with the content box");
   assert.match(inner, /max-height: 96px/);
   assert.match(inner, /overflow-y: auto/);

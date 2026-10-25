@@ -67,7 +67,7 @@ test("G5.1/2/6: profile views expose current identity, lifetime numbers and newe
   assert.equal(view.profile.friendCode, null); // unsaved documents have no friend_codes row (see friends.test.js)
   assert.equal(view.profile.since, 123456789);
   assert.equal(view.profile.stats.points, 40);
-  assert.deepEqual(view.profile.stats.postcards, { collected: 1, cards: 2, total: Object.values(view.catalog.places).filter((p) => p.open).length });
+  assert.deepEqual(view.profile.stats.postcards, { collected: 1, cards: 2, total: view.metrics.postcards.total });
   assert.equal(view.profile.stats.tripsTaken, 2);
   assert.equal(view.profile.stats.lessonsFinished, 2);
   assert.equal(view.profile.stats.missionsDone, 1);
