@@ -117,7 +117,7 @@ test("H9.2 first passes roll the server window; every replay earns zero points a
     assert.equal(view.lessons.finished.length, i + 1);
   }
   assert.deepEqual(readChild(a.id).accounts, money);
-  assert.deepEqual(snapshot(readChild(a.id)).lessons, { finished: 15, total: 15 });
+  assert.deepEqual(snapshot(readChild(a.id)).lessons, { finished: 15, total: 15, next_titles: [] });
   const d = seed(Date.now());
   // Direct first pass preserves the existing lesson reward, separate from daily mission rewards.
   const before = d.child.points;

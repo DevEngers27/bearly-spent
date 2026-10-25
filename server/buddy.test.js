@@ -410,7 +410,7 @@ test("a completed model plan update posts one cheerful auto note", async (t) => 
 
 const guardFallback = "Hmm, let's talk about your savings or Maple's next trip instead! Want to see how close you are to your goal?";
 
-test("systemPrompt includes child background, every content rule and money-tool rules under 900 words", () => {
+test("systemPrompt includes child background, every content rule and money-tool rules under 1800 words (the kid guide rides along)", () => {
   const prompt = _internals.systemPrompt(read());
   for (const keyword of [
     "Who you are talking to", "7–12", "alone with the device", "parent reads every transcript",
@@ -421,7 +421,7 @@ test("systemPrompt includes child background, every content rule and money-tool 
     "trusted grown-up", "return to money or the bear", "get_snapshot", "simulate_purchase",
     "update_savings_plan", "propose_mission", "cannot move, send, or spend money",
   ]) assert.ok(prompt.includes(keyword), keyword);
-  assert.ok(prompt.split(/\s+/).length < 900);
+  assert.ok(prompt.split(/\s+/).length < 1800);
 });
 
 test("guard BLOCK replaces a chat reply and only audits the first 80 blocked characters", async (t) => {

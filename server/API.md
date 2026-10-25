@@ -4,6 +4,45 @@ This is the API contract for the v0.4.0 release candidate; the cookie-based clie
 
 `GET /help/apple-cash` is a public, server-rendered HTML guide loaded from `docs/apple-cash-shortcut.md` before static serving and the SPA fallback. It uses the request origin in example URLs, escapes all Markdown content and host text, and never includes session or Shortcut tokens.
 
+`GET /help` is a public server-rendered page with the parent guide followed by
+the kid guide from `docs/help/`. It shares the Apple Cash guide renderer and
+styling, escapes guide text, uses a generic bear name, and never reads credentials.
+
+## App help and Buddy knowledge (H11)
+
+`POST /api/parent/help/ask {question}` requires an unlocked parent session and
+accepts a trimmed, nonempty string of at most 500 characters. The normal
+`?child=` selection and family isolation apply. The limit is 20 valid questions
+per hour per family (shared across children and devices); 429 includes
+`Retry-After`. Windows are process-local and reset on restart.
+
+Returns `{answer,mode:"claude"|"offline"}`. Claude receives a redacted question,
+a parent-only `lookup_help` tool, and only children's first names, selected
+child's first name, whether a PIN is set, and the selected child's Shortcut
+connection status. No balances, parent names, family labels, codes, tokens,
+email, PIN value, or password are included in these family facts. Questions
+and answers are not stored in MoneyQuest. No game data is changed. With no
+provider key, provider failure, or no completed answer, local guide lookup
+returns the best one or two parent sections directly.
+
+Buddy's `lookup_help` always searches only the kid guide, irrespective of tool
+input requesting another audience. Bear placeholders are replaced with that
+child's bear name. Offline kid chat also looks up app-use questions locally.
+Guides use exact current UI labels; screen changes must update `docs/help/`
+and pass the label regression check (see `specs/COMMON.md`).
+
+The read-only Buddy snapshot adds `wardrobe` (points, wearing labels, owned
+labels, up to six unowned affordable point items cheapest first, and the next
+unaffordable point item or null), `postcards` (trip-place/card counts, latest
+collected card and date, away flag and minutes to return), `friends` (approved
+count and first names, pending request/swap counts only), lesson `next_titles`
+(up to three), `weekly_budget` (last practice plan or null), `apple_cash_waiting`
+(receipt count and total), and `current_goal` (live goal or null). Money amounts
+are formatted dollar strings and dates are ISO dates. Existing goals,
+transactions, missions and plan remain available. No unrevealed destination,
+friend codes, peer IDs, family labels, or receipt details are added. The normal
+seed snapshot is about 2 KB; existing goal/history lists can make it larger.
+
 ## Conventions and authentication
 
 All successful JSON routes return HTTP 200. Actions without another result return `{ "ok": true }`. Errors are `{ "error": "short message" }` (except the `/api/auth/me` 401 shape below): 400 invalid input/game rule, 401 missing/invalid/expired credentials or wrong password/PIN, 403 child attempting parent access or parent mode locked, 404 unknown route/child or unavailable integration/demo control, 410 deprecated savings-goal route, 413 JSON body too large, 429 rate/concurrency limit. An unknown child and another family's child both return 404. Unexpected errors return a generic 500.

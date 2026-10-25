@@ -238,3 +238,11 @@ Browser/device verification remains pending. No listening server was started.
 - [ ] Verify bold, italic, paragraphs/breaks, short lists and inline code in child chat, bubble and parent log. HTML and URL text never run/open. Unclosed/nested markers stay readable; long replies wrap and bubble scrolls; typewriter and reduced motion still work.
 
 Socket-free coverage: `client/h9.test.mjs` and `server/h9.test.js`. These checks do not establish real-device/browser visual acceptance; record actual browser and date when checking the items above.
+
+## H11 app help and Buddy knowledge
+
+Socket-free coverage: `server/h11.test.js` and `client/h11.test.mjs`.
+
+- [ ] At 360/390px and desktop widths, open Ask about MoneyQuest from More or the sidebar. Ask about kid codes and Apple Cash; check loading, errors/retry, keyboard focus, wrapped Markdown steps, and Help links. Navigate away or switch children during a pending answer; the old answer must not appear in the new panel. Device-offline disables asking; no-key server mode still returns guide text.
+- [ ] Open Help from Welcome and parent More. Parent guide appears first, kid guide second, with readable numbered steps and a working Apple Cash setup link. No credentials or family data appear in the public page.
+- [ ] Tap the How do I…? chip in the kid talk bar. Finish a question about friends or goals and check exact UI steps and the custom bear name. With Claude configured, inspect lookup_help's kid-only results and personalised wardrobe, postcards, budget, pending Apple Cash and current-goal facts. No model/provider live verification is implied by stubbed tests.

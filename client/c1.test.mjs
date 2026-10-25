@@ -1156,11 +1156,12 @@ test("F6: going away during a reply closes the bar and ignores the stale reply",
   assert.equal(talk.isOpen, false); assert.equal(talk.bubble, "");
 });
 
-test("F6: talk bar offers exactly three suggestions, text input and transcript link", () => {
+test("F6/H11: talk bar offers three suggestions, a how-to chip, text input and transcript link", () => {
   const h = harness("Child.jsx"), state = stateFixture();
   const props = { state, talk: { close: noop, send: async () => false }, open: noop };
   let tree = h.render(h.exports.TalkBar, props);
-  assert.equal(nodes(tree, (n) => n.props.className === "chip").length, 3);
+  assert.equal(nodes(tree, (n) => n.props.className === "chip").length, 4);
+  assert.ok(byText(tree, "How do I…?"));
   assert.ok(byText(tree, "Can I buy a toy for $8?"));
   assert.equal(nodes(tree, (n) => n.props["aria-label"] === "Hold to talk").length, 0);
   assert.ok(byText(tree, "See our chat"));

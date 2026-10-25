@@ -312,6 +312,7 @@ function AuthScreen({ screen, navigate, demo, onSession, error, welcomeHint }) {
           <button className="btn wide" aria-describedby="kid-code-hint" onClick={() => navigate("link")}>I have a kid code</button>
           <p className="fine" id="kid-code-hint">Ask your grown-up for a 6-letter kid code (Parent → Kids)</p>
           {demo && <button className="link" disabled={busy} onClick={() => login("demo/login", {})}>Try the demo family</button>}
+          <footer className="auth-help"><a href="/help" target="_blank" rel="noopener noreferrer">Help</a></footer>
         </> : <form className="auth-form" onSubmit={submit}>
           {screen === "create" && <label>Your name<input autoComplete="name" required maxLength={64} {...field("parentName")} /></label>}
           {screen !== "link" && <>

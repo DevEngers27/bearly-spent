@@ -12,6 +12,7 @@ export const policies = {
   kidLink: [5, 15 * MINUTE],
   missionSeen: [30, HOUR],
   chat: [30, HOUR],
+  parentHelp: [20, HOUR],
   walletPing: [60, HOUR], walletSpend: [60, HOUR],
 };
 

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { guides } from "./kb.js";
 
 const guide = new URL("../docs/apple-cash-shortcut.md", import.meta.url);
 const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
@@ -46,11 +47,20 @@ export function appleCashHelp(req) {
   const host = /^[a-zA-Z0-9.-]+(:\d+)?$/.test(rawHost) ? rawHost : "localhost";
   // Host is inserted only into escaped text, never executable markup or a link.
   const markdown = readFileSync(guide, "utf8").replaceAll("https://YOUR_MONEYQUEST_SITE", `${protocol}://${host}`);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Apple Cash tracking · MoneyQuest</title><style>
+  return helpPage("Apple Cash tracking", markdown);
+}
+
+export function appHelp() {
+  return helpPage("Help", `${guides.parent}\n\n${guides.kid}`.replaceAll("<bear>", "your bear"),
+    '<p><a href="/help/apple-cash">Apple Cash Shortcut setup</a></p>');
+}
+
+function helpPage(title, markdown, extra = "") {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)} · MoneyQuest</title><style>
     * { box-sizing: border-box; } body { margin: 0; background: #F7F0DF; color: #514738; font: 17px/1.6 ui-rounded, system-ui, sans-serif; padding: 24px 16px; }
     main { max-width: 760px; margin: auto; padding: 28px; background: #FCF8EE; border: 2px solid #514738; border-radius: 18px; box-shadow: 0 6px 14px -8px #514738; overflow-wrap: anywhere; }
     h1, h2 { font-family: "Comic Sans MS", cursive; line-height: 1.2; } h2 { margin-top: 32px; } a { color: #4F7389; } li { margin: 10px 0; }
     code { font-size: 0.9em; } pre { white-space: pre-wrap; background: #EFE5CC; padding: 16px; border-radius: 10px; } table { border-collapse: collapse; } th, td { text-align: left; vertical-align: top; padding: 10px; border: 1px solid #BBAE94; } .table-wrap { overflow-x: auto; }
     @media (max-width: 480px) { main { padding: 18px; } }
-  </style></head><body><main><a href="/">Back to MoneyQuest</a>${renderMarkdown(markdown)}</main></body></html>`;
+  </style></head><body><main><a href="/">Back to MoneyQuest</a>${extra}${renderMarkdown(markdown)}</main></body></html>`;
 }
