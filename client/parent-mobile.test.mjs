@@ -249,7 +249,7 @@ test("G2.2: the family header follows the selected child and keeps Lock separate
 test("G2.3: phone records expose labels and values, including every transaction and wallet column", () => {
   const props = fixture(), state = props.state;
   state.transactions = [{ id: "one", ts: Date.now(), memo: "A".repeat(200), from: "savings", to: "spending", amount: 100, status: "posted" }];
-  state.walletTransactions = [{ ...state.transactions[0], kind: "wallet_in" }];
+  state.walletTransactions = [{ ...state.transactions[0], kind: "wallet_spend" }];
   for (const [name, expected] of [["Activity", ["When", "What", "From → to", "Amount", "Status"]], ["WalletLedger", ["When", "What", "Amount", "Status"]]]) {
     const h = harness(), tree = h.render(h.exports[name], props);
     assert.deepEqual(nodes(tree, (n) => n.type === "td").map((n) => n.props["data-label"]), expected);
@@ -258,7 +258,7 @@ test("G2.3: phone records expose labels and values, including every transaction 
 });
 
 test("G2.3: all mobile numeric fields specify decimal or numeric keyboards", () => {
-  for (const name of ["Goals", "Allowance", "WalletLedger"]) {
+  for (const name of ["Goals", "Allowance"]) {
     const h = harness(), tree = h.render(h.exports[name], { ...fixture(), mobile: true });
     const fields = nodes(tree, (n) => n.type === "input" && n.props.type === "number");
     assert.ok(fields.length);

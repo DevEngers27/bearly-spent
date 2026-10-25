@@ -68,6 +68,18 @@ function placesView(db, now = Date.now()) {
   }));
 }
 
+function walletSummary(db, now) {
+  const rows = db.transactions.filter((t) => t.kind === "wallet_spend" && t.status === "posted" && t.ts <= now);
+  const zone = db.settings.timezone;
+  const day = dayKey(now, zone), week = weekKey(now, zone);
+  const total = (matches) => rows.filter(matches).reduce((sum, t) => sum + t.amount, 0);
+  return {
+    today: total((t) => dayKey(t.ts, zone) === day),
+    week: total((t) => weekKey(t.ts, zone) === week),
+    month: total((t) => dayKey(t.ts, zone).slice(0, 7) === day.slice(0, 7)),
+  };
+}
+
 export function childView(db, now = Date.now()) {
   game.normalizeGoals(db);
   const day = dayKey(now, db.settings.timezone);
@@ -99,8 +111,9 @@ export function childView(db, now = Date.now()) {
     budgetDoneThisWeek: db.child.lastBudgetWeek === week,
     child: db.child,
     profile,
-    balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance, wallet: db.accounts.wallet.balance },
-    walletLastTransaction: db.transactions.findLast((t) => ["wallet_in", "wallet_spend"].includes(t.kind)) || null,
+    balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance, parent: db.accounts.parent.balance },
+    walletSpent: walletSummary(db, now),
+    walletLastTransaction: db.transactions.filter((t) => t.kind === "wallet_spend" && t.status === "posted").sort((a, b) => b.ts - a.ts)[0] || null,
     currentGoalId: db.child.currentGoalId,
     goals: db.savingsGoals.map((g) => ({ ...g, current: g.id === db.child.currentGoalId, weeksLeft: game.weeksToGoal(db, g) })),
     allowance: { amount: db.allowance.amount, savePct: db.allowance.savePct, nextRun: db.allowance.nextRun, spendLimit: db.allowance.spendLimit },
@@ -133,7 +146,7 @@ export function childView(db, now = Date.now()) {
   };
 }
 
-export function parentView(db, before) {
+export function parentView(db, before, now = Date.now()) {
   let end = db.buddy.chat.length;
   if (before !== undefined) {
     if (typeof before !== "string" || before.length > 64) throw new GameError("Pick a chat message");
@@ -142,13 +155,13 @@ export function parentView(db, before) {
   }
   const chat = db.buddy.chat.slice(Math.max(0, end - 200), end);
   return {
-    ...childView(db),
+    ...childView(db, now),
     adventures: db.adventures.slice(-10).reverse(),
     family: { parentName: db.family.parentName },
     chat,
     chatNextBefore: end > chat.length ? chat[0]?.id : null,
-    accounts: Object.fromEntries(Object.entries(db.accounts).map(([key, account]) => [key, {
-      ...account, ...(["savings", "spending"].includes(key) ? { label: `${db.child.name}'s ${key}` } : {}),
+    accounts: Object.fromEntries(["parent", "savings", "spending"].map((key) => [key, {
+      ...db.accounts[key], ...(["savings", "spending"].includes(key) ? { label: `${db.child.name}'s ${key}` } : {}),
     }])),
     allowance: db.allowance,
     approvals: game.socialApprovalsView(db).slice().reverse(),
@@ -157,7 +170,8 @@ export function parentView(db, before) {
     transactions: db.transactions.slice(-60).reverse(),
     audit: db.audit.slice(-120).reverse(),
     tracking: db.tracking.slice(-20).reverse(),
-    walletTransactions: db.transactions.filter((t) => ["wallet_in", "wallet_spend"].includes(t.kind)).slice(-60).reverse(),
+    walletTransactions: db.transactions.filter((t) => t.kind === "wallet_spend").slice(-60).reverse(),
+    walletPending: (db.walletPending || []).slice().reverse(),
     walletLastPing: db.walletLastPing || null,
     friends: game.socialFriendsView(db),
   };
@@ -205,7 +219,7 @@ register("POST", "/api/parent/children/:id/profile", "parent", (req, ctx) => upd
 register("POST", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.createLink(ctx, req.params.id, now));
 register("GET", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.linkStatus(ctx, req.params.id, req.query?.code, now));
 register("GET", "/api/state", "child", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...childView(readChild(ctx.childId), now) }; });
-register("GET", "/api/parent/state", "parent", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before) }; });
+register("GET", "/api/parent/state", "parent", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before, now) }; });
 register("GET", "/api/child/wallet/token", "parent", (req, ctx, res, now) => auth.walletToken(ctx, { now }));
 register("POST", "/api/child/wallet/token", "parent", (req, ctx, res, now) => {
   actions.walletPing(null, req.body);
@@ -219,9 +233,17 @@ register("POST", "/api/child/wallet/ping", "child", (req, ctx, res, now) => {
 });
 register("POST", "/api/child/wallet/spend", "child", (req, ctx, res, now) => {
   takeLimit("walletSpend", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
-  return runChildAction(ctx.childId, (db) => actions.walletSpend(db, req.body), "walletSpend", now);
+  const result = runChildAction(ctx.childId, (db) => actions.walletSpend(db, req.body, now), "walletSpend", now);
+  if (result.reason === "funding_short") res.status(409);
+  return result;
 });
-register("POST", "/api/parent/wallet/send", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.walletSend(db, req.body), "wallet_in", now));
+register("POST", "/api/parent/wallet/send", "parent", () => game.parentWalletSend());
+register("POST", "/api/parent/wallet/pending/:id/record", "parent", (req, ctx, res, now) => {
+  const result = runChildAction(ctx.childId, (db) => actions.walletRecord(db, req.body, req.params.id, now), "wallet_record", now);
+  if (result.reason === "funding_short") res.status(409);
+  return result;
+});
+register("POST", "/api/parent/wallet/pending/:id/dismiss", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.walletDismiss(db, req.body, req.params.id), "wallet_dismiss", now));
 
 export function stream(req, context, res) {
   res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-store, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });

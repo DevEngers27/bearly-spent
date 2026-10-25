@@ -71,7 +71,7 @@ A paired child receives only its own summary in `children` and no `user` field; 
 | `GET /api/parent/children/:id/devices` | Parent | No fields | Array of active paired child devices: `{id,created_at,last_seen,name}`. Times in Unix milliseconds; `name` is a short user-agent description. IDs are separate opaque digests, not session tokens or stored credential hashes. |
 | `DELETE /api/parent/children/:id/devices/:sessionId` | Parent | No fields | `{ok:true}`; revokes only that child's device within this family. Unknown child/device: 404. Requires PIN unlock when set. |
 
-New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Each child currently has its own funding account; shared family funding is a follow-up. New non-demo families cannot add funding through the current UI/API because top-ups are demo-only; configuring allowance alone does not fund it. The simulated `DIRECTORY` friend codes remain available only to the demo family. Real families use the G3 friend-code flow below; friend views never contain money.
+New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Each child currently has its own funding account; shared family funding is a follow-up. Families record funds through Allowance → Add money (`POST /api/parent/funding/add`); configuring allowance alone does not fund it. The simulated `DIRECTORY` friend codes remain available only to the demo family. Real families use the G3 friend-code flow below; friend views never contain money.
 
 PIN is an optional quick switch **inside a parent-authenticated device**, not a way to obtain a parent session on a paired child device. If a PIN is already set, changing it requires an unlocked parent session. A new password login starts locked until `/api/parent/unlock`. Child routes remain available from that parent session.
 
@@ -173,46 +173,57 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | `POST /api/parent/settings` | Partial `{requireTradeApproval?,buddyEnabled?,coopChallenge?,timezone?}` | `{ok:true}`; strict booleans; timezone must be a valid IANA name. Disabling Buddy cancels this child's queued/in-flight replans. |
 | `POST /api/parent/savings-goal` | Deprecated | HTTP 410; use `/api/parent/goals` and `/api/parent/goals/:id`. |
 
-## Apple Cash tracking (F2)
+## Apple Cash tracking (H1)
+
+There is one funding account (`accounts.parent`, label `Funding account`), plus
+savings and spending. Allowance and Apple Cash purchases both draw from funding.
+These routes record money already paid outside MoneyQuest; no Apple payment or
+Nessie instruction is made. No account may go negative.
 
 | Method and route | Auth | Request / response |
 | --- | --- | --- |
-| `POST /api/parent/wallet/send` | Parent | `{amount,note?}` records an already-sent inflow `outside → wallet`, `kind:wallet_in`, memo `Sent via Apple Cash`; returns the transaction. $0.01–$10,000. Money comes from the parent's own pocket: only wallet is credited, with no debit or change to the child's funding record, savings or spending. This is tracking, not a payment instruction. |
-| `POST /api/child/wallet/spend` | Child | `{amount,merchant,at?,external_id?}` records `wallet → merchant`, `kind:wallet_spend`; returns the transaction plus `duplicate`. Amount $0.01–$10,000; merchant <=120 chars; date ISO 8601 with zone or Unix milliseconds; external ID <=64 chars. Keys persist per child after ledger retention. Short balances post with `uncovered:true`; over-limit purchases notify without a hold. G4 anomaly notices apply. |
+| `POST /api/parent/wallet/send` | Parent | Retired: HTTP 410. Use `POST /api/parent/funding/add` instead. |
+| `POST /api/child/wallet/spend` | Child | `{amount,merchant,at?,external_id?}` records `parent → merchant`, `kind:wallet_spend`; HTTP 200 returns the transaction plus `duplicate`. Amount $0.01–$10,000; merchant <=120 chars; date ISO 8601 with zone or Unix milliseconds; external ID <=64 chars. Over-limit purchases record and notify without an approval hold; G4 unusual-spend notices also apply. |
+| `POST /api/parent/wallet/pending/:id/record` | Parent | `{}` posts the saved receipt if funding covers it. Returns the transaction plus `duplicate`; repeating a successful record or the original external ID cannot debit twice. HTTP 409 if still short. |
+| `POST /api/parent/wallet/pending/:id/dismiss` | Parent | `{}` removes the pending receipt and audits the dismissal. External-ID retries return the dismissed receipt without a debit. |
 | `GET /api/child/wallet/token` | Parent + configured, unlocked PIN | `{token:null,id,expiresAt}` for the selected child's active Shortcut, null ID/time if absent; no mutation. |
 | `POST /api/child/wallet/token` | Parent + configured, unlocked PIN | `{}` rotates/revokes only that child's Shortcut sessions; returns `{token,id,expiresAt}`. Raw token is shown only in this response; hashes only in storage. |
 | `POST /api/child/wallet/ping` | Child | `{}` returns `{ok:true,childId,at}` and records the connection time without a transaction. |
 
-Ping and spend each allow 60 requests per hour per authenticated session and
-selected child, in independent fixed windows starting with the first request.
-This includes Shortcut Bearer tokens, paired child browsers and parent sessions
-using child routes. Authenticated invalid payloads and idempotent retries count.
-Excess requests return 429 with `{error:"Let's take a little break. Try again soon!",
-retryAfterSeconds:N}` and a matching `Retry-After: N` header; they do not change the
-wallet or ping time. Keep pending Shortcut purchases and retry after that delay
-with the original body and `external_id`. Limits are process-local and reset on
-API restart, like the other request limits.
+Short funding returns HTTP **409** with
+`{error:"Your grown-up's funding is short for that. Ask them to add money!",reason:"funding_short",shortBy:N}`
+(`N` is cents). No transfer posts. The receipt is saved in `walletPending` (newest
+20 retained) and the parent is notified once per receipt. Use Inbox → Add money,
+then Record now, or retry the original Shortcut body and external ID after funding.
+The first receipt's amount, merchant and time win on retries. Receipt keys survive
+rolling ledger/pending retention and restarts. Receipts older than the pending cap
+can still be retried with their original external ID after funding is added.
+Manual purchases without an external ID cannot be matched to a Shortcut entry.
 
-The ledger invariant is funding + savings + spending + wallet + posted merchant
-outflows − posted outside inflows. Recording sent Apple Cash increases wallet
-and outside inflows equally; it never reduces funding or drives funding negative.
+Ping and spend each allow **60/hour per selected child and authenticated session**,
+in independent windows starting at the first request. Invalid authenticated
+payloads, short-funded attempts and retries count. HTTP **429** returns
+`{error:"Let's take a little break. Try again soon!",retryAfterSeconds:N}` with
+`Retry-After: N`. Keep the original body and external ID and retry after the delay.
+A rejected rate-limited request changes no receipt or balance. Limits reset on
+API restart. Token kind `shortcut`, child binding, fixed 180-day lifetime, PIN
+requirements, rotation, Devices → Unlink and family-wide logout are unchanged.
+All routes honor `?child=`; child credentials cannot select a sibling.
 
-All routes honor `?child=`. Shortcut credentials are child-bound, fixed 180-day
-sessions with device kind `shortcut`. Devices responses now include `kind`
-(`browser` or `shortcut`); Shortcut name is `Apple Cash Shortcut`. Existing Unlink
-and family-wide logout revoke them. Normal paired sessions are unaffected by
-Shortcut rotation. Browser setup tests must omit cookies when using the Bearer
-token so the test cannot replace the parent's session cookie.
+Child state has `balances.{parent,savings,spending}`, `walletLastTransaction`
+(latest posted Apple Cash purchase by purchase time), and `walletSpent` totals in
+cents (`today`, ISO `week`, calendar `month`, in the family time zone). Parent
+state has the same fields, the three `accounts`, up to 60 `walletTransactions`
+(newest recorded first, purchases only), `walletPending`, and `walletLastPing`.
+Purchases include merchant, purchase time `ts`, `recordedAt`, optional external ID,
+and `overLimit` / `unusual` flags. Pending receipts show as waiting for funding.
+G5 considers the next allowance, unpaid reward/extra commitments and the last
+seven days of Apple Cash spending. `hasDueWork` is unchanged.
 
-New and migrated documents have `accounts.wallet` (`Apple Cash`, initial balance
-0). Child state adds `balances.wallet` and `walletLastTransaction` (null or latest
-recorded wallet transaction). Parent state includes `accounts.wallet`, up to 60
-`walletTransactions` newest first, and `walletLastPing` (null or Unix milliseconds).
-Wallet transactions include `note` for parent sends and `merchant`, `recordedAt`,
-`uncovered` and optional `external_id` for purchases. `uncovered` is historical;
-later incoming records reconcile the balance without rewriting that flag.
-These are real-family tracking routes, independent of demo controls. See
-[Shortcut setup](../docs/apple-cash-shortcut.md) for the exact automation body.
+Migration moves a positive legacy wallet balance into funding with an audit,
+drops negative tracked debt with an audit, and deletes `accounts.wallet`.
+Old `wallet_in` rows remain as `Sent via Apple Cash (before 0.7)`; historical
+purchases remain intact. See [Shortcut setup](../docs/apple-cash-shortcut.md).
 
 ## Demo controls
 

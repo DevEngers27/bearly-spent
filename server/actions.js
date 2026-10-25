@@ -30,13 +30,13 @@ export const actions = {
   spend: action((db, body) => game.childSpend(db, {
     amount: money(body.amount, { min: 1 }), memo: str(body.memo),
   }, spendPolicy)),
-  walletSpend: action((db, body) => game.childWalletSpend(db, {
+  walletSpend: action((db, body, now) => game.childWalletSpend(db, {
     amount: money(body.amount, { min: 1 }), merchant: str(body.merchant),
     at: body.at, external_id: body.external_id,
-  }, spendPolicy)),
-  walletSend: action((db, body) => game.parentWalletSend(db, {
-    amount: money(body.amount, { min: 1 }), note: optionalNote(body),
-  })),
+  }, spendPolicy, now)),
+  walletSend: action(() => game.parentWalletSend()),
+  walletRecord: action((db, body, pendingId, now) => game.recordWalletPending(db, id(pendingId), spendPolicy, now)),
+  walletDismiss: action((db, body, pendingId) => game.dismissWalletPending(db, id(pendingId))),
   extra: action((db, body) => game.requestExtraAllowance(db, {
     amount: money(body.amount, { min: 100, max: 5000 }), reason: str(body.reason),
   })),

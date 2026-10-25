@@ -401,18 +401,37 @@ export function childSpend(db, { amount, memo }, policy, now = Date.now()) {
   return { held: false };
 }
 
-// Apple Cash entries record money that already moved outside MoneyQuest. They
-// are not bank instructions and must never mirror to Nessie or wait for funds.
-export function parentWalletSend(db, { amount, note = "" }, now = Date.now()) {
-  if (!Number.isInteger(amount) || amount < 1 || amount > 1000000) throw new GameError("Enter an amount from $0.01 to $10,000");
-  if (typeof note !== "string" || note.trim().length > 120) throw new GameError("Add a short note");
-  const txn = { id: uid("txn"), ts: now, from: "outside", to: "wallet", amount, kind: "wallet_in", memo: "Sent via Apple Cash", note: note.trim(), idempotencyKey: uid("wallet_in"), status: "posted" };
-  db.accounts.wallet.balance += amount;
+// Apple Cash receipts describe purchases already paid outside the app. Funding
+// covers the record; short receipts wait for a parent deposit without a debit.
+export function parentWalletSend() {
+  throw new GameError("Use Add money in Allowance to fund Apple Cash", 410);
+}
+
+const FUNDING_SHORT = "Your grown-up's funding is short for that. Ask them to add money!";
+function fundingShort(db, receipt) {
+  return { error: FUNDING_SHORT, reason: "funding_short", shortBy: receipt.amount - db.accounts.parent.balance };
+}
+
+function postWalletReceipt(db, receipt, policy, now, actor = "child") {
+  if (db.accounts.parent.balance < receipt.amount) return fundingShort(db, receipt);
+  const verdict = policy(db, receipt.amount, receipt.merchant, { alreadyPaid: true });
+  const txn = {
+    id: uid("txn"), pendingId: receipt.id, ts: receipt.ts, recordedAt: now, from: "parent", to: "merchant",
+    amount: receipt.amount, kind: "wallet_spend", memo: receipt.merchant, merchant: receipt.merchant,
+    idempotencyKey: receipt.idempotencyKey, status: "posted",
+    overLimit: !!verdict.overLimit, unusual: !!verdict.unusual,
+  };
+  if (receipt.external_id !== undefined) txn.external_id = receipt.external_id;
+  // These receipts are local records, not instructions to the bank mirror.
+  db.accounts.parent.balance -= txn.amount;
   db.transactions.push(txn);
-  notify(db, "child", `Your grown-up sent ${dollars(amount)} via Apple Cash!`, "money", txn.id);
-  audit(db, "parent", "wallet_in", `Recorded ${dollars(amount)} sent via Apple Cash`, { txnId: txn.id });
-  moneyMoved(db, "Apple Cash money received");
-  return txn;
+  (db.walletReceipts ||= {})[receipt.idempotencyKey] = { ...txn };
+  db.walletPending = (db.walletPending || []).filter((p) => p.id !== receipt.id);
+  for (const n of db.notifications) if (n.ref === receipt.id) n.read = true;
+  dailyTrackingBonus(db, now);
+  audit(db, actor, "wallet_spend", `Recorded ${dollars(txn.amount)} paid with Apple Cash at ${txn.merchant}`, { txnId: txn.id, pendingId: receipt.id });
+  moneyMoved(db, "Apple Cash purchase recorded");
+  return { ...txn, duplicate: false };
 }
 
 export function childWalletSpend(db, { amount, merchant, at, external_id }, policy, now = Date.now()) {
@@ -428,22 +447,44 @@ export function childWalletSpend(db, { amount, merchant, at, external_id }, poli
     else throw new GameError("Use an ISO date with a time zone or a timestamp");
     if (!Number.isSafeInteger(ts) || ts < 0 || !Number.isFinite(new Date(ts).getTime())) throw new GameError("Use a valid transaction date");
   }
-  // Receipts survive the rolling transaction history, so an old automation
-  // retry still cannot debit twice after retention or a server restart.
+  // Durable receipts preserve idempotency beyond rolling ledger/pending retention.
   const existing = key && (db.walletReceipts?.[key] || db.transactions.find((t) => t.idempotencyKey === key));
-  if (existing) return { ...existing, duplicate: true };
-  policy(db, amount, merchant, { alreadyPaid: true });
-  const uncovered = db.accounts.wallet.balance < amount;
-  const txn = { id: uid("txn"), ts, recordedAt: now, from: "wallet", to: "merchant", amount, kind: "wallet_spend", memo: merchant, merchant, idempotencyKey: key, status: "posted", uncovered };
-  if (external_id !== undefined) txn.external_id = external_id.trim();
-  db.accounts.wallet.balance -= amount;
-  db.transactions.push(txn);
-  if (key) (db.walletReceipts ||= {})[key] = { ...txn };
-  if (uncovered) notify(db, "parent", `${db.child.name}'s Apple Cash shows ${dollars(-db.accounts.wallet.balance)} more spent than was sent — did you send money outside MoneyQuest?`, "guardian", `uncovered:${txn.id}`);
-  dailyTrackingBonus(db, now);
-  audit(db, "child", "wallet_spend", `Recorded ${dollars(amount)} paid with Apple Cash at ${merchant}`, { txnId: txn.id, uncovered });
-  moneyMoved(db, "Apple Cash purchase recorded");
-  return { ...txn, duplicate: false };
+  if (existing && existing.status !== "waiting") return { ...existing, duplicate: true };
+  const receipt = existing || {
+    id: uid("wpend"), ts, createdAt: now, amount, merchant, status: "waiting",
+    idempotencyKey: key || uid("wallet"), ...(key ? { external_id: external_id.trim() } : {}),
+  };
+  if (db.accounts.parent.balance >= receipt.amount) return postWalletReceipt(db, receipt, policy, now);
+  if (!existing) {
+    (db.walletReceipts ||= {})[receipt.idempotencyKey] = receipt;
+    (db.walletPending ||= []).push(receipt);
+    if (db.walletPending.length > 20) db.walletPending.splice(0, db.walletPending.length - 20);
+    notify(db, "parent", `${db.child.name}'s Apple Cash spent ${dollars(amount)} at ${merchant} but funding only has ${dollars(db.accounts.parent.balance)} — add money, then record it.`, "guardian", receipt.id);
+    audit(db, "child", "wallet_pending", `Apple Cash purchase of ${dollars(amount)} at ${merchant} is waiting for funding`, { pendingId: receipt.id });
+  }
+  return fundingShort(db, receipt);
+}
+
+export function recordWalletPending(db, pendingId, policy, now = Date.now()) {
+  pendingId = id(pendingId);
+  const receipt = db.walletPending?.find((p) => p.id === pendingId);
+  if (!receipt) {
+    const original = Object.values(db.walletReceipts || {}).find((r) => r.pendingId === pendingId);
+    if (original) return { ...original, duplicate: true };
+    throw new GameError("That receipt is no longer waiting", 404);
+  }
+  return postWalletReceipt(db, receipt, policy, now, "parent");
+}
+
+export function dismissWalletPending(db, pendingId) {
+  pendingId = id(pendingId);
+  const receipt = db.walletPending?.find((p) => p.id === pendingId);
+  if (!receipt) throw new GameError("That receipt is no longer waiting", 404);
+  db.walletReceipts[receipt.idempotencyKey] = { ...receipt, status: "dismissed" };
+  db.walletPending = db.walletPending.filter((p) => p.id !== pendingId);
+  for (const n of db.notifications) if (n.ref === pendingId) n.read = true;
+  audit(db, "parent", "wallet_pending_dismissed", `Dismissed Apple Cash receipt of ${dollars(receipt.amount)} at ${receipt.merchant}`, { pendingId });
+  return { ok: true };
 }
 
 export function journal(db, { direction, amount, note }, now = Date.now()) {
