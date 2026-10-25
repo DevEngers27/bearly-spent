@@ -305,6 +305,9 @@ button.stat-stamp { cursor: pointer; }
 .swatch small { font-weight: 600; color: var(--ink-soft); }
 .swatch.on { border-color: var(--ink); background: var(--honey-soft); box-shadow: 0 2px 0 var(--ink); }
 .swatch.locked { background: transparent; border-style: dashed; }
+.swatch.pending { border-style: solid; border-color: var(--ink); background: var(--honey-soft); box-shadow: 0 2px 0 var(--ink); }
+.swatch.pending .swatch-art { filter: grayscale(.2) opacity(.95); }
+.swatch.pending small { color: var(--ink); }
 
 /* ---------------------------------------------------------------- missions */
 .goal-card .reward { background: var(--sage); border: 2px solid var(--ink); border-radius: 999px; padding: 0 10px; font-weight: 800; }
