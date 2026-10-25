@@ -182,3 +182,18 @@ test("tapping inside the talk bar keeps the bubble; tapping elsewhere outside th
   click([".scene"]); assert.equal(dismissed, 0);
   click([]); assert.equal(dismissed, 1);
 });
+
+test("the Tap to talk pill is a real button that opens the talk bar, and hides while the bar is open or the bear is away", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  let opened = 0;
+  const talk = talkStub({ isOpen: false, open: () => opened++ });
+  let tree = h.render(h.exports.Home, { state, talk, open: noop, talkOpen: false });
+  const pill = byText(tree, "Tap to talk");
+  assert.ok(pill, "pill rendered as a button"); assert.equal(pill.props.type, "button"); assert.equal(pill.props.className, "tap-hint");
+  pill.props.onClick(); assert.equal(opened, 1);
+  tree = h.render(h.exports.Home, { state, talk: talkStub(), open: noop, talkOpen: true });
+  assert.equal(byText(tree, "Tap to talk"), undefined, "no pill while the bar is open");
+  state.adventures.push({ id: "adv_test", status: "away", destId: "seattle", returnsAt: Date.now() + 60000, startedAt: Date.now() });
+  tree = h.render(h.exports.Home, { state, talk, open: noop, talkOpen: false });
+  assert.equal(byText(tree, "Tap to talk"), undefined, "no pill while the bear is away");
+});

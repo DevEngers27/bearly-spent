@@ -402,7 +402,7 @@ function Home({ state, setTab, open, run, busy, talk, talkOpen = false }) {
           <strong>{state.child.bear.name}</strong>
           <span>{stage ? `${stage.label} bear` : "Little cub"}</span>
         </div>
-        {!away && <span className="tap-hint">Tap to talk</span>}
+        {!away && !talkOpen && <button type="button" className="tap-hint" onClick={() => talk?.open()}>Tap to talk</button>}
       </section>
       {talkOpen && <TalkBar state={state} talk={talk} busy={busy} open={open} />}
 
