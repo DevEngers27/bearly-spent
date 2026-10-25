@@ -102,19 +102,23 @@ async function createNessieAccounts(db) {
   return accts;
 }
 
+// The sandbox stores whole-dollar amounts and its transfer records carry no payee, so an
+// internal move is mirrored as a completed transfer on the source account plus a completed
+// deposit on the destination; the exact amount travels in the description.
+const NICKNAME = { parent: "Parent funding", savings: "Kid savings", spending: "Kid spending" };
 function nessieMirror(db, txn) {
   if (!nessieEnabled()) return;
   (async () => {
     const accts = await ensureNessieAccounts(db);
-    const date = new Date(txn.ts).toISOString().slice(0, 10);
-    const amount = txn.amount / 100;
+    const transaction_date = new Date(txn.ts).toISOString().slice(0, 10);
+    const dollars = txn.amount / 100, amount = Math.round(dollars), exact = `$${dollars.toFixed(2)}`;
+    const base = { transaction_date, status: "completed", amount };
     if (txn.to === "merchant") {
-      await nessie(`/accounts/${accts[txn.from]}/withdrawals`, { medium: "balance", transaction_date: date, amount, description: txn.memo });
+      await nessie(`/accounts/${accts[txn.from]}/withdrawals`, { medium: "balance", ...base, description: `${txn.memo} (${exact})` });
     } else {
-      await nessie(`/accounts/${accts[txn.from]}/transfers`, {
-        medium: "balance", payee_id: accts[txn.to], amount, transaction_date: date, description: txn.memo,
-      });
+      await nessie(`/accounts/${accts[txn.from]}/transfers`, { ...base, description: `${txn.memo} (${exact} to ${NICKNAME[txn.to] || txn.to})` });
+      await nessie(`/accounts/${accts[txn.to]}/deposits`, { medium: "balance", ...base, description: `${txn.memo} (${exact} from ${NICKNAME[txn.from] || txn.from})` });
     }
-    auditHook("nessie_mirrored", `Mirrored ${txn.kind} of $${amount.toFixed(2)} to Nessie sandbox`, { txnId: txn.id }, db);
+    auditHook("nessie_mirrored", `Mirrored ${txn.kind} of ${exact} to Nessie sandbox`, { txnId: txn.id }, db);
   })().catch((e) => auditHook("nessie_error", `Nessie mirror failed (local ledger unaffected): ${e.message}`, { txnId: txn.id }, db));
 }
