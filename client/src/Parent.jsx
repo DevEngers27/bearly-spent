@@ -15,7 +15,7 @@ const SECTIONS = [
   ["security", "Security"],
 ];
 
-const KIND_LABEL = { goal_purchase: "Goal purchase", child_funds: "Child funds", reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
+const KIND_LABEL = { goal_purchase: "Goal purchase", child_funds: "Child funds", reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", friend_request: "Friend request", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
 const BROWSER_TIMEZONE = Intl.DateTimeFormat("en-US").resolvedOptions().timeZone || "UTC";
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
@@ -449,13 +449,14 @@ function Settings({ state, run, demo, busy }) {
       <section className="p-card">
         <label className="switch"><input type="checkbox" disabled={busy} checked={s.requireTradeApproval} onChange={() => toggle("requireTradeApproval")} /> Ask me before postcard trades</label>
         <label className="switch"><input type="checkbox" disabled={busy} checked={s.buddyEnabled} onChange={() => toggle("buddyEnabled")} /> Money Buddy is {s.buddyEnabled ? "on" : "off"}</label>
-        <label className="switch"><input type="checkbox" disabled={busy} checked={s.coopChallenge} onChange={() => toggle("coopChallenge")} /> Team challenges with friends</label>
+        {demo && <label className="switch"><input type="checkbox" disabled={busy} checked={s.coopChallenge} onChange={() => toggle("coopChallenge")} /> Team challenges with friends</label>}
         <p className="p-muted">Friends can only see {state.child.name}'s bear, postcards and prewritten greetings. Balances, transactions and allowance stay private. There's no open chat.</p>
       </section>
       <h2>Friends</h2>
+      {!state.friends.length && <p className="p-muted">Add a friend with their code. Both children and both parents must agree.</p>}
       <table className="ptable">
         <tbody>
-          {state.friends.map((f) => <tr key={f.id}><td>{f.name}</td><td>{f.code}</td><td>{f.status.replace("_", " ")}</td></tr>)}
+          {state.friends.map((f) => <tr key={f.id}><td>{f.name || "Friend request"}</td><td>{f.status.replaceAll("_", " ")}</td><td>{f.real && f.status === "approved" && <button className="pbtn danger" disabled={busy} onClick={() => run(`parent/friend/${f.id}/remove`, {}, "Friend removed")}>Unfriend</button>}</td></tr>)}
         </tbody>
       </table>
       {demo && <section className="p-card">
@@ -469,6 +470,7 @@ function Settings({ state, run, demo, busy }) {
 
 
 function Children({ state, me, refreshMe, run, busy }) {
+  useEffect(() => { if (state) refreshMe().catch(() => {}); }, [state?.version]);
   const [child, setChild] = useState({ name: "", age: "9", bearName: "" });
   const [links, setLinks] = useState({});
   const [shortcutVersions, setShortcutVersions] = useState({});
@@ -521,6 +523,20 @@ function Children({ state, me, refreshMe, run, busy }) {
       const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
       return <section className="p-card" key={summary.id}>
         <div className="row"><div><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></div><button className="pbtn" disabled={busy} onClick={() => generate(summary.id)}>Generate kid code</button></div>
+        {summary.friendCode && <div className="p-stack">
+          <label className="pform">Friend code<input className="kid-code" readOnly value={summary.friendCode || ""} onFocus={(event) => event.target.select()} /></label>
+          <p className="p-muted">Share with a friend's family. This code stays valid until you replace it. It cannot pair a device.</p>
+          <button className="pbtn" disabled={busy} onClick={() => run(async () => {
+            const result = await api(`parent/children/${encodeURIComponent(summary.id)}/friend-code?child=${encodeURIComponent(summary.id)}`, {});
+            await refreshMe();
+            return result;
+          }, undefined, "Friend code replaced")}>Replace friend code</button>
+          {(summary.friends || []).map((f) => <div className="row" key={f.id}><span>{f.name} · {f.status.replaceAll("_", " ")}</span>{f.status === "approved" && <button className="pbtn danger" disabled={busy} onClick={() => run(async () => {
+            const result = await api(`parent/friend/${f.id}/remove?child=${encodeURIComponent(summary.id)}`, {});
+            await refreshMe();
+            return result;
+          }, undefined, "Friend removed")}>Unfriend</button>}</div>)}
+        </div>}
         <Devices childId={summary.id} busy={busy} onUnlink={(device) => {
           if (device?.kind === "shortcut") setShortcutVersions((current) => ({ ...current, [summary.id]: (current[summary.id] || 0) + 1 }));
         }} />

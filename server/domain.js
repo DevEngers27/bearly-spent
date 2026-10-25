@@ -2,7 +2,8 @@
 // HTTP layer wraps calls in store.mutateChild(). Throw GameError for user-facing
 // validation problems.
 import { randomInt } from "node:crypto";
-import { uid } from "./store.js";
+import { uid, childIdFor, childRecord, readChild, mutateChildren, childForFriendCode, DEMO_FAMILY_ID } from "./store.js";
+import { object, id, str, bool, integer } from "./validate.js";
 import { transfer, BankError } from "./bank.js";
 import { dayKey, weekKey } from "./time.js";
 import {
@@ -463,6 +464,7 @@ export function requestExtraAllowance(db, { amount, reason }) {
 // ------------------------------------------------------------------ approvals
 export function decide(db, approvalId, approve, note = "") {
   const a = db.approvals.find((x) => x.id === approvalId);
+  if (a?.real) throw new GameError("Use the family approval step");
   const canDecline = a && !approve && a.status === "approved" && !a.paidTxnId && ["reward", "extra", "spend", "goal_purchase"].includes(a.kind);
   if (!a || (a.status !== "pending" && !canDecline)) throw new GameError("That request was already handled");
   resolveParentNotification(db, a.id);
@@ -697,6 +699,7 @@ const DIRECTORY = {
 };
 
 export function addFriendByCode(db, code) {
+  if (childIdFor(db) && childRecord(childIdFor(db)).family_id !== DEMO_FAMILY_ID) throw new GameError("Add a friend with their code");
   code = String(code || "").trim().toUpperCase();
   const existing = db.friends.find((f) => f.code === code);
   if (existing && existing.status !== "declined") throw new GameError("You already added that friend");
@@ -714,7 +717,7 @@ export function addFriendByCode(db, code) {
 
 export function proposeTrade(db, friendId, giveDefId, getDefId) {
   const f = db.friends.find((x) => x.id === friendId && x.status === "approved");
-  if (!f) throw new GameError("You can only trade with approved friends");
+  if (!f || f.real) throw new GameError("You can only trade with approved friends");
   const give = PLACES[giveDefId], get = PLACES[getDefId];
   if (!give || !get) throw new GameError("Pick two postcards");
   if (give.rarity === "secret") throw new GameError("Secret postcards are yours to keep!");
@@ -760,13 +763,14 @@ export const GREETINGS = [
 ];
 export function sendGreeting(db, friendId, idx) {
   const f = db.friends.find((x) => x.id === friendId && x.status === "approved");
-  if (!f) throw new GameError("Not an approved friend");
+  if (!f || f.real) throw new GameError("Not an approved friend");
   const text = GREETINGS[idx];
   if (!text) throw new GameError("Pick a greeting");
   f.greetings = [...(f.greetings || []), { ts: Date.now(), text, from: "me" }].slice(-10);
 }
 
 function coopProgress(db) {
+  if (childIdFor(db) && childRecord(childIdFor(db)).family_id !== DEMO_FAMILY_ID) return;
   // Team challenge: friends contribute learning challenges (friends' side is simulated).
   db.child.coopLearning = (db.child.coopLearning || 0) + 1;
 }
@@ -774,6 +778,12 @@ function coopProgress(db) {
 // ------------------------------------------------------------------ views
 /** What a friend is allowed to see. Never includes money. */
 export function friendView(f) {
+  if (f.real) {
+    if (f.status !== "approved") return { id: f.id, real: true, status: f.status, incoming: !f.initiator, childAccepted: f.childAccepted, ...(f.initiator ? {} : { name: firstName(readChild(f.peerId)) }) };
+    const peer = readChild(f.peerId);
+    const bear = Object.fromEntries(["name", "hat", "eyes", "neck", "outfit", "held", "friend", "background"].map((key) => [key, peer.child.bear[key]]));
+    return { id: f.id, real: true, status: f.status, name: firstName(peer), bear, postcards: peer.postcards.map((p) => p.defId), greetings: f.greetings || [] };
+  }
   return { id: f.id, name: f.name, status: f.status, bear: f.bear, postcards: f.postcards, greetings: f.greetings || [], coopLearning: f.coopLearning };
 }
 
@@ -785,4 +795,221 @@ export function weeksToGoal(db, goal = currentGoal(db), extraSaving = 0) {
   const weekly = Math.round((db.allowance.amount * db.allowance.savePct) / 100);
   if (weekly <= 0) return null;
   return Math.ceil(remaining / weekly);
+}
+
+// Real friendships are mirrored in the two private child documents. Only the
+// route orchestrator resolves peers; callers cannot supply a peer child ID.
+const SOCIAL_TTL = 7 * 86400000;
+const firstName = (d) => d.child.name.trim().split(/\s+/)[0];
+const unavailable = () => new GameError("Request not found", 404);
+const activeFriend = (f) => f?.real && f.status === "approved";
+
+function socialApproval(d, kind, record, title, detail = "Friends only see bears and postcards — never money.") {
+  const a = { id: uid("apr"), kind, real: true, status: "pending", createdAt: Date.now(), socialId: record.id, title, detail };
+  d.approvals.push(a);
+  notify(d, "parent", title, "approval", a.id);
+  return a;
+}
+
+function closeSocialApprovals(d, socialId, status) {
+  for (const a of d.approvals.filter((a) => a.real && a.socialId === socialId && a.status === "pending")) {
+    a.status = status;
+    resolveParentNotification(d, a.id);
+  }
+}
+
+function endTrade(docs, trades, status) {
+  docs.forEach((d, i) => {
+    trades[i].status = status;
+    for (const card of d.postcards) if (card.lockedForTrade === trades[i].id) delete card.lockedForTrade;
+    closeSocialApprovals(d, trades[i].id, status);
+    notify(d, "child", status === "expired" ? "Your postcard swap expired. Your cards are ready again." : "Your postcard swap didn't go through.", "info");
+    audit(d, "system", `trade_${status}`, `Postcard swap ${status}`);
+  });
+}
+
+function advanceTrade(docs, trades, now) {
+  if (!trades.every((t) => t.childAccepted && (!t.parentRequired || t.parentAccepted))) return;
+  if (!docs.every((d, i) => activeFriend(d.friends.find((f) => f.id === trades[i].friendId)))) throw unavailable();
+  const cards = docs.map((d, i) => d.postcards.find((p) => p.id === trades[i].cardId && p.defId === trades[i].give && p.lockedForTrade === trades[i].id));
+  if (cards.some((p) => !p || PLACES[p.defId]?.rarity === "secret")) throw new GameError("Those postcards aren't ready to swap");
+  docs.forEach((d, i) => {
+    d.postcards.splice(d.postcards.indexOf(cards[i]), 1);
+    const peer = docs[1 - i];
+    d.postcards.push({ id: uid("pc"), defId: cards[1 - i].defId, source: "trade", collectedAt: now, from: firstName(peer) });
+    trades[i].status = "done";
+    trades[i].executedAt = now;
+    closeSocialApprovals(d, trades[i].id, "approved");
+    notify(d, "child", `Trade complete! A postcard from ${firstName(peer)} is in your album.`, "celebrate");
+    audit(d, "system", "trade_done", `Traded ${trades[i].give} for ${trades[i].get}`, { tradeId: trades[i].id });
+  });
+}
+
+function advanceFriend(docs, friends) {
+  const aIndex = friends[0].initiator ? 0 : 1;
+  const a = friends[aIndex], b = friends[1 - aIndex];
+  const status = !a.parentAccepted ? "pending_parent_a" : !b.parentAccepted || !b.childAccepted ? "pending_parent_b" : "approved";
+  friends.forEach((f) => { f.status = status; });
+  if (a.parentAccepted && !docs[1 - aIndex].approvals.some((r) => r.real && r.socialId === a.id)) {
+    const sender = docs[aIndex], recipient = docs[1 - aIndex];
+    socialApproval(recipient, "friend_request", b, `${firstName(sender)} (from the ${sender.family.parentName} family) wants to be friends with ${firstName(recipient)}`);
+    notify(recipient, "child", `${firstName(sender)} wants to be friends`, "info");
+  }
+  if (status === "approved") docs.forEach((d, i) => {
+    notify(d, "child", `You and ${firstName(docs[1 - i])} are now friends!`, "celebrate");
+    audit(d, "system", "friend_accepted", "Friend request accepted", { friendId: friends[i].id });
+  });
+}
+
+export function socialFriendsView(d) {
+  return d.friends.filter((f) => (isDemoChild(d) || f.real) && !["declined", "removed"].includes(f.status) && !(f.real && !f.initiator && f.status === "pending_parent_a")).map(friendView);
+}
+
+export function socialTradesView(d) {
+  return d.trades.filter((t) => isDemoChild(d) || t.real).slice(-10).reverse().map(({ peerId, cardId, ...t }) => t);
+}
+
+// Validated actions run outside mutateChild so there is exactly one transaction.
+export function runSocialAction(childId, action, input, recordId, now = Date.now()) {
+  const body = object(input);
+  const own = readChild(childId);
+  let peerId, record, approval;
+  if (action === "friend") {
+    const code = str(body.code, { max: 64 }).toUpperCase();
+    peerId = childForFriendCode(code);
+    // Valid and invalid codes have identical public receipts; no name lookup.
+    if (!peerId || peerId === childId) return { ok: true, message: "Request sent" };
+    if (own.friends.some((f) => f.real && f.peerId === peerId && !["declined", "removed"].includes(f.status))) return { ok: true, message: "Request sent" };
+  } else {
+    if (action === "approval") {
+      approval = own.approvals.find((a) => a.id === id(recordId) && a.real);
+      if (!approval) throw unavailable();
+      recordId = approval.socialId;
+      record = (approval.kind === "friend_request" ? own.friends : own.trades).find((r) => r.id === recordId);
+    } else if (action === "friendRespond" || action === "unfriend") {
+      record = own.friends.find((f) => f.id === id(recordId) && f.real);
+    } else if (action === "tradeRespond") {
+      record = own.trades.find((t) => t.id === id(recordId) && t.real);
+    } else {
+      record = own.friends.find((f) => f.id === id(body.friendId) && activeFriend(f));
+    }
+    if (!record) throw unavailable();
+    peerId = record.peerId;
+  }
+  return mutateChildren([childId, peerId], (docs) => {
+    const [d, peer] = docs;
+    if (action === "friend") {
+      const common = { id: uid("fr"), real: true, status: "pending_parent_a", createdAt: now, parentAccepted: false };
+      const a = { ...common, peerId, initiator: true, childAccepted: true };
+      const b = { ...common, peerId: childId, initiator: false, childAccepted: false };
+      d.friends.push(a);
+      peer.friends.push(b);
+      socialApproval(d, "friend_request", a, `${firstName(d)} wants to add a friend`);
+      audit(d, "child", "friend_requested", "Friend request sent");
+      return { ok: true, message: "Request sent" };
+    }
+    if (action === "greet") {
+      const other = peer.friends.find((f) => f.id === record.id);
+      if (!activeFriend(record) || !activeFriend(other)) throw unavailable();
+      const text = GREETINGS[integer(body.index, { min: 0, max: GREETINGS.length - 1 })];
+      // Shared rolling window: both directions together have 20 messages/day.
+      const recent = (record.greetingTimes || []).filter((ts) => ts > now - 86400000);
+      if (recent.length >= 20) throw new GameError("Let's send more notes tomorrow!", 429);
+      for (const f of [record, other]) f.greetingTimes = [...recent, now];
+      record.greetings = [...(record.greetings || []), { ts: now, text, from: "me" }].slice(-10);
+      other.greetings = [...(other.greetings || []), { ts: now, text, from: firstName(d) }].slice(-10);
+      notify(peer, "child", `${firstName(d)}: ${text}`, "greeting");
+      return { ok: true };
+    }
+    if (action === "trade") {
+      const other = peer.friends.find((f) => f.id === record.id);
+      if (!activeFriend(other)) throw unavailable();
+      const give = id(body.give), get = id(body.get);
+      if (![give, get].every((key) => Object.hasOwn(PLACES, key))) throw new GameError("Pick two postcards");
+      if ([give, get].some((key) => PLACES[key].rarity === "secret")) throw new GameError("Secret postcards are yours to keep!");
+      const cards = docs.map((doc, i) => doc.postcards.find((p) => p.defId === [give, get][i] && !p.lockedForTrade));
+      if (cards.some((p) => !p)) throw new GameError("Those postcards aren't ready to swap");
+      const tradeId = uid("trd");
+      docs.forEach((doc, i) => {
+        const t = { id: tradeId, real: true, friendId: record.id, peerId: [peerId, childId][i], initiator: i === 0, give: [give, get][i], get: [get, give][i], cardId: cards[i].id, status: "pending", createdAt: now, expiresAt: now + SOCIAL_TTL, childAccepted: i === 0, parentRequired: doc.settings.requireTradeApproval, parentAccepted: false };
+        doc.trades.push(t);
+        cards[i].lockedForTrade = tradeId;
+        audit(doc, "child", "trade_proposed", "Postcard swap proposed", { tradeId });
+      });
+      notify(peer, "child", `${firstName(d)} would like to swap postcards!`, "info");
+      return socialTradesView(d).find((t) => t.id === tradeId);
+    }
+    const isTrade = action === "tradeRespond" || approval?.kind === "trade";
+    const records = docs.map((doc) => (isTrade ? doc.trades : doc.friends).find((r) => r.id === record.id && r.real));
+    if (records.some((r) => !r)) throw unavailable();
+    if (action === "unfriend") {
+      if (!activeFriend(records[0])) throw unavailable();
+      docs.forEach((doc, i) => {
+        records[i].status = "removed";
+        audit(doc, "parent", "friend_removed", "Friendship ended");
+        notify(doc, "child", "This friendship has ended.", "info");
+      });
+      for (const t of d.trades.filter((t) => t.real && t.friendId === record.id && t.status === "pending")) {
+        const other = peer.trades.find((r) => r.id === t.id);
+        if (other) endTrade(docs, [t, other], "cancelled");
+      }
+      return { ok: true };
+    }
+    if (isTrade && records[0].status === "pending" && now >= records[0].expiresAt) {
+      endTrade(docs, records, "expired");
+      return { ok: true, status: "expired" };
+    }
+    if (isTrade ? records[0].status !== "pending" : !["pending_parent_a", "pending_parent_b"].includes(records[0].status)) throw unavailable();
+    if (isTrade) records.forEach((t, i) => { t.parentRequired ||= docs[i].settings.requireTradeApproval; });
+    const approve = bool(body.approve);
+    if (approval) {
+      if (approval.status !== "pending") throw unavailable();
+      // Validate optional notes but never send private decline reasons across families.
+      if (Object.hasOwn(body, "note")) str(body.note, { required: false });
+      approval.status = approve ? "approved" : "declined";
+      approval.decidedAt = now;
+      resolveParentNotification(d, approval.id);
+      records[0].parentAccepted = approve;
+      audit(d, "parent", approve ? "approved" : "declined", `${approve ? "Approved" : "Declined"}: ${approval.title}`);
+    } else {
+      if (records[0].initiator || records[0].childAccepted) throw unavailable();
+      if (!isTrade && records[0].status === "pending_parent_a") throw unavailable();
+      records[0].childAccepted = approve;
+    }
+    if (!approve) {
+      if (isTrade) endTrade(docs, records, "declined");
+      else docs.forEach((doc, i) => {
+        records[i].status = "declined";
+        closeSocialApprovals(doc, record.id, "declined");
+        notify(doc, "child", "Your friend request didn't go through.", "info");
+        audit(doc, "system", "friend_declined", "Friend request did not go through");
+      });
+    } else if (!isTrade) advanceFriend(docs, records);
+    else {
+      if (records.every((t) => t.childAccepted)) docs.forEach((doc, i) => {
+        if (records[i].parentRequired && !doc.approvals.some((a) => a.real && a.socialId === record.id)) {
+          socialApproval(doc, "trade", records[i], `${firstName(doc)} wants to swap postcards with ${firstName(docs[1 - i])}`, `Give ${PLACES[records[i].give].name} ↔ get ${PLACES[records[i].get].name}`);
+        }
+      });
+      advanceTrade(docs, records, now);
+    }
+    return approval ? { ...approval } : { ok: true, status: records[0].status };
+  });
+}
+
+export function expireSocialTrades(childId, now = Date.now()) {
+  for (const t of readChild(childId).trades.filter((t) => t.real && t.status === "pending" && now >= t.expiresAt)) {
+    mutateChildren([childId, t.peerId], (docs) => {
+      const trades = docs.map((d) => d.trades.find((r) => r.id === t.id));
+      if (trades.every((r) => r?.status === "pending")) endTrade(docs, trades, "expired");
+    });
+  }
+}
+
+export function isDemoChild(d) {
+  return !childIdFor(d) || childRecord(childIdFor(d)).family_id === DEMO_FAMILY_ID;
+}
+
+export function socialApprovalsView(d) {
+  return d.approvals.filter((a) => isDemoChild(d) || a.real || !["friend", "trade"].includes(a.kind));
 }

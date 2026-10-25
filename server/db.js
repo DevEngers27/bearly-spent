@@ -46,6 +46,9 @@ function open(filename) {
       expires_at INTEGER NOT NULL, last_seen INTEGER NOT NULL, ua TEXT,
       unlocked_until INTEGER NOT NULL DEFAULT 0, pin_locked_until INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS friend_codes (
+      code TEXT PRIMARY KEY, child_id TEXT NOT NULL UNIQUE REFERENCES children(id)
+    );
     CREATE TABLE IF NOT EXISTS kid_links (
       code TEXT PRIMARY KEY, family_id TEXT NOT NULL REFERENCES families(id),
       child_id TEXT NOT NULL REFERENCES children(id), expires_at INTEGER NOT NULL, used_at INTEGER

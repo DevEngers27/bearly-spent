@@ -423,14 +423,15 @@ test("demo controls audit the selected child and reset preserves other families 
   assert.equal(readChild(a.id).child.points, 777);
 });
 
-test("fresh children can add practice DIRECTORY friends without exposing money", async () => {
+test("real children have no practice DIRECTORY friends or public name lookup", async () => {
   const a = await family("a");
   const result = await a.browser.call("POST", "/api/child/friend", { code: "SAM-12" });
   assert.equal(result.status, 200);
-  assert.equal(result.body.status, "pending_parent");
-  assert.ok(result.body.postcards.length > 0);
-  for (const key of ["accounts", "balance", "balances", "transactions"]) assert.equal(Object.hasOwn(result.body, key), false);
-  assert.equal(readChild(a.id).friends.length, 1);
+  assert.deepEqual(result.body, { ok: true, message: "Request sent" });
+  assert.equal(readChild(a.id).friends.length, 0);
+  const state = await a.browser.call("GET", "/api/state");
+  assert.equal(state.body.demo, false);
+  assert.equal(state.body.settings.coopChallenge, false);
 });
 
 test("API handoff lists every exported route and reset script targets the demo SQLite child", () => {

@@ -115,6 +115,7 @@ export const actions = {
         throw new game.GameError("Choose a time zone from the list");
       }
     }
+    if (childIdFor(db) && body.coopChallenge === true && !game.isDemoChild(db)) throw new game.GameError("Team challenges are only in the demo for now");
     Object.assign(db.settings, update);
     const labels = { requireTradeApproval: "Trade approval", buddyEnabled: "Buddy", coopChallenge: "Team challenge" };
     const detail = Object.entries(update).map(([key, value]) => key === "timezone" ? `Time zone set to ${value}` : `${labels[key]} turned ${value ? "on" : "off"}`).join(". ");

@@ -17,6 +17,8 @@ export const DEMO_CHILD_ID = "child_demo";
 export const uid = (prefix = "id") =>
   `${prefix}_${crypto.randomUUID()}`;
 
+export const CODE_ALPHABET = "BCDFGHJKMNPQRTVWXY346789";
+
 const DAY = 24 * 60 * 60 * 1000;
 
 export function seed(now = Date.now()) {
@@ -178,7 +180,9 @@ export function readChild(childId) {
 export function listChildren(familyId) {
   return database().prepare("SELECT id, doc, version FROM children WHERE family_id = ? ORDER BY rowid").all(familyId).map((row) => {
     const d = JSON.parse(row.doc);
-    return { id: row.id, name: d.child.name, age: d.child.age, bearName: d.child.bear.name, version: row.version };
+    const friends = d.friends.filter((f) => f.real && !["declined", "removed"].includes(f.status) && !(!f.initiator && f.status === "pending_parent_a"))
+      .map((f) => ({ id: f.id, status: f.status, name: f.status === "approved" ? readChild(f.peerId).child.name.trim().split(/\s+/)[0] : "Friend request" }));
+    return { id: row.id, name: d.child.name, age: d.child.age, bearName: d.child.bear.name, version: row.version, friendCode: friendCode(row.id), friends };
   });
 }
 
@@ -202,11 +206,12 @@ export function createChild(familyId, input) {
   }
   for (const key of ["transactions", "postcards", "adventures", "friends", "approvals", "notifications"]) d[key] = [];
   d.allowance.amount = 0;
+  d.settings.coopChallenge = familyId === DEMO_FAMILY_ID;
   for (const goal of d.savingsGoals) goal.createdAt = Date.now();
   const id = uid("child");
   database().prepare("INSERT INTO children (id, family_id, doc, version, updated_at) VALUES (?, ?, ?, ?, ?)")
     .run(id, familyId, JSON.stringify(d), d.version, Date.now());
-  return { id, name, age, bearName, version: d.version };
+  return { id, name, age, bearName, version: d.version, friendCode: friendCode(id) };
 }
 
 function publish(familyId, version, childId) {
@@ -230,34 +235,63 @@ export function mutateChild(childId, fn) {
       throw e;
     }
   }
-  const d = readChild(childId);
-  const snapshot = structuredClone(d);
-  let row;
+  return mutateChildren([childId], ([d]) => fn(d));
+}
+
+// One SQLite transaction and no notifications until every document is durable.
+export function mutateChildren(childIds, fn) {
+  const ids = [...new Set(childIds)];
+  if (!ids.length) throw new GameError("Child not found", 404);
+  const docs = ids.map(readChild);
+  const snapshots = docs.map((d) => structuredClone(d));
+  let rows;
   let result;
   try {
     result = transaction((db) => {
-      row = db.prepare("SELECT family_id, version FROM children WHERE id = ?").get(childId);
-      result = fn(d);
-      if (result && typeof result.then === "function") throw new Error("Child mutations must be synchronous");
-      retain(d);
-      d.version = row.version + 1;
-      db.prepare("UPDATE children SET doc = ?, version = ?, updated_at = ? WHERE id = ?")
-        .run(JSON.stringify(d), d.version, Date.now(), childId);
-      return result;
+      rows = ids.map((id) => db.prepare("SELECT family_id, version FROM children WHERE id = ?").get(id));
+      const out = fn(docs);
+      if (out && typeof out.then === "function") throw new Error("Child mutations must be synchronous");
+      docs.forEach((d, i) => {
+        retain(d);
+        d.version = rows[i].version + 1;
+        db.prepare("UPDATE children SET doc = ?, version = ?, updated_at = ? WHERE id = ?")
+          .run(JSON.stringify(d), d.version, Date.now(), ids[i]);
+      });
+      return out;
     });
   } catch (e) {
-    for (const key of Object.keys(d)) delete d[key];
-    Object.assign(d, snapshot);
+    docs.forEach((d, i) => {
+      for (const key of Object.keys(d)) delete d[key];
+      Object.assign(d, snapshots[i]);
+    });
     throw e;
   }
-  publish(row.family_id, d.version, childId);
+  docs.forEach((d, i) => publish(rows[i].family_id, d.version, ids[i]));
   return result;
+}
+
+export function friendCode(childId, regenerate = false) {
+  if (!childRecord(childId)) throw new GameError("Child not found", 404);
+  const db = database();
+  const current = db.prepare("SELECT code FROM friend_codes WHERE child_id = ?").get(childId)?.code;
+  if (current && !regenerate) return current;
+  for (let i = 0; i < 20; i++) {
+    const code = Array.from({ length: 8 }, () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join("");
+    if (code === current || db.prepare("SELECT code FROM friend_codes WHERE code = ?").get(code)) continue;
+    db.prepare("INSERT INTO friend_codes (code, child_id) VALUES (?, ?) ON CONFLICT(child_id) DO UPDATE SET code = excluded.code").run(code, childId);
+    return code;
+  }
+  throw new GameError("Try making a new code in a moment", 429);
+}
+
+export function childForFriendCode(code) {
+  return database().prepare("SELECT child_id FROM friend_codes WHERE code = ?").get(code)?.child_id;
 }
 
 export function childrenWithDueWork(now = Date.now()) {
   return database().prepare("SELECT id FROM children").all().filter(({ id }) => {
     const d = readChild(id);
-    return dueAdventures(d, now).length > 0 || hasDueWork(d, now);
+    return dueAdventures(d, now).length > 0 || hasDueWork(d, now) || d.trades.some((t) => t.real && t.status === "pending" && now >= t.expiresAt);
   }).map(({ id }) => id);
 }
 
