@@ -146,7 +146,7 @@ test("H10.3 both views expose all six questions privately, a rolling five, and t
       for (const q of lesson.questions) assert.deepEqual(Object.keys(q).sort(), ["options", "q"]);
     }
   }
-  assert.deepEqual(snapshot(db).lessons, { finished: 1, total: 30 });
+  assert.deepEqual(snapshot(db).lessons, { finished: 1, total: 30, next_titles: LESSONS.slice(1, 4).map((l) => l.title) });
 });
 
 test("H10.2 first-pass mission hook still awards only twenty and failed/review tries never complete it", () => {
