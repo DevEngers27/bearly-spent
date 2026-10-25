@@ -479,7 +479,8 @@ test("F3: reveal includes an envelope, ordered bonus card and one Add to album a
 test("F3: seen adventures persist across several returns; New badges clear only when opened", () => {
   const h = harness("Child.jsx"), state = stateFixture();
   const props = { state, toast: noop };
-  state.postcards = [{ id: "new-pc", defId: "seattle", source: "trip" }];
+  h.render(h.exports.default, props); h.flush();
+  state.postcards = [...state.postcards, { id: "new-pc", defId: "seattle", source: "trip" }];
   state.adventures = [{ id: "one", status: "returned", postcardIds: ["new-pc"] }];
   let tree = h.render(h.exports.default, props); h.flush();
   nodes(tree, (n) => n.type?.name === "ReturnReveal")[0].props.onSeen();
@@ -497,7 +498,7 @@ test("F3: seen adventures persist across several returns; New badges clear only 
   tree = h.render(h.exports.default, props);
   album = nodes(tree, (n) => n.type?.name === "Album")[0];
   assert.equal(album.props.newCards.length, 0);
-  assert.deepEqual(JSON.parse(h.storage.get("mq_opened_cards")), ["new-pc"]);
+  assert.deepEqual(JSON.parse(h.storage.get("mq_opened_cards:Mia")), ["new-pc"]);
 });
 
 test("F6: talk guards Buddy-off, away and offline with warm bubbles and no request", async () => {
@@ -665,4 +666,135 @@ test("F6: talk input keeps focus through polls, Escape restores opener and faile
   const escape = new Event("keydown"); Object.assign(escape, { key: "Escape" }); h.window.dispatchEvent(escape);
   assert.equal(closed, 1);
   h.slots.find((s) => s?.cleanup)?.cleanup(); assert.equal(focused, 1);
+});
+
+
+test("F36.1: bubble containment", async () => {
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  const scene = css.match(/\.scene:has\(\.bear-bubble\)\s*\{([^}]+)\}/)[1];
+  const bubble = css.match(/\.bear-bubble\s*\{([^}]+)\}/)[1];
+  assert.match(scene, /aspect-ratio:\s*auto/);
+  assert.match(scene, /min-width:\s*0/);
+  assert.match(bubble, /max-width:\s*calc\(100% - 24px\)/);
+  assert.match(bubble, /overflow-wrap:\s*anywhere/);
+  assert.match(bubble, /word-break:\s*break-word/);
+  for (const away of [false, true]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    const reply = away ? "Maple is on a trip! Back in 0:42" : "A long reply ".repeat(150) + "x".repeat(500);
+    if (away) state.adventures = [{ status: "away", returnsAt: h.now + 42000 }];
+    const home = h.render(h.exports.Home, { state, talk: { bubble: reply, open: noop } });
+    const scene = nodes(home, (n) => n.type === "section" && n.props.className.startsWith("scene "))[0];
+    const component = nodes(scene, (n) => n.type?.name === "SpeechBubble")[0];
+    const rendered = harness("Child.jsx");
+    const markup = rendered.render(rendered.exports.SpeechBubble, component.props);
+    assert.match(text(markup), away ? /Maple is on a trip!/ : /A long reply/);
+    assert.equal(markup.props.style?.width, undefined);
+  }
+});
+
+test("F36.2: child album baseline and badges", () => {
+  const h = harness("Child.jsx"), state = stateFixture(), props = { state, toast: noop };
+  let tree = h.render(h.exports.default, props); h.flush();
+  byText(tree, "Album").props.onClick();
+  const album = () => nodes(h.render(h.exports.default, props), (n) => n.type?.name === "Album")[0];
+  assert.equal(album().props.newCards.length, 0);
+  assert.equal(state.postcards.filter((p) => p.defId === "chicago").length, 2);
+  state.postcards.push({ id: "later", defId: "seattle", source: "trip", collectedAt: h.now + 1000 });
+  assert.equal(album().props.newCards[0].id, "later");
+  const reload = harness("Child.jsx");
+  h.storage.forEach((v, k) => reload.storage.set(k, v));
+  tree = reload.render(reload.exports.default, props);
+  let reloadedAlbum = nodes(tree, (n) => n.type?.name === "Album")[0];
+  assert.equal(reloadedAlbum.props.newCards[0].id, "later");
+  reloadedAlbum.props.openCard("seattle");
+  tree = reload.render(reload.exports.default, props);
+  assert.equal(nodes(tree, (n) => n.type?.name === "Album")[0].props.newCards.length, 0);
+  const other = harness("Child.jsx");
+  reload.storage.forEach((v, k) => other.storage.set(k, v));
+  state.child = { ...state.child, name: "Leo" };
+  tree = other.render(other.exports.default, props);
+  assert.equal(nodes(tree, (n) => n.type?.name === "Album")[0].props.newCards.length, 0);
+  assert.ok(other.storage.has("mq_album_baseline:Leo"));
+});
+
+test("F36.3: spoiler-free reveal and reduced motion", () => {
+  for (const revealDelay of [0, 2400]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    const props = { place: state.catalog.places.seattle, bearName: "Maple", to: "Mia", collectedAt: h.now, revealDelay };
+    let tree = h.render(h.exports.FlipPostcard, props); h.flush();
+    assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
+    assert.equal(nodes(tree, (n) => n.props.className === "postmark").length, 0);
+    assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "");
+    nodes(tree, (n) => n.props.role === "button")[0].props.onClick();
+    tree = h.render(h.exports.FlipPostcard, props);
+    assert.match(tree.props.className, /flipped/);
+    h.timeouts[0](); // start the flip, still no readable spoiler
+    tree = h.render(h.exports.FlipPostcard, props);
+    assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
+    h.timeouts[1](); // finish the flip
+    tree = h.render(h.exports.FlipPostcard, props);
+    assert.match(text(tree), /Seattle/);
+    assert.match(text(tree), /hydrangeas/);
+    assert.equal(nodes(tree, (n) => n.props.className === "postmark").length, 1);
+    const reduced = harness("Child.jsx"); reduced.window.matchMedia = () => ({ matches: true });
+    tree = reduced.render(reduced.exports.FlipPostcard, props);
+    assert.doesNotMatch(tree.props.className, /flipped/);
+    assert.match(text(tree), /Seattle/);
+    assert.match(text(tree), /hydrangeas/);
+  }
+});
+
+test("F36.4: paper envelope body and flap", async () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  const tree = h.render(h.exports.ReturnReveal, { state, latest: { postcardIds: [] }, onSeen: noop, onDone: noop });
+  assert.equal(nodes(tree, (n) => n.type === "rect" && n.props.className === "envelope-body" && n.props.fill === "#FFF0CF").length, 1);
+  assert.equal(nodes(tree, (n) => n.type === "path" && n.props.className === "envelope-flap").length, 1);
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.return-envelope\s*\{[^}]*margin: 10px auto -22px;[^}]*drop-shadow/);
+});
+
+test("F36.5: collector and Maple copy", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  const tile = h.render(h.exports.PostcardTile, { id: "seattle", place: state.catalog.places.seattle, count: 0 });
+  assert.match(text(tile), /Collector's value/);
+  assert.doesNotMatch(text(tile), /Album value|pts/);
+  const chat = harness("Child.jsx");
+  const tree = chat.render(chat.exports.Buddy, { state, startTalk: noop });
+  assert.match(text(tree), /Maple\s+explains and plans/);
+  assert.doesNotMatch(text(tree), /Money Buddy/);
+  const bear = harness("Child.jsx");
+  assert.match(bear.render(bear.exports.BearFigure, { bear: state.child.bear, mood: "happy" }).props["aria-label"], /feeling happy/);
+});
+
+test("F36.6: intrinsic stamp width", async () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  state.postcards.push({ defId: "seattle", source: "trip" });
+  const tree = h.render(h.exports.PlaceSheet, { state, id: "seattle", close: noop });
+  assert.equal(nodes(tree, (n) => n.type?.name === "Stamp").length, 1);
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.stamp\s*\{[^}]*width:\s*fit-content;[^}]*justify-self:\s*start/);
+});
+
+test("F36.7: legible sound toggle", () => {
+  for (const muted of [false, true]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    let toggles = 0;
+    const tree = h.render(h.exports.TalkBar, { state, talk: { muted, toggleMute: () => toggles++, close: noop }, open: noop });
+    const button = nodes(tree, (n) => n.type === "button" && n.props["aria-label"] === (muted ? "Sound off" : "Sound on"))[0];
+    assert.equal(button.props["aria-pressed"], muted);
+    assert.equal(button.props.title, muted ? "Sound off" : "Sound on");
+    assert.equal(nodes(button, (n) => n.type?.name === "Icon")[0].props.name, muted ? "speakerOff" : "speaker");
+    button.props.onClick(); assert.equal(toggles, 1);
+  }
+});
+
+test("F36.8: visible map clues", () => {
+  for (const open of [true, false]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    state.catalog.places.seattle = { ...state.catalog.places.seattle, open, clue: "Follow the rainy trail.", lockReason: "Save money 3 times" };
+    const tree = h.render(h.exports.PlaceSheet, { state, id: "seattle", close: noop });
+    assert.equal(nodes(tree, (n) => n.type === "p" && text(n) === "Follow the rainy trail.").length, 1);
+    if (!open) assert.match(text(tree), /Save money 3 times/);
+    assert.doesNotMatch(text(tree), /Send|Earn/);
+  }
 });

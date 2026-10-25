@@ -377,6 +377,8 @@ export function dueAdventures(db, now = Date.now()) {
   return db.adventures.filter((a) => a.status === "away" && a.returnsAt <= now);
 }
 
+const articleFor = (name) => /^[aeiou]/i.test(name) ? "an" : "a";
+
 export function finalizeAdventures(db, now = Date.now()) {
   const returned = [];
   const bear = db.child.bear.name;
@@ -394,7 +396,7 @@ export function finalizeAdventures(db, now = Date.now()) {
     notify(db, "child",
       secret.length
         ? `${bear} is home from ${PLACES[adv.destId].name}… and discovered ${secret.join(" + ")}!`
-        : `${bear} is home with a ${PLACES[adv.destId].name} postcard!`,
+        : `${bear} is home with ${articleFor(PLACES[adv.destId].name)} ${PLACES[adv.destId].name} postcard!`,
       "celebrate", adv.id);
     audit(db, "system", "adventure_returned", `Returned from ${adv.destId} with ${defs.join(", ")}`);
     returned.push(adv);

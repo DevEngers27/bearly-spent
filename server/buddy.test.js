@@ -171,7 +171,7 @@ test("isSafetyConcern uses phrases while ordinary money and game questions still
     assert.doesNotMatch(offlineReply(read(), text), /talk to a grown-up you trust right away/);
   }
   assert.match(offlineReply(read(), "Would buying a $15 game hurt my savings?"), /you'd need \$5.00 more/);
-  assert.match(offlineReply(read(), "How do I find the secret places?"), /missions and lessons.*Map/);
+  assert.match(offlineReply(read(), "How do I find the secret places?"), /missions and lessons.*send Maple on a trip from Home! Secret places.*saving habits/);
 });
 
 test("offline plans and all goal and purchase replies explain missing weekly savings", () => {
@@ -568,4 +568,16 @@ test("offline replies do not call the model guard", async () => {
   const result = await chat("How much have I saved?");
   assert.match(result.reply, /\$20.00/);
   assert.equal(_internals.runGuard.mock.calls.length, 0);
+});
+
+
+test("F36.5: offline Maple trip copy", () => {
+  for (const question of ["How many points?", "How do I find the secret places?"]) {
+    const reply = offlineReply(read(), question);
+    assert.match(reply, /send Maple on a trip from Home!/);
+    assert.match(reply, /Secret places turn up on trips as you build good saving habits/);
+    assert.doesNotMatch(reply, /somewhere on the Map/);
+  }
+  assert.match(offlineReply(read(), "Hi"), /I'm Maple/);
+  assert.doesNotMatch(offlineReply(read(), "Hi"), /Money Buddy/);
 });

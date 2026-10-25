@@ -408,7 +408,7 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 
 .stamp {
   --stamp: var(--rose);
-  padding: 5px; flex: none;
+  padding: 5px; flex: none; width: fit-content; justify-self: start;
   background: radial-gradient(circle at 50% 50%, transparent 2.6px, #FFFDF7 3px) -5px -5px / 10px 10px;
   filter: drop-shadow(0 1px 1px rgba(81, 71, 56, 0.35));
   transform: rotate(-2deg);
@@ -638,8 +638,8 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .sign-title { font: 700 34px var(--hand); fill: var(--ink); }
 .sign-time { font: 800 20px var(--body); fill: var(--ink); }
 @keyframes sign-sway { 0%, 100% { transform: rotate(-1.5deg); } 50% { transform: rotate(1.5deg); } }
-.scene:has(.bear-bubble) { padding-top: 150px; min-height: 430px; }
-.bear-bubble { position: absolute; z-index: 4; top: 68px; left: 6%; width: 88%; padding: 15px 18px 30px; font-size: 14px; line-height: 1.45; max-height: 210px; overflow-y: auto; isolation: isolate; }
+.scene:has(.bear-bubble) { padding-top: 150px; min-height: 430px; aspect-ratio: auto; min-width: 0; }
+.bear-bubble { position: absolute; z-index: 4; top: 68px; left: 6%; width: 88%; max-width: calc(100% - 24px); overflow-wrap: anywhere; word-break: break-word; padding: 15px 18px 30px; font-size: 14px; line-height: 1.45; max-height: 210px; overflow-y: auto; isolation: isolate; }
 .bear-bubble > svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
 .bear-bubble > span:not(.sr-only) { display: block; min-height: 42px; }
 .thought-dots { position: absolute; top: -8%; right: -10%; display: flex; gap: 5px; background: var(--paper-card); padding: 10px; border: 2px solid var(--ink); border-radius: 50%; }
@@ -668,7 +668,7 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .return-dialog .sheet-head { justify-content: center; }
 .return-dialog .sheet-body { display: grid; gap: 18px; }
 .return-parcel { position: relative; transform-origin: center; }
-.return-envelope { display: block; width: 78%; margin: 10px auto -120px; animation: envelope-arrive .7s ease-out both; }
+.return-envelope { display: block; width: 78%; margin: 10px auto -22px; filter: drop-shadow(0 4px 3px #51473830); animation: envelope-arrive .7s ease-out both; }
 .return-card { position: relative; animation: postcard-arrive 1.1s cubic-bezier(.2, 1.35, .5, 1) both; animation-delay: var(--delay); text-align: center; }
 .return-card .flip { width: 100%; }
 .return-card .flip-inner { transition: transform .8s cubic-bezier(.2, 1.3, .5, 1); }

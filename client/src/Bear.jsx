@@ -70,7 +70,7 @@ export function BearFigure({ bear, pose = "front", mood = "idle", size = 200, fl
     if (mood === "resting" && !worn.hat) worn.hat = "sleeping_cap";
   }
   const label = pose === "back" ? "walking away on an adventure" : pose === "side" ? "walking" : {
-    thinking: "thinking", idle: "saying hi", happy: "reading the map", eating: "having a honey snack", celebrate: "celebrating", resting: "taking a nap",
+    thinking: "thinking", idle: "saying hi", happy: "feeling happy", eating: "having a honey snack", celebrate: "celebrating", resting: "taking a nap",
   }[mood] || "saying hi";
   return (
     <div className={`bear pose-${pose} mood-${mood} ${className}`} style={{ width: size, aspectRatio: `${p.w} / ${p.h}` }} role="img" aria-label={`${bear.name} the bear, ${label}`}>
