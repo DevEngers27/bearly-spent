@@ -39,35 +39,9 @@ export function placeXY(id, p) {
   return [x + dx, y + dy];
 }
 
-function trailD([x1, y1], [x2, y2]) {
-  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2 - Math.min(120, Math.hypot(x2 - x1, y2 - y1) * 0.25);
-  return { d: `M${x1} ${y1} Q${mx} ${my} ${x2} ${y2}`, at: (t) => [
-    (1 - t) ** 2 * x1 + 2 * (1 - t) * t * mx + t ** 2 * x2,
-    (1 - t) ** 2 * y1 + 2 * (1 - t) * t * my + t ** 2 * y2,
-  ] };
-}
-
-// The side-view bear faces left; mirror it when walking east.
-function Walker({ facingRight }) {
-  return (
-    <g transform={facingRight ? "scale(-1 1)" : undefined}>
-      <image href="/bear/poses/bear_side.png" x="-26" y="-56" width="52" height="56" />
-    </g>
-  );
-}
-
-export default function MapView({ places, home, owned, away, now, bear, selected, onSelect }) {
+export default function MapView({ places, home, owned, selected, onSelect }) {
   const homeXY = project(home.lon, home.lat);
   const entries = Object.entries(places);
-  let token = null, trail = null, facingRight = false;
-  if (away) {
-    const dest = placeXY(away.destId, places[away.destId]);
-    trail = trailD(homeXY, dest);
-    const p = Math.min(1, Math.max(0, (now - away.startedAt) / (away.returnsAt - away.startedAt)));
-    const outbound = p < 0.5;
-    token = trail.at(outbound ? p * 2 : 2 - p * 2);
-    facingRight = outbound ? dest[0] > homeXY[0] : dest[0] < homeXY[0];
-  }
   return (
     <svg className="adventure-map" viewBox={`0 0 ${W} ${H}`} role="group" aria-label="Adventure map">
       <g filter="url(#mq-wobble)" aria-hidden="true">
@@ -100,7 +74,6 @@ export default function MapView({ places, home, owned, away, now, bear, selected
       <defs><clipPath id="pin-clip"><circle r="15.5" /></clipPath></defs>
       <text x="66" y="472" className="map-label small">Hawaiʻi</text>
 
-      {trail && <path d={trail.d} className="trail" />}
       <g transform={`translate(${homeXY[0]} ${homeXY[1]})`} className="home-pin" aria-label="Home cabin">
         <path d="M-16 4 L0 -12 L16 4 V18 H-16 Z" fill="#D98D81" stroke="#514738" strokeWidth="2.5" strokeLinejoin="round" />
         <rect x="-5" y="6" width="10" height="12" fill="#9C6A40" stroke="#514738" strokeWidth="2" />
@@ -126,29 +99,25 @@ export default function MapView({ places, home, owned, away, now, bear, selected
         const ly = side === "below" ? 34 : side === "above" ? -24 : 5;
         const anchor = side === "right" ? "start" : side === "left" ? "end" : "middle";
         return (
-          <g key={id} className={`pin ${state} ${selected === id ? "selected" : ""} ${away?.destId === id ? "target" : ""}`} transform={`translate(${x} ${y})`}
-            onClick={() => onSelect(id)} role="button" tabIndex="0" aria-label={`${p.name}: ${state === "visited" ? "visited" : state === "open" ? `${p.cost} points` : "locked"}`}
+          <g key={id} className={`pin ${state} ${selected === id ? "selected" : ""}`} transform={`translate(${x} ${y})`}
+            onClick={() => onSelect(id)} role="button" tabIndex="0" aria-label={`${p.name}: ${state === "visited" ? "visited" : state === "open" ? "a future adventure" : "locked"}`}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(id); } }}>
             <circle className="pin-bg" r="20" />
             {state === "locked" ? (
               <svg x="-11" y="-11" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">{ICON_PATHS.lock}</svg>
-            ) : (
+            ) : visited ? (
               <>
                 <image href={p.image} x="-21" y="-17" width="42" height="35" clipPath="url(#pin-clip)" preserveAspectRatio="xMidYMid slice" />
                 <circle className="pin-ring" r="15.5" />
               </>
-            )}
+            ) : <circle className="pin-ring" r="12" strokeDasharray="3 4" />}
+            {!visited && p.open && <title>{p.clue || `A little adventure in ${p.state}.`}</title>}
             {visited && <g transform="translate(9 -24)"><circle r="8" className="tick-bg" /><path className="tick" d="M-4 0 l3 3 5 -6" /></g>}
             <text x={lx} y={ly} textAnchor={anchor} className="map-label">{p.name}</text>
           </g>
         );
       })}
 
-      {token && (
-        <g className="walker" transform={`translate(${token[0]} ${token[1] + 6})`}>
-          <Walker facingRight={facingRight} />
-        </g>
-      )}
     </svg>
   );
 }

@@ -1,10 +1,11 @@
 // Game + family rules. Every function takes the db object and mutates it; the
 // HTTP layer wraps calls in store.mutate(). Throw GameError for user-facing
 // validation problems.
+import { randomInt } from "node:crypto";
 import { uid } from "./store.js";
 import { transfer, BankError } from "./bank.js";
 import {
-  PLACES, LESSONS, COSMETICS, MILESTONES, POINTS, SLOTS, placeStatus, bonusDiscoveries,
+  PLACES, LESSONS, COSMETICS, MILESTONES, POINTS, TRIP, SLOTS, placeStatus, bonusDiscoveries,
 } from "./catalog.js";
 
 export class GameError extends Error {
@@ -14,7 +15,7 @@ export class GameError extends Error {
   }
 }
 
-export const ADVENTURE_MS = Number(process.env.ADVENTURE_SECONDS || 15) * 1000;
+export const ADVENTURE_MS = Number(process.env.ADVENTURE_SECONDS || 60) * 1000;
 const dollars = (c) => `$${(c / 100).toFixed(2)}`;
 const today = (now) => new Date(now).toISOString().slice(0, 10);
 
@@ -348,6 +349,33 @@ export function startAdventure(db, destId, now = Date.now()) {
   const adv = { id: uid("adv"), destId, startedAt: now, returnsAt: now + ADVENTURE_MS, status: "away", postcardIds: [] };
   db.adventures.push(adv);
   audit(db, "child", "adventure_started", `Sent ${bear} to ${dest.name} for ${dest.cost} pts (savings untouched)`);
+  return adv;
+}
+
+// Draw before mutating so a failed request never spends points. rng(max) is
+// injectable; production uses crypto's unbiased integer draw.
+export function startTrip(db, now = Date.now(), rng = randomInt) {
+  const bear = db.child.bear.name;
+  if (db.adventures.some((a) => a.status === "away")) throw new GameError(`${bear} is already on a trip!`);
+  if (!Number.isInteger(db.child.points)) throw new GameError("Points need a whole number");
+  if (db.child.points < TRIP.cost) throw new GameError(`Earn ${TRIP.cost - db.child.points} more points`);
+  const collected = visitedSet(db);
+  const open = Object.keys(PLACES).filter((id) => {
+    const status = placeStatus(id, db.child, collected, collected, new Date(now));
+    return status.ok && !status.hidden;
+  });
+  const fresh = open.filter((id) => !collected.has(id));
+  const pool = fresh.length ? fresh : open;
+  if (!pool.length) throw new GameError("No trips are ready just yet");
+  const weight = (id) => PLACES[id].rarity === "common" ? 3 : 1;
+  const total = pool.reduce((sum, id) => sum + weight(id), 0);
+  let ticket = rng(total);
+  if (!Number.isInteger(ticket) || ticket < 0 || ticket >= total) throw new GameError("Let's try packing again");
+  const destId = pool.find((id) => (ticket -= weight(id)) < 0);
+  db.child.points -= TRIP.cost;
+  const adv = { id: uid("adv"), destId, startedAt: now, returnsAt: now + ADVENTURE_MS, status: "away", postcardIds: [] };
+  db.adventures.push(adv);
+  audit(db, "child", "adventure_started", `Sent ${bear} on a surprise trip (${TRIP.cost} pts)`);
   return adv;
 }
 

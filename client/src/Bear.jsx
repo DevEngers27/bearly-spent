@@ -61,6 +61,7 @@ function Layer({ id, item }) {
  * or effect without replacing anything the child chose.
  */
 export function BearFigure({ bear, pose = "front", mood = "idle", size = 200, flip = false, className = "" }) {
+  if (mood === "thinking") pose = "threeQuarter";
   const p = POSES[pose] || POSES.front;
   const worn = { ...pickWorn(bear) };
   if (pose === "front") {
@@ -69,7 +70,7 @@ export function BearFigure({ bear, pose = "front", mood = "idle", size = 200, fl
     if (mood === "resting" && !worn.hat) worn.hat = "sleeping_cap";
   }
   const label = pose === "back" ? "walking away on an adventure" : pose === "side" ? "walking" : {
-    idle: "saying hi", happy: "reading the map", eating: "having a honey snack", celebrate: "celebrating", resting: "taking a nap",
+    thinking: "thinking", idle: "saying hi", happy: "reading the map", eating: "having a honey snack", celebrate: "celebrating", resting: "taking a nap",
   }[mood] || "saying hi";
   return (
     <div className={`bear pose-${pose} mood-${mood} ${className}`} style={{ width: size, aspectRatio: `${p.w} / ${p.h}` }} role="img" aria-label={`${bear.name} the bear, ${label}`}>
@@ -80,6 +81,7 @@ export function BearFigure({ bear, pose = "front", mood = "idle", size = 200, fl
           return id && ITEMS[id] ? <Layer key={slot} id={id} item={ITEMS[id]} /> : null;
         })}
       </div>
+      {mood === "thinking" && <div className="thought-dots" aria-hidden="true"><i /><i /><i /></div>}
       {pose === "front" && mood === "celebrate" && (
         <div className="sparkles" aria-hidden="true"><i /><i /><i /></div>
       )}
