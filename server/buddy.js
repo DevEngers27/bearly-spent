@@ -8,7 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { read, mutate, uid } from "./store.js";
 import { audit, notify, weeksToGoal } from "./domain.js";
 
-const MODEL = process.env.BUDDY_MODEL || "claude-opus-5";
+const MODEL = process.env.BUDDY_MODEL || "claude-opus-5-5";
 const EFFORT = process.env.BUDDY_EFFORT || "low"; // kid chat: keep latency low
 const dollars = (c) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toFixed(2)}`;
 
@@ -24,12 +24,13 @@ function getClient() {
 // ------------------------------------------------------------------ safety
 // Kids type things they shouldn't share. Strip obvious personal info before it
 // leaves the server, and tell the child why.
-const PII = [
-  { re: /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/g, label: "phone number" },
+export const PII = [
+  { re: /(?<!\w)(?:\+1[ .-]?|1[ .-])?(?:\(\d{3}\)|\d{3})[ .-]?\d{3}[ .-]?\d{4}\b/g, label: "phone number" },
   { re: /\b[\w.+-]+@[\w-]+\.[\w.]+\b/g, label: "email" },
-  { re: /\b\d{1,5}\s+\w+(\s\w+)?\s(street|st|avenue|ave|road|rd|lane|ln|drive|dr|blvd)\b/gi, label: "address" },
+  { re: /\b\d{3}-\d{2}-\d{4}\b/g, label: "SSN" },
+  { re: /\b\d{1,5}\s+(?:[\w'-]+\s+){1,4}(street|st|avenue|ave|road|rd|lane|ln|drive|dr|boulevard|blvd)\b/gi, label: "address" },
   { re: /\b(?:\d[ -]*?){13,19}\b/g, label: "card number" },
-  { re: /\b(password|passcode|pin)\s*(is|:)?\s*\S+/gi, label: "password" },
+  { re: /\b(password|passcode|pin)\b\s*(?:is\b\s*[:=]?|[:=])\s*[^\s:=]\S*/gi, label: "password" },
 ];
 export function redact(text) {
   let out = text;
@@ -45,14 +46,34 @@ export function redact(text) {
   return { text: out, found };
 }
 
+function redactData(value) {
+  if (typeof value === "string") return redact(value).text;
+  if (Array.isArray(value)) return value.map(redactData);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, redactData(v)]));
+  return value;
+}
+
+function redactMessages(messages) {
+  return messages.map((message) => ({
+    ...message,
+    content: typeof message.content === "string" ? redact(message.content).text : message.content.map((block) => {
+      if (block.type === "text") return { ...block, text: redact(block.text).text };
+      if (block.type === "tool_use") return { ...block, input: redactData(block.input) };
+      if (block.type === "tool_result") return { ...block, content: redact(block.content).text };
+      // Signed thinking blocks and protocol identifiers must stay intact.
+      return block;
+    }),
+  }));
+}
+
 // ------------------------------------------------------------------ tools
-function snapshot(db) {
+export function snapshot(db) {
   const goals = db.savingsGoals.map((g) => ({
     id: g.id, title: g.title, target: dollars(g.target),
     saved_so_far: dollars(Math.min(db.accounts.savings.balance, g.target)),
     weeks_left_at_current_pace: weeksToGoal(db, g),
   }));
-  return {
+  return redactData({
     child_name: db.child.name,
     age: db.child.age,
     savings_balance: dollars(db.accounts.savings.balance),
@@ -68,7 +89,7 @@ function snapshot(db) {
       date: new Date(t.ts).toDateString(), what: t.memo, amount: dollars(t.amount), direction: t.to === "merchant" ? "spent" : `into ${t.to}`,
     })),
     current_plan: db.buddy.plan?.summary || null,
-  };
+  });
 }
 
 function simulatePurchase(db, { price_dollars, pay_from }) {
@@ -89,7 +110,7 @@ function simulatePurchase(db, { price_dollars, pay_from }) {
   const weekly = Math.round((db.allowance.amount * (100 - db.allowance.savePct)) / 100);
   if (shortfall > 0 && weekly > 0) result.weeks_to_afford_from_spending_money = Math.ceil(shortfall / weekly);
   if (price > db.allowance.spendLimit) result.needs_parent_ok = true;
-  return result;
+  return redactData(result);
 }
 
 const TOOLS = [
@@ -142,7 +163,7 @@ const TOOLS = [
   },
 ];
 
-function runTool(name, input) {
+function runTool(name, input, canWrite = () => true) {
   const db = read();
   switch (name) {
     case "get_snapshot":
@@ -150,7 +171,9 @@ function runTool(name, input) {
     case "simulate_purchase":
       return simulatePurchase(db, input);
     case "update_savings_plan":
+      if (!db.settings.buddyEnabled || !canWrite()) return { error: "This plan update is no longer needed." };
       return mutate((d) => {
+        if (!d.settings.buddyEnabled || !canWrite()) return { error: "This plan update is no longer needed." };
         const summary = String(input.summary || "").slice(0, 240);
         const steps = (input.steps || []).slice(0, 4).map((s) => String(s).slice(0, 120));
         const weekly = Math.max(0, Math.round(Number(input.weekly_save_dollars) * 100) || 0);
@@ -159,7 +182,9 @@ function runTool(name, input) {
         return { ok: true };
       });
     case "propose_mission":
+      if (!db.settings.buddyEnabled || !canWrite()) return { error: "This mission suggestion is no longer needed." };
       return mutate((d) => {
+        if (!d.settings.buddyEnabled || !canWrite()) return { error: "This mission suggestion is no longer needed." };
         const already = d.approvals.some((a) => a.kind === "mission_proposal" && a.status === "pending");
         if (already) return { ok: false, reason: "A suggested mission is already waiting for the parent." };
         const points = Math.max(10, Math.min(50, Math.round(Number(input.points) || 20)));
@@ -177,7 +202,17 @@ function runTool(name, input) {
 }
 
 function systemPrompt(db) {
-  return `You are Money Buddy, the friendly sidekick inside MoneyQuest, a game that helps kids learn to save and manage money. You're talking with ${db.child.name}, who is ${db.child.age} years old. Their bear companion is named ${db.child.bear.name}; it travels to real U.S. national parks and cities with adventure points.
+  return `You are Money Buddy, the friendly AI sidekick inside MoneyQuest.
+
+Who you are talking to:
+- Your audience is a child aged 7–12. You're talking with ${db.child.name}, who is ${db.child.age} years old. The child may be alone with the device. A parent reads every transcript.
+- This app is a money-learning game with a bear named by the child. Their bear companion is named ${db.child.bear.name}; it travels to real U.S. national parks and cities with adventure points.
+
+Content rules:
+- No violence, horror, sexual or romantic content, drugs, alcohol, gambling, self-harm, hate or slurs, or politics or religion debates, including hints or allusions.
+- Never ask for or repeat personal details (full name, address, school, phone, passwords). If they share some, gently remind them to keep those private.
+- No links or app/store recommendations. No pretending to be a human or a parent. No promises about real money.
+- If the child steers toward these topics, respond with one gentle sentence, suggest talking to a trusted grown-up when it is a safety topic, then return to money or the bear without discussing the unsafe details.
 
 How to talk:
 - Use short sentences and words a ${db.child.age}-year-old knows. Keep replies under 70 words unless they ask for more. One emoji at most.
@@ -192,9 +227,8 @@ What you can and can't do:
 - Adventure points are game points, not money. Spending points never changes savings.
 
 Staying safe:
-- Never ask for or repeat personal details (full name, address, school, phone, passwords). If they share some, gently remind them not to.
 - Don't recommend specific stocks, crypto, gambling, loot boxes, or apps that cost money. Keep investing talk at a simple "money can grow over time" level.
-- If they mention being hurt, scared, bullied, or someone asking them for money or secrets online, kindly tell them to talk to a trusted grown-up right away, and stop giving money advice for that message.
+- If they mention being hurt, scared, bullied, or someone asking them for money or secrets online, kindly tell them to talk to a trusted grown-up right away. Offer to return to savings or the bear without giving advice about the unsafe topic.
 - Topics far from money, saving, or the game: answer in one friendly line, then steer back.`;
 }
 
@@ -214,17 +248,48 @@ async function callClaude(params) {
 
 const textOf = (content) => content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 
-/** Run the agentic loop. Returns { reply, toolsUsed }. */
-async function runClaude(messages) {
+const GUARD_PROMPT = "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, real-money promises, or anything a careful parent would not want a 9-year-old to read. Otherwise OK.";
+const GUARD_FALLBACK = "Hmm, let's talk about your savings or Maple's next trip instead! Want to see how close you are to your goal?";
+
+async function runGuard(reply) {
+  const res = await _internals.callGuard({
+    model: process.env.BUDDY_GUARD_MODEL || "claude-haiku-5-5",
+    system: GUARD_PROMPT,
+    messages: [{ role: "user", content: redact(reply).text }],
+    max_tokens: 5,
+  });
+  return res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+}
+
+async function screenReply(reply, canWrite = () => true) {
+  try {
+    if (await _internals.runGuard(reply) === "OK") return reply;
+  } catch {
+    // A failed check must never let an unchecked model reply through.
+  }
+  if (canWrite()) mutate((d) => {
+    if (canWrite()) audit(d, "buddy", "buddy_guard_blocked", reply.slice(0, 80));
+  });
+  return GUARD_FALLBACK;
+}
+
+/** Run the agentic loop. Returns { reply, toolsUsed, completed }. */
+async function runClaude(messages, { executeTool = runTool, canWrite = () => true } = {}) {
   const db = read();
   const toolsUsed = [];
   const convo = [...messages];
   for (let i = 0; i < 6; i++) {
-    const res = await callClaude({ system: systemPrompt(db), tools: TOOLS, messages: convo });
+    const res = await _internals.callClaude({ system: redact(systemPrompt(db)).text, tools: TOOLS, messages: redactMessages(convo) });
     if (res.stop_reason === "refusal") {
-      return { reply: "Hmm, I can't help with that one. Want to talk about your savings goal or an adventure instead?", toolsUsed };
+      if (canWrite()) mutate((d) => {
+        if (canWrite()) audit(d, "buddy", "buddy_refusal", "Money Buddy declined a model response.");
+      });
+      return { reply: "Hmm, I can't help with that one. Want to talk about your savings goal or an adventure instead?", toolsUsed, completed: false };
     }
-    if (res.stop_reason !== "tool_use") return { reply: textOf(res.content) || "Hmm, let me think about that. Can you ask another way?", toolsUsed };
+    if (res.stop_reason !== "tool_use") {
+      const reply = textOf(res.content);
+      return { reply: reply || "Hmm, let me think about that. Can you ask another way?", toolsUsed, completed: Boolean(reply) };
+    }
     convo.push({ role: "assistant", content: res.content });
     const results = [];
     for (const block of res.content) {
@@ -232,40 +297,57 @@ async function runClaude(messages) {
       toolsUsed.push(block.name);
       let out;
       try {
-        out = runTool(block.name, block.input || {});
+        out = executeTool(block.name, redactData(block.input || {}));
       } catch (e) {
         out = { error: e.message };
       }
-      results.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(out), is_error: Boolean(out?.error) });
+      results.push({ type: "tool_result", tool_use_id: block.id, content: redact(JSON.stringify(out)).text, is_error: Boolean(out?.error) });
     }
     convo.push({ role: "user", content: results });
   }
-  return { reply: "Let me think about that a bit more — ask me again in a moment!", toolsUsed };
+  return { reply: "Let me think about that a bit more — ask me again in a moment!", toolsUsed, completed: false };
 }
+
+export const _internals = { runClaude, callClaude, runGuard, systemPrompt, callGuard: (params) => getClient().messages.create(params) };
 
 // ------------------------------------------------------------------ offline fallback
 // Offline Money Buddy: a small rule-based helper so the chat still works
 // without an API key. It reads the same real numbers Claude would.
 const has = (text, re) => re.test(text.toLowerCase());
-function offlineReply(db, text) {
+export function isSafetyConcern(text) {
+  return /\b(?:(?:i'?m|i am) scared|bull(?:y|ied|ying)|hurts? me|someone (?:asked|wants|is asking)|stranger|unsafe|my (?:password|secret)|keep (?:it|this) (?:a )?secret)\b/i.test(text);
+}
+
+export function parsePrice(text) {
+  const amount = text.match(/\$\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(?!\d|[,.]\d)|\b((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*(?:dollars?|bucks?)\b/i);
+  if (!amount) return null;
+  const cents = Math.round(Number((amount[1] || amount[2]).replaceAll(",", "")) * 100);
+  return Number.isSafeInteger(cents) ? cents : null;
+}
+
+const NO_WEEKLY_SAVINGS = "Right now nothing goes to savings each week — ask your grown-up to set a saving amount, or save some yourself!";
+
+export function offlineReply(db, text) {
   const goal = db.savingsGoals[0];
   const weekly = Math.round((db.allowance.amount * db.allowance.savePct) / 100);
   const bear = db.child.bear.name;
-  const amount = text.match(/\$\s?(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s?(dollars|bucks)/i);
-  const price = amount ? Number(amount[1] || amount[2]) : null;
+  const price = parsePrice(text);
 
-  if (has(text, /\b(scared|bully|bullied|hurt|stranger|secret|password|someone (asked|wants)|unsafe)\b/)) {
+  if (isSafetyConcern(text)) {
     return "That sounds important. Please talk to a grown-up you trust right away, like your parent or teacher. You never have to keep secrets about money or passwords.";
   }
-  if (has(text, /\b(buy|get|purchase|afford|spend|cost)\b/) && price) {
-    const sim = simulatePurchase(db, { price_dollars: price, pay_from: "spending" });
-    const simSave = simulatePurchase(db, { price_dollars: price, pay_from: "savings" });
+  if (has(text, /\b(buy(?:ing)?|get|purchase|afford|spend|cost)\b/) && price) {
+    const sim = simulatePurchase(db, { price_dollars: price / 100, pay_from: "spending" });
+    const simSave = simulatePurchase(db, { price_dollars: price / 100, pay_from: "savings" });
     const gi = simSave.goal_impact[0];
-    const limit = price * 100 > db.allowance.spendLimit ? ` It's over ${dollars(db.allowance.spendLimit)}, so your grown-up would need to say OK first.` : "";
+    const limit = price > db.allowance.spendLimit ? ` It's over ${dollars(db.allowance.spendLimit)}, so your grown-up would need to say OK first.` : "";
     if (sim.can_afford) return `Yes, you can pay with your spending money and still have ${sim.balance_after} left. Your ${goal.title} savings stay safe.${limit} Want to wait one day to check you still want it?`;
-    return `You have ${dollars(db.accounts.spending.balance)} to spend, so you'd need ${dollars(price * 100 - db.accounts.spending.balance)} more. If you took it from savings, your ${gi.goal} would take ${gi.weeks_left_after_purchase} weeks instead of ${gi.weeks_left_now}.${limit} Want me to make a plan to save for it?`;
+    const impact = gi.weeks_left_after_purchase === null || gi.weeks_left_now === null
+      ? NO_WEEKLY_SAVINGS
+      : `If you took it from savings, your ${gi.goal} would take ${gi.weeks_left_after_purchase} weeks instead of ${gi.weeks_left_now}.`;
+    return `You have ${dollars(db.accounts.spending.balance)} to spend, so you'd need ${dollars(price - db.accounts.spending.balance)} more. ${impact}${limit} Want me to make a plan to save for it?`;
   }
-  if (has(text, /\b(buy|afford|purchase)\b/)) {
+  if (has(text, /\b(buy(?:ing)?|afford|purchase)\b/)) {
     return "How much does it cost? Tell me the price, like \"Can I buy a $12 book?\", and I'll check your numbers.";
   }
   if (has(text, /\b(plan|budget me|help me save)\b/)) {
@@ -279,12 +361,13 @@ function offlineReply(db, text) {
   if (has(text, /\b(how long|when|weeks|goal|bike|bicycle)\b/)) {
     const w = weeksToGoal(db, goal);
     if (w === 0) return `You already saved enough for your ${goal.title}! Ask your grown-up about buying it, then pick a new goal.`;
+    if (w === null) return NO_WEEKLY_SAVINGS;
     return `You have ${dollars(db.accounts.savings.balance)} of ${dollars(goal.target)} for your ${goal.title}. Saving ${dollars(weekly)} a week, that's about ${w} more weeks. Finishing missions and lessons can earn reward money to go faster.`;
   }
   if (has(text, /\b(need|want)s?\b/) && has(text, /\b(vs|versus|difference|or)\b|what('?s| is) a (need|want)/)) {
     return "A need is something you must have to be safe and healthy, like food, a warm coat or school supplies. A want is something fun that's nice to have, like a new toy. It's good to pay for needs first, then save for wants!";
   }
-  if (has(text, /\b(points?|trip|adventure|travel|map|postcard)\b/)) {
+  if (has(text, /\b(points?|trip|adventure|travel|map|postcard|secret places?)\b/)) {
     return `You have ${db.child.points} adventure points. Points are game points, not money, so trips never touch your savings. Earn more by doing missions and lessons, then send ${bear} somewhere on the Map!`;
   }
   if (has(text, /\b(allowance|payday|get paid)\b/)) {
@@ -309,8 +392,9 @@ export function offlinePlan(db, reason) {
   return {
     summary: w === 0
       ? `You reached your ${goal.title} goal! Time to pick a new one.`
-      : `${dollars(db.accounts.savings.balance)} saved — about ${w} weeks to your ${goal.title} at ${dollars(weekly)}/week.`,
-    steps: [`Keep saving ${dollars(weekly)} from each allowance`, "Finish lessons to earn reward money", "Wait a day before big buys"],
+      : w === null ? NO_WEEKLY_SAVINGS
+        : `${dollars(db.accounts.savings.balance)} saved — about ${w} weeks to your ${goal.title} at ${dollars(weekly)}/week.`,
+    steps: [weekly > 0 ? `Keep saving ${dollars(weekly)} from each allowance` : "Ask your grown-up about saving a little each week", "Finish lessons to earn reward money", "Wait a day before big buys"],
     weeklySave: weekly, goalId: goal.id, updatedAt: Date.now(), reason, offline: true,
   };
 }
@@ -325,17 +409,19 @@ export async function chat(userText) {
   });
   let reply, toolsUsed = [];
   const db = read();
-  if (buddyMode() === "claude") {
+  const live = buddyMode() === "claude";
+  if (live) {
     // Merge consecutive same-role turns (auto plan notes) and start on a user turn.
     const history = [];
     for (const m of db.buddy.chat.slice(-12)) {
       const last = history[history.length - 1];
-      if (last && last.role === m.role) last.content += `\n\n${m.text}`;
-      else history.push({ role: m.role, content: m.text });
+      const content = redact(m.text).text;
+      if (last && last.role === m.role) last.content += `\n\n${content}`;
+      else history.push({ role: m.role, content });
     }
     while (history.length && history[0].role !== "user") history.shift();
     try {
-      ({ reply, toolsUsed } = await runClaude(history));
+      ({ reply, toolsUsed } = await _internals.runClaude(history));
     } catch (e) {
       console.error("[buddy] Claude error:", e.message);
       reply = offlineReply(read(), text) + " (I'm having trouble connecting, so this is a quick answer.)";
@@ -344,6 +430,7 @@ export async function chat(userText) {
     reply = offlineReply(db, text);
   }
   if (found.length) reply = `Quick tip: let's keep things like your ${found.join(" and ")} private, okay?\n\n${reply}`;
+  if (live) reply = await screenReply(reply);
   mutate((d) => {
     d.buddy.chat.push({ id: uid("msg"), role: "assistant", text: reply, ts: Date.now(), tools: toolsUsed });
     if (d.buddy.chat.length > 60) d.buddy.chat.splice(0, d.buddy.chat.length - 60);
@@ -356,24 +443,69 @@ export async function chat(userText) {
  * server, debounced. Claude decides whether the plan needs to change and leaves
  * the child a short note.
  */
+let replanSequence = 0;
+let replanTimer = null;
+const pendingReasons = [];
+
+export function cancelReplan() {
+  clearTimeout(replanTimer);
+  replanTimer = null;
+  pendingReasons.length = 0;
+  replanSequence += 1;
+}
+
+export function queueReplan(reason) {
+  // A newer money event invalidates an in-flight plan even during the debounce.
+  replanSequence += 1;
+  pendingReasons.push(redact(reason).text);
+  clearTimeout(replanTimer);
+  replanTimer = setTimeout(() => {
+    replanTimer = null;
+    const why = pendingReasons.splice(0).join("; ");
+    if (read().settings.buddyEnabled) replan(why).catch((e) => console.error("[replan]", e.message));
+  }, 1500);
+}
+
 export async function replan(reason) {
+  const sequence = ++replanSequence;
+  const db = read();
+  const canWrite = () => sequence === replanSequence && read() === db && db.settings.buddyEnabled;
+  if (!canWrite()) return;
+  reason = redact(reason).text;
   if (buddyMode() !== "claude") {
     mutate((d) => {
+      if (!canWrite()) return;
       d.buddy.plan = offlinePlan(d, reason);
       audit(d, "buddy", "plan_updated", `Recalculated plan after: ${reason} (offline planner)`);
     });
     return;
   }
-  const prompt = `[Automatic update — not typed by ${read().child.name}] Something changed: ${reason}. Check the snapshot, then call update_savings_plan with a refreshed plan. Then write one short, cheerful note (max 35 words) telling ${read().child.name} what changed for their goal.`;
+  const prompt = redact(`[Automatic update — not typed by ${db.child.name}] Something changed: ${reason}. Check the snapshot, then call update_savings_plan with a refreshed plan. Then write one short, cheerful note (max 35 words) telling ${db.child.name} what changed for their goal.`).text;
+  let planUpdated = false;
+  const executeTool = (name, input) => {
+    const out = runTool(name, input, canWrite);
+    if (name === "update_savings_plan" && out?.ok) planUpdated = true;
+    return out;
+  };
   try {
-    const { reply } = await runClaude([{ role: "user", content: prompt }]);
+    let { reply, completed } = await _internals.runClaude([{ role: "user", content: prompt }], { executeTool, canWrite });
+    if (!canWrite()) return;
+    if (planUpdated && completed !== false) reply = await screenReply(reply, canWrite);
+    if (!canWrite()) return;
     mutate((d) => {
+      if (!canWrite()) return;
+      if (!planUpdated || completed === false) {
+        audit(d, "buddy", "replan_no_note", "Automatic replan finished without a completed plan update; no chat note posted.");
+        return;
+      }
       if (d.buddy.plan) d.buddy.plan.reason = reason;
       d.buddy.chat.push({ id: uid("msg"), role: "assistant", text: reply, ts: Date.now(), auto: true });
     });
   } catch (e) {
     console.error("[buddy] replan error:", e.message);
+    if (!canWrite()) return;
     mutate((d) => {
+      if (!canWrite()) return;
       d.buddy.plan = offlinePlan(d, reason);
     });
   }
