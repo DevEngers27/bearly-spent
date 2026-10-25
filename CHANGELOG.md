@@ -11,6 +11,16 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.7.1] — 2026-10-25
+
+### Added
+- The bear walks the map again. During a surprise trip it roams a fixed
+  mystery loop with a "?" cloud and sparkles (every pin stays labelled and
+  the picture is the same whatever the destination, so nothing is given
+  away). After the postcard reveal the map draws the real trail once, walks
+  the bear home, calls out "New postcard!" and keeps a faint line for the
+  latest trip. 326 server tests and 191 client tests.
+
 ## [0.7.0] — 2026-10-25
 
 One pot of real money, missions that keep coming, and the polish from the
