@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, money, useAction } from "./api.js";
+import { api, money, formatTime, formatDateTime, postcardMetrics, useAction } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 
 const SECTIONS = [
@@ -16,11 +16,13 @@ const SECTIONS = [
 ];
 
 const KIND_LABEL = { reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
-const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+const BROWSER_TIMEZONE = Intl.DateTimeFormat("en-US").resolvedOptions().timeZone || "UTC";
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
 export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignOutAll, offline }) {
   const [sec, setSec] = useState("inbox");
+  const [opened, setOpened] = useState(["inbox"]);
+  const selectSection = (id) => { setSec(id); setOpened((previous) => previous.includes(id) ? previous : [...previous, id]); };
   const [run, pendingAction] = useAction(toast, offline);
   const busy = pendingAction || offline;
   const timezoneAttempted = useRef(false);
@@ -44,7 +46,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
         </div>
         <nav aria-label="Parent sections">
           {SECTIONS.map(([id, label]) => (
-            <button key={id} className={sec === id ? "on" : ""} onClick={() => setSec(id)} aria-current={sec === id ? "page" : undefined}>
+            <button key={id} className={sec === id ? "on" : ""} onClick={() => selectSection(id)} aria-current={sec === id ? "page" : undefined}>
               {label}
               {id === "inbox" && pending.length > 0 && <span className="badge">{pending.length}</span>}
             </button>
@@ -55,8 +57,8 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
       <main className="p-main" id="main">
         {sec === "inbox" && <Inbox {...ctx} pending={pending} />}
         {sec === "overview" && <Overview {...ctx} />}
-        {sec === "goals" && <Goals key={JSON.stringify(state.goals[0] && [state.goals[0].id, state.goals[0].title, state.goals[0].target])} {...ctx} />}
-        {sec === "allowance" && <Allowance key={JSON.stringify([state.allowance.amount, state.allowance.savePct, state.allowance.spendLimit, state.allowance.rewardDestination])} {...ctx} />}
+        {opened.includes("goals") && <div hidden={sec !== "goals"}><Goals {...ctx} /></div>}
+        {opened.includes("allowance") && <div hidden={sec !== "allowance"}><Allowance key={JSON.stringify([state.allowance.amount, state.allowance.savePct, state.allowance.spendLimit, state.allowance.rewardDestination])} {...ctx} /></div>}
         {sec === "activity" && <Activity {...ctx} />}
         {sec === "guardian" && <Guardian {...ctx} />}
         {sec === "buddy" && <BuddyLog {...ctx} />}
@@ -80,11 +82,12 @@ function Integrations({ state }) {
 }
 
 function Inbox({ state, run, pending, busy }) {
+  const notifications = state.notifications.filter((n) => !n.read);
   const decided = state.approvals.filter((a) => a.status !== "pending").slice(0, 8);
   return (
     <div className="p-stack">
       <h1>Approvals</h1>
-      {pending.length === 0 && <p className="empty">You're all caught up. New requests from {state.child.name}, the Guardian, and Money Buddy show up here.</p>}
+      {pending.length === 0 && <p className="empty">Nothing waiting — nice!</p>}
       <ul className="approval-list">
         {pending.map((a) => (
           <li key={a.id} className={`approval k-${a.kind}`}>
@@ -129,9 +132,10 @@ function Inbox({ state, run, pending, busy }) {
         </>
       )}
       <h2>Notifications</h2>
+      {notifications.length === 0 && <p className="empty">Nothing waiting — nice!</p>}
       <ul className="p-feed">
-        {state.notifications.slice(0, 8).map((n) => (
-          <li key={n.id} className={`k-${n.kind}`}><time>{new Date(n.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>{n.text}</li>
+        {notifications.slice(0, 8).map((n) => (
+          <li key={n.id} className={`k-${n.kind}`}><time>{formatTime(n.ts)}</time>{n.text}</li>
         ))}
       </ul>
     </div>
@@ -161,7 +165,7 @@ function Overview({ state }) {
               <tr><td>Days with money tracked</td><td>{learned.tracked}</td></tr>
               <tr><td>Weekly budgets planned</td><td>{learned.budgetsDone}</td></tr>
               <tr><td>Adventures taken</td><td>{learned.adventures}</td></tr>
-              <tr><td>Postcards collected</td><td>{state.postcards.length}</td></tr>
+              <tr><td>Postcards collected</td><td>{postcardMetrics(state).places} of {postcardMetrics(state).total} places ({postcardMetrics(state).cards} cards)</td></tr>
             </tbody>
           </table>
         </section>
@@ -181,9 +185,9 @@ const Figure = ({ label, value, sub }) => (
 );
 
 function Goals({ state, run, busy }) {
-  const [g, setG] = useState({ title: "Complete five financial literacy challenges", type: "lessons", count: 5, reward: 5 });
+  const remaining = state.catalog.lessons.filter((l) => !state.child.lessonsDone.includes(l.id)).length;
+  const [g, setG] = useState({ title: "Complete money lessons", type: remaining ? "lessons" : "tasks", count: remaining || 1, reward: 5 });
   const [m, setM] = useState({ title: "", points: 40 });
-  const [sg, setSg] = useState({ title: state.goals[0]?.title || "", target: state.goals[0] ? state.goals[0].target / 100 : 50 });
   return (
     <div className="p-stack">
       <h1>Goals & tasks</h1>
@@ -199,10 +203,10 @@ function Goals({ state, run, busy }) {
                 <option value="tasks">Tasks you confirm</option>
                 <option value="save_actions">Times saved</option>
               </select></label>
-              <label>How many<input type="number" min="1" max="50" value={g.count} onChange={(e) => setG({ ...g, count: e.target.value })} /></label>
+              <label>How many{g.type === "lessons" && <small>{remaining} lessons remaining</small>}<input type="number" min="1" max={g.type === "lessons" ? remaining : 50} value={g.count} onChange={(e) => setG({ ...g, count: e.target.value })} /></label>
               <label>Reward ($)<input type="number" min="0" max="100" step="0.5" value={g.reward} onChange={(e) => setG({ ...g, reward: e.target.value })} /></label>
             </div>
-            <button disabled={busy} className="pbtn primary">Create goal</button>
+            <button disabled={busy || (g.type === "lessons" && (remaining === 0 || Number(g.count) > remaining))} className="pbtn primary">Create goal</button>
           </form>
         </section>
         <section className="p-card">
@@ -215,22 +219,14 @@ function Goals({ state, run, busy }) {
           </form>
         </section>
       </div>
-      <section className="p-card">
-        <h2>{state.goals[0] ? "Savings goal" : "Set a savings goal"}</h2>
-        {!state.goals[0] && <p>Pick something your child would love to save for.</p>}
-        <form className="pform pform-row" onSubmit={(e) => { e.preventDefault(); run("parent/savings-goal", sg, "Savings goal updated"); }}>
-          <label>Saving for<input value={sg.title} onChange={(e) => setSg({ ...sg, title: e.target.value })} /></label>
-          <label>Target ($)<input type="number" min="1" value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
-          <button disabled={busy} className="pbtn">Update</button>
-        </form>
-      </section>
+      <SavingsGoal key={JSON.stringify(state.goals[0] && [state.goals[0].id, state.goals[0].title, state.goals[0].target])} state={state} run={run} busy={busy} />
       <h2>All goals</h2>
       <table className="ptable">
         <thead><tr><th>Goal</th><th>Progress</th><th>Reward</th><th>Status</th></tr></thead>
         <tbody>
           {state.parentGoals.length === 0 && <tr><td colSpan="4" className="p-muted">No goals yet. Create one above.</td></tr>}
           {state.parentGoals.slice().reverse().map((x) => (
-            <tr key={x.id}><td>{x.title}</td><td>{x.progress}/{x.count}</td><td>{money(x.reward)}</td><td>{x.status.replace("_", " ")}</td></tr>
+            <tr key={x.id} className={x.status === "cancelled" ? "struck" : ""}><td>{x.title}</td><td>{x.progress}/{x.count}</td><td>{money(x.reward)}</td><td>{x.status.replace("_", " ")}{x.status === "active" && <button disabled={busy} className="pbtn" onClick={() => run(`parent/goal/${x.id}/cancel`, {}, "Goal cancelled")}>Cancel</button>}</td></tr>
           ))}
         </tbody>
       </table>
@@ -247,13 +243,28 @@ function Goals({ state, run, busy }) {
   );
 }
 
+function SavingsGoal({ state, run, busy }) {
+  const [sg, setSg] = useState({ title: state.goals[0]?.title || "", target: state.goals[0] ? state.goals[0].target / 100 : 50 });
+  return (
+    <section className="p-card">
+      <h2>{state.goals[0] ? "Savings goal" : "Set a savings goal"}</h2>
+      {!state.goals[0] && <p>Pick something your child would love to save for.</p>}
+      <form className="pform pform-row" onSubmit={(e) => { e.preventDefault(); run("parent/savings-goal", sg, "Savings goal updated"); }}>
+        <label>Saving for<input value={sg.title} onChange={(e) => setSg({ ...sg, title: e.target.value })} /></label>
+        <label>Target ($)<input type="number" min="1" value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
+        <button disabled={busy} className="pbtn">Update</button>
+      </form>
+    </section>
+  );
+}
+
 function Allowance({ state, run, busy }) {
   const a = state.allowance;
   const [f, setF] = useState({ amount: a.amount / 100, savePct: a.savePct, spendLimit: a.spendLimit / 100, rewardDestination: a.rewardDestination });
   return (
     <div className="p-stack">
       <h1>Allowance & limits</h1>
-      <p className="p-muted">The Ledger Guardian pays the allowance on schedule, splits it between savings and spending, and holds purchases over your limit for approval. Next payout: {new Date(a.nextRun).toLocaleString()}.</p>
+      <p className="p-muted">The Ledger Guardian pays the allowance on schedule, splits it between savings and spending, and holds purchases over your limit for approval. Next payout: {formatDateTime(a.nextRun)}.</p>
       <form className="p-card pform" onSubmit={(e) => { e.preventDefault(); run("parent/allowance", f, "Allowance rules saved"); }}>
         <div className="pform-row">
           <label>Weekly allowance ($)<input type="number" min="0" max="100" step="0.5" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
@@ -289,11 +300,11 @@ function Activity({ state }) {
         <tbody>
           {state.transactions.map((t) => (
             <tr key={t.id} className={t.status !== "posted" ? "struck" : t.flagged ? "flag" : ""}>
-              <td>{new Date(t.ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
+              <td>{formatDateTime(t.ts)}</td>
               <td>{t.memo}{t.injected ? " (bank replay)" : ""}</td>
               <td>{label[t.from]} → {label[t.to]}</td>
               <td className="num">{money(t.amount)}</td>
-              <td>{t.status}{t.flagged ? " · flagged" : ""}</td>
+              <td>{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}</td>
             </tr>
           ))}
         </tbody>
@@ -328,7 +339,7 @@ function Guardian({ state, run, busy }) {
       <ol className="audit">
         {rows.slice(0, 60).map((a) => (
           <li key={a.id} className={`actor-${a.actor}`}>
-            <time>{new Date(a.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</time>
+            <time>{formatTime(a.ts, { second: "2-digit" })}</time>
             <span className="actor">{a.actor}</span>
             <span>{a.detail}</span>
           </li>

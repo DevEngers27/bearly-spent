@@ -224,6 +224,8 @@ export const MILESTONES = [
   { at: 20000, label: "Legend", reward: "Legend glow" },
 ];
 
+export const TRIP = { cost: 30 };
+
 export const POINTS = {
   track: 10,
   lesson: 20,

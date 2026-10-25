@@ -33,7 +33,10 @@ export const actions = {
     if (!Array.isArray(body.answers) || !body.answers.every((v) => Number.isInteger(v))) throw new game.GameError("Answer every question with a choice");
     return game.completeLesson(db, lessonId, body.answers);
   }),
+  adventureSeen: (db, adventureId) => game.markAdventureSeen(db, id(adventureId)),
+  cancelGoal: (db, goalId) => game.cancelParentGoal(db, id(goalId)),
   missionDone: (db, missionId) => game.childMarkMissionDone(db, id(missionId)),
+  trip: action((db) => game.startTrip(db)),
   adventure: action((db, body) => game.startAdventure(db, id(body.destId))),
   buyCosmetic: action((db, body) => game.buyCosmetic(db, id(body.id))),
   equip: action((db, body) => game.equip(db, id(body.kind), body.value === null ? null : id(body.value))),
@@ -75,8 +78,9 @@ export const actions = {
     // A parent deposit can unblock parent-funded payouts, not child spending.
     db.approvals.forEach((a) => {
       if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
-      if (a.kind === "topup" && a.status === "pending") a.status = "approved";
+      if (a.kind === "topup" && a.status === "pending") game.resolveEscalation(db, a, "approved");
     });
+    game.notify(db, "parent", `Funding topped up: $${(amount / 100).toFixed(2)}`, "money");
     game.audit(db, "parent", "topup", `Added $${(amount / 100).toFixed(2)} to the funding account (simulated deposit)`);
   }),
   settings: action((db, body) => {

@@ -11,7 +11,7 @@ import * as catalog from "../server/catalog.js";
 import { childView } from "../server/index.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
-  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet", "Parent.jsx": "Overview, Goals, Allowance, Inbox, Guardian, Settings, Children, Security, BuddyLog", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
+  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
   const result = await build({
     stdin: { contents: await readFile(new URL(`src/${name}`, import.meta.url), "utf8") + (extra ? `\nexport { ${extra} };` : ""), resolveDir: new URL("src/", import.meta.url).pathname, loader: "jsx" },
     bundle: true, write: false, format: "cjs", external: ["react"], jsxFactory: "h", jsxFragment: "Fragment", define: { "import.meta.env.PROD": "false" },
@@ -19,12 +19,13 @@ const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Pa
   return [name, result.outputFiles[0].text];
 })));
 
-function harness(name) {
-  const slots = [], pending = [], timers = [], notices = [], streams = [];
+function harness(name, { controller = null } = {}) {
+  const slots = [], pending = [], timers = [], timeouts = [], notices = [], streams = [];
   const storage = new Map(), session = new Map();
   const window = new EventTarget();
+  window.scrollTo = () => {};
   let cursor = 0;
-  const env = { now: Date.now(), fetch: async () => new Response("{}"), slots, pending, notices, storage, session, window, timers, streams };
+  const env = { now: Date.now(), fetch: async () => new Response("{}"), slots, pending, notices, storage, session, window, timers, timeouts, streams };
   const changed = (a, b) => !a || !b || a.length !== b.length || a.some((v, i) => !Object.is(v, b[i]));
   const hooks = {
     useState(initial) {
@@ -41,9 +42,9 @@ function harness(name) {
     },
   };
   const storageApi = (map) => ({ getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v), removeItem: (k) => map.delete(k) });
-  env.document = { activeElement: null, visibilityState: "visible", body: { classList: { add() {}, remove() {} } }, addEventListener() {}, removeEventListener() {} };
+  env.document = { activeElement: null, visibilityState: "visible", body: { classList: { add() {}, remove() {} } }, addEventListener() {}, removeEventListener() {}, querySelector: () => null };
   env.location = new URL("https://moneyquest.test/");
-  env.navigator = { serviceWorker: new EventTarget() };
+  env.navigator = { serviceWorker: Object.assign(new EventTarget(), { controller }) };
   const module = { exports: {} };
   vm.runInNewContext(sources[name], {
     module, exports: module.exports, require: () => hooks,
@@ -52,8 +53,9 @@ function harness(name) {
     location: env.location, history: { replaceState: (a, b, url) => { env.location.href = url.href; } },
     fetch: (...args) => env.fetch(...args), Event, URL, URLSearchParams, console,
     EventSource: class { constructor(url) { this.url = url; streams.push(this); } close() { this.closed = true; } },
+    SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } },
     Date: class extends Date { static now() { return env.now; } },
-    setInterval: (fn) => { timers.push(fn); return timers.length; }, clearInterval() {}, setTimeout() {},
+    setInterval: (fn) => { timers.push(fn); return timers.length; }, clearInterval() {}, setTimeout: (fn) => { timeouts.push(fn); return timeouts.length; }, clearTimeout: (id) => { timeouts[id - 1] = null; },
   });
   env.exports = module.exports;
   env.render = (fn, props) => { cursor = 0; return fn(props); };
@@ -206,7 +208,7 @@ test("Lesson replay copy and failed final submission retry use the original answ
 
 test("C7 / C16: empty goals render friendly cards and an unknown stored tab opens Home", () => {
   const state = stateFixture(); state.goals = [];
-  for (const [file, name] of [["Child.jsx", "Home"], ["Child.jsx", "Buddy"], ["Parent.jsx", "Overview"], ["Parent.jsx", "Goals"]]) {
+  for (const [file, name] of [["Child.jsx", "Home"], ["Child.jsx", "Buddy"], ["Parent.jsx", "Overview"], ["Parent.jsx", "SavingsGoal"]]) {
     const h = harness(file);
     assert.match(text(h.render(h.exports[name], { state })), /Set a savings goal/);
   }
@@ -225,7 +227,12 @@ test("C4: parent form keys change only with their server-backed editable values"
   };
   const goal = getSection("Goals & tasks");
   state.goals[0] = { ...state.goals[0], title: "Skates", target: 6000 };
-  assert.notEqual(getSection("Goals & tasks").props.key, goal.props.key);
+  assert.equal(getSection("Goals & tasks").props.key, goal.props.key, "reward draft must not remount with savings changes");
+  const goals = harness("Parent.jsx");
+  const savings = () => nodes(goals.render(goals.exports.Goals, { state }), (n) => n.type?.name === "SavingsGoal")[0];
+  const savingsKey = savings().props.key;
+  state.goals[0] = { ...state.goals[0], target: 8000 };
+  assert.notEqual(savings().props.key, savingsKey, "only the savings form remounts");
   const allowance = getSection("Allowance");
   state.allowance.nextRun++;
   assert.equal(getSection("Allowance").props.key, allowance.props.key);
@@ -238,8 +245,8 @@ function meFixture(role = "parent", pinSet = false) {
     activeChild: { id: "child-one", name: "Mia", age: 9, bearName: "Maple" },
     children: [{ id: "child-one", name: "Mia", age: 9, bearName: "Maple" }, ...(role === "parent" ? [{ id: "child-two", name: "Leo", age: 8, bearName: "Pip" }] : [])] };
 }
-async function appHarness(me) {
-  const h = harness("App.jsx");
+async function appHarness(me, options) {
+  const h = harness("App.jsx", options);
   h.fetch = async () => new Response(JSON.stringify(me));
   h.render(h.exports.default); h.flush();
   await new Promise(setImmediate);
@@ -367,11 +374,12 @@ test("C13 / M16: all child and parent POST controls receive the shared busy stat
     ["Child.jsx", "Missions", {}, ["A task"]],
     ["Child.jsx", "LessonSheet", { lesson: catalog.LESSONS[0] }, [catalog.LESSONS[0].questions[0].options[0]]],
     ["Child.jsx", "BudgetSheet", {}, ["Finish my budget"]],
-    ["Child.jsx", "PlaceSheet", { id: "seattle" }, ["Send Maple"]],
+    ["Child.jsx", "Home", {}, ["Send Maple on a trip"]],
     ["Child.jsx", "Friends", {}, ["Propose swap", game.GREETINGS[0], "Send"]],
-    ["Child.jsx", "Buddy", {}, ["Send", "Can I buy"]],
+    ["Child.jsx", "TalkBar", { talk: { close: noop, send: noop } }, ["Send", "Can I buy"]],
     ["Parent.jsx", "Inbox", { pending: [{ id: "a", kind: "reward", title: "Reward", amount: 500 }, { id: "b", kind: "topup", title: "Funding" }] }, ["Approve", "Decline", "Mark handled", "Add $50"]],
-    ["Parent.jsx", "Goals", {}, ["Create goal", "Assign task", "Update"]],
+    ["Parent.jsx", "Goals", {}, ["Create goal", "Assign task"]],
+    ["Parent.jsx", "SavingsGoal", {}, ["Update"]],
     ["Parent.jsx", "Allowance", {}, ["Save rules", "Add $50", "Fast-forward"]],
     ["Parent.jsx", "Guardian", {}, ["Post a duplicate"]],
     ["Parent.jsx", "Settings", {}, ["Reset demo"]],
@@ -421,7 +429,7 @@ test("C16: return reveal replaces an open sheet and dismissing never reopens it"
 });
 
 test("C6 / C16 / C3: App returns to Welcome on unauthorized; controllerchange offers explicit reload", async () => {
-  const h = await appHarness(meFixture());
+  const h = await appHarness(meFixture(), { controller: {} });
   let tree = h.tree();
   h.window.dispatchEvent(new Event("mq:unauthorized"));
   tree = h.render(h.exports.default); h.flush();
@@ -1007,4 +1015,576 @@ test("B5b follow-up demo: a delayed Welcome discovery 401 cannot eject the sign-
   finish(new Response('{"error":"Sign in","demo":true}', { status: 401 }));
   await new Promise(setImmediate);
   assert.equal(nodes(h.tree(), (n) => n.type?.name === "AuthScreen")[0].props.screen, "signin");
+});
+
+test("F3: Home offers one flat-price trip and an anonymous countdown sign", async () => {
+  const h = harness("Child.jsx"), state = stateFixture(), calls = [];
+  state.child.points = 18;
+  const props = { state, run: async (...args) => calls.push(args), talk: { open: noop }, open: noop };
+  let tree = h.render(h.exports.Home, props);
+  assert.equal(byText(tree, "Earn 12 more points").props.disabled, true);
+  state.child.points = 30;
+  tree = h.render(h.exports.Home, props);
+  await byText(tree, "Send Maple on a trip").props.onClick();
+  assert.equal(calls[0][0], "child/trip");
+  assert.deepEqual(Object.keys(calls[0][1]), []);
+  state.adventures = [{ id: "away", status: "away", returnsAt: h.now + 42000 }];
+  tree = h.render(h.exports.Home, props);
+  assert.match(text(tree), /On a trip.*Back in 0:42/s);
+  assert.doesNotMatch(text(tree), /Gone to|San Francisco/);
+  assert.equal(byText(tree, "On a trip").props.disabled, undefined); // tappable sign
+  assert.equal(h.exports.countdown(h.now, h.now), "Any second now…");
+});
+
+test("F3: map handles masked adventures and place sheets are read-only with story and visit count", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  state.adventures = [{ status: "away", returnsAt: h.now + 42000 }];
+  let tree = h.render(h.exports.MapScreen, { state, open: noop });
+  assert.match(text(tree), /Maple\s*'s travels/);
+  assert.doesNotMatch(text(tree), /walking to|heading home from|send Maple/);
+  const map = harness("Child.jsx");
+  tree = map.render(map.exports.MapView, { places: state.catalog.places, home: state.catalog.home, owned: new Set(), away: state.adventures[0], onSelect: noop });
+  assert.equal(nodes(tree, (n) => n.props.className === "trail" || n.props.className === "walker").length, 0);
+  const place = harness("Child.jsx");
+  state.postcards = [{ defId: "seattle", source: "trip" }, { defId: "seattle", source: "trip" }];
+  tree = place.render(place.exports.PlaceSheet, { state, id: "seattle", close: noop, openCard: noop });
+  assert.match(text(tree), /Visited\s+2\s+times/);
+  assert.match(text(tree), /hydrangeas/);
+  assert.doesNotMatch(text(tree), /Earn|Send|points/);
+});
+
+test("F3: reveal includes an envelope, ordered bonus card and one Add to album action", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  const ids = ["san_francisco", "hawaii_volcanoes_national_park"];
+  state.postcards = ids.map((defId, i) => ({ id: `pc${i}`, defId, source: "trip" }));
+  const tree = h.render(h.exports.ReturnReveal, { state, latest: { postcardIds: ["pc0", "pc1"] }, onSeen: noop, onDone: noop });
+  assert.equal(tree.props.fullscreen, true);
+  assert.equal(nodes(tree, (n) => n.props.className === "return-envelope").length, 1);
+  assert.match(text(tree), /…and a surprise!/);
+  assert.equal(nodes(tree, (n) => n.type === "button").length, 1);
+  assert.equal(text(byText(tree, "Add to album")), "Add to album");
+  const cards = nodes(tree, (n) => n.type?.name === "FlipPostcard");
+  assert.deepEqual(cards.map((c) => c.props.revealDelay), [0, 2400]);
+});
+
+test("F3: seen adventures persist across several returns; New badges clear only when opened", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  const props = { state, toast: noop };
+  h.render(h.exports.default, props); h.flush();
+  state.postcards = [...state.postcards, { id: "new-pc", defId: "seattle", source: "trip" }];
+  state.adventures = [{ id: "one", status: "returned", postcardIds: ["new-pc"] }];
+  let tree = h.render(h.exports.default, props); h.flush();
+  nodes(tree, (n) => n.type?.name === "ReturnReveal")[0].props.onSeen();
+  state.adventures.unshift({ id: "two", status: "returned", postcardIds: [] });
+  tree = h.render(h.exports.default, props); h.flush();
+  nodes(tree, (n) => n.type?.name === "ReturnReveal")[0].props.onSeen();
+  tree = h.render(h.exports.default, props); h.flush();
+  assert.equal(nodes(tree, (n) => n.type?.name === "ReturnReveal").length, 0);
+  assert.deepEqual(JSON.parse(h.storage.get("mq_seen_adv")), ["one", "two"]);
+  byText(tree, "Album").props.onClick();
+  tree = h.render(h.exports.default, props);
+  let album = nodes(tree, (n) => n.type?.name === "Album")[0];
+  assert.equal(album.props.newCards.length, 1);
+  album.props.openCard("seattle");
+  tree = h.render(h.exports.default, props);
+  album = nodes(tree, (n) => n.type?.name === "Album")[0];
+  assert.equal(album.props.newCards.length, 0);
+  assert.deepEqual(JSON.parse(h.storage.get("mq_opened_cards:Mia")), ["new-pc"]);
+});
+
+test("F6: talk guards Buddy-off, away and offline with warm bubbles and no request", async () => {
+  for (const mode of ["off", "away", "offline"]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    let calls = 0;
+    if (mode === "off") state.settings.buddyEnabled = false;
+    if (mode === "away") state.adventures = [{ id: "away", status: "away", returnsAt: h.now + 42000 }];
+    const props = { state, offline: mode === "offline", run: () => { calls++; } };
+    let talk = h.render(h.exports.useMapleTalk, props); h.flush();
+    talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+    assert.equal(talk.isOpen, false);
+    assert.match(talk.bubble, mode === "off" ? /grown-up switched chatting off/ : mode === "away" ? /on a trip! Back in 0:42/ : /can't chat while we're offline/);
+    assert.equal(await talk.send("Hello"), false);
+    assert.equal(calls, 0);
+  }
+});
+
+test("F6: one talk request sets thinking then happy, safety replies rest, and mute persists", async () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  h.storage.set("mq_muted", "true");
+  let finish, calls = 0;
+  const props = { state, run: () => { calls++; return new Promise((r) => { finish = r; }); } };
+  let talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  talk.open(); const first = talk.send("Hi");
+  assert.equal(await talk.send("Again"), false);
+  talk = h.render(h.exports.useMapleTalk, props);
+  assert.equal(talk.mood, "thinking"); assert.equal(talk.bubble, "…");
+  finish({ reply: "A little saving adds up!" }); await first;
+  talk = h.render(h.exports.useMapleTalk, props);
+  assert.equal(talk.mood, "happy"); assert.equal(calls, 1);
+  const safety = talk.send("Hi"); finish({ reply: "Hmm, let's talk about your savings." }); await safety;
+  talk = h.render(h.exports.useMapleTalk, props);
+  assert.equal(talk.mood, "resting");
+  talk.toggleMute(); assert.equal(h.storage.get("mq_muted"), "false");
+});
+
+test("F6: going away during a reply closes the bar and ignores the stale reply", async () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  let finish;
+  const props = { state, run: () => new Promise((r) => { finish = r; }) };
+  let talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  talk.open(); const request = talk.send("Hi");
+  state.adventures = [{ id: "away", status: "away", returnsAt: h.now + 60000 }];
+  h.render(h.exports.useMapleTalk, props); h.flush();
+  finish({ reply: "A late reply" }); await request;
+  talk = h.render(h.exports.useMapleTalk, props);
+  assert.equal(talk.isOpen, false); assert.equal(talk.bubble, "");
+});
+
+test("F6: talk bar offers exactly three suggestions, conditional hold-to-talk and transcript link", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  const props = { state, talk: { close: noop, send: async () => false }, open: noop };
+  let tree = h.render(h.exports.TalkBar, props);
+  assert.equal(nodes(tree, (n) => n.props.className === "chip").length, 3);
+  assert.ok(byText(tree, "Can I buy a $15 toy?"));
+  assert.equal(nodes(tree, (n) => n.props["aria-label"] === "Hold to talk").length, 0);
+  let session, stopped = 0;
+  h.window.SpeechRecognition = class { constructor() { session = this; } start() {} stop() { stopped++; } };
+  tree = h.render(h.exports.TalkBar, props);
+  const mic = nodes(tree, (n) => n.props["aria-label"] === "Hold to talk")[0];
+  mic.props.onPointerDown({ preventDefault: noop, currentTarget: {} });
+  session.onresult({ results: [[{ transcript: "My little saving plan" }]] });
+  tree = h.render(h.exports.TalkBar, props);
+  assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, "My little saving plan");
+  mic.props.onPointerUp(); assert.equal(stopped, 1);
+  assert.ok(byText(tree, "See our chat"));
+  const chat = harness("Child.jsx");
+  tree = chat.render(chat.exports.Buddy, { state, startTalk: noop });
+  assert.match(text(tree), /grown-up can read these chats/);
+  assert.match(text(tree), /Keep passwords, phone numbers and addresses private/);
+  assert.ok(byText(tree, "Talk to Maple"));
+});
+
+test("F6: speech tries Cartesia token then proxy then browser; muted reply sends no voice requests", async () => {
+  const h = harness("Child.jsx"), calls = [], spoken = [];
+  h.window.speechSynthesis = { cancel: noop, speak: (u) => spoken.push(u.text) };
+  h.fetch = async (url) => { calls.push(url); return new Response("unavailable", { status: 503 }); };
+  await h.exports.speak("A little saving!", "cartesia");
+  assert.deepEqual(calls, ["/api/voice/token", "/api/buddy/speak"]);
+  assert.deepEqual(spoken, ["A little saving!"]);
+  calls.length = 0; spoken.length = 0;
+  h.storage.set("mq_muted", "true");
+  const props = { state: stateFixture(), run: async () => ({ reply: "A little saving!" }) };
+  let talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  await talk.send("Hi");
+  assert.equal(calls.length, 0); assert.equal(spoken.length, 0);
+});
+
+test("F6: late voice fallback is suppressed after mute or leaving the turn", async () => {
+  const h = harness("Child.jsx"), spoken = [];
+  h.window.speechSynthesis = { cancel: noop, speak: (u) => spoken.push(u.text) };
+  let enabled = true, finish;
+  h.fetch = () => new Promise((r) => { finish = r; });
+  const speech = h.exports.speak("A late reply", "cartesia", () => enabled);
+  enabled = false;
+  finish(new Response("unavailable", { status: 503 }));
+  await speech;
+  assert.equal(spoken.length, 0);
+});
+
+test("F3 / F6: reduced motion shows postcard picture and full polite bubble immediately", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  h.window.matchMedia = () => ({ matches: true });
+  let tree = h.render(h.exports.FlipPostcard, { place: state.catalog.places.seattle, bearName: "Maple", to: "You", revealDelay: 2400 }); h.flush();
+  tree = h.render(h.exports.FlipPostcard, { place: state.catalog.places.seattle, bearName: "Maple", to: "You", revealDelay: 2400 });
+  assert.doesNotMatch(tree.props.className, /flipped/);
+  const bubble = harness("Child.jsx"); bubble.window.matchMedia = () => ({ matches: true });
+  tree = bubble.render(bubble.exports.SpeechBubble, { text: "Here is a little plan." }); bubble.flush();
+  tree = bubble.render(bubble.exports.SpeechBubble, { text: "Here is a little plan." });
+  assert.equal(tree.props["aria-live"], "polite");
+  assert.equal(nodes(tree, (n) => n.props["aria-hidden"] === "true" && n.type === "span")[0].props.children[0], "Here is a little plan.");
+  const bear = harness("Child.jsx");
+  tree = bear.render(bear.exports.BearFigure, { bear: state.child.bear, mood: "thinking" });
+  assert.match(tree.props.className, /pose-threeQuarter mood-thinking/);
+  assert.equal(nodes(tree, (n) => n.props.className === "thought-dots").length, 1);
+});
+
+test("F3: a legacy seen adventure does not replay older postcards", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  h.storage.set("mq_seen_adv", "latest");
+  state.adventures = [{ id: "latest", status: "returned", returnedAt: h.now }, { id: "older", status: "returned", returnedAt: h.now - 60000 }];
+  const tree = h.render(h.exports.default, { state, toast: noop });
+  assert.equal(nodes(tree, (n) => n.type?.name === "ReturnReveal").length, 0);
+});
+
+test("F3: Add to album flies toward nav and finishes once after animation", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  let seen = 0, done = 0;
+  const props = { state, latest: { postcardIds: [] }, onSeen: () => seen++, onDone: () => done++ };
+  let tree = h.render(h.exports.ReturnReveal, props); h.flush();
+  const values = {};
+  h.document.querySelector = () => ({ getBoundingClientRect: () => ({ left: 300, top: 700, width: 50, height: 50 }) });
+  nodes(tree, (n) => n.props.className === "return-parcel ")[0].props.ref.current = {
+    getBoundingClientRect: () => ({ left: 50, top: 200, width: 300, height: 300 }),
+    style: { setProperty: (name, value) => { values[name] = value; } },
+  };
+  const add = byText(tree, "Add to album").props.onClick;
+  add(); add();
+  tree = h.render(h.exports.ReturnReveal, props); h.flush();
+  assert.equal(byText(tree, "Add to album").props.disabled, true);
+  assert.equal(values["--album-x"], "125px"); assert.equal(values["--album-y"], "375px");
+  assert.equal(seen, 0);
+  h.timeouts.filter(Boolean).forEach((fn) => fn());
+  assert.equal(seen, 1); assert.equal(done, 1);
+});
+
+test("F6: talk input keeps focus through polls, Escape restores opener and failed send keeps draft", async () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  let focused = 0, closed = 0;
+  const opener = { focus: () => focused++ };
+  h.document.activeElement = opener;
+  const props = { state, talk: { close: () => closed++, send: async () => false }, open: noop };
+  let tree = h.render(h.exports.TalkBar, props);
+  const input = nodes(tree, (n) => n.type === "input")[0];
+  const element = { focus: () => { h.document.activeElement = element; } };
+  input.props.ref.current = element; h.flush();
+  assert.equal(h.document.activeElement, element);
+  input.props.onChange({ target: { value: "Can we save a little?" } });
+  tree = h.render(h.exports.TalkBar, props); h.flush();
+  assert.equal(h.document.activeElement, element);
+  await nodes(tree, (n) => n.type === "form")[0].props.onSubmit(submit);
+  tree = h.render(h.exports.TalkBar, props);
+  assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, "Can we save a little?");
+  const escape = new Event("keydown"); Object.assign(escape, { key: "Escape" }); h.window.dispatchEvent(escape);
+  assert.equal(closed, 1);
+  h.slots.find((s) => s?.cleanup)?.cleanup(); assert.equal(focused, 1);
+});
+
+
+test("F36.1: bubble containment", async () => {
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  const scene = css.match(/\.scene:has\(\.bear-bubble\)\s*\{([^}]+)\}/)[1];
+  const bubble = css.match(/\.bear-bubble\s*\{([^}]+)\}/)[1];
+  assert.match(scene, /aspect-ratio:\s*auto/);
+  assert.match(scene, /min-width:\s*0/);
+  assert.match(bubble, /max-width:\s*calc\(100% - 24px\)/);
+  assert.match(bubble, /overflow-wrap:\s*anywhere/);
+  assert.match(bubble, /word-break:\s*break-word/);
+  for (const away of [false, true]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    const reply = away ? "Maple is on a trip! Back in 0:42" : "A long reply ".repeat(150) + "x".repeat(500);
+    if (away) state.adventures = [{ status: "away", returnsAt: h.now + 42000 }];
+    const home = h.render(h.exports.Home, { state, talk: { bubble: reply, open: noop } });
+    const scene = nodes(home, (n) => n.type === "section" && n.props.className.startsWith("scene "))[0];
+    const component = nodes(scene, (n) => n.type?.name === "SpeechBubble")[0];
+    const rendered = harness("Child.jsx");
+    const markup = rendered.render(rendered.exports.SpeechBubble, component.props);
+    assert.match(text(markup), away ? /Maple is on a trip!/ : /A long reply/);
+    assert.equal(markup.props.style?.width, undefined);
+  }
+});
+
+test("F36.2: child album baseline and badges", () => {
+  const h = harness("Child.jsx"), state = stateFixture(), props = { state, toast: noop };
+  let tree = h.render(h.exports.default, props); h.flush();
+  byText(tree, "Album").props.onClick();
+  const album = () => nodes(h.render(h.exports.default, props), (n) => n.type?.name === "Album")[0];
+  assert.equal(album().props.newCards.length, 0);
+  assert.equal(state.postcards.filter((p) => p.defId === "chicago").length, 2);
+  state.postcards.push({ id: "later", defId: "seattle", source: "trip", collectedAt: h.now + 1000 });
+  assert.equal(album().props.newCards[0].id, "later");
+  const reload = harness("Child.jsx");
+  h.storage.forEach((v, k) => reload.storage.set(k, v));
+  tree = reload.render(reload.exports.default, props);
+  let reloadedAlbum = nodes(tree, (n) => n.type?.name === "Album")[0];
+  assert.equal(reloadedAlbum.props.newCards[0].id, "later");
+  reloadedAlbum.props.openCard("seattle");
+  tree = reload.render(reload.exports.default, props);
+  assert.equal(nodes(tree, (n) => n.type?.name === "Album")[0].props.newCards.length, 0);
+  const other = harness("Child.jsx");
+  reload.storage.forEach((v, k) => other.storage.set(k, v));
+  state.child = { ...state.child, name: "Leo" };
+  tree = other.render(other.exports.default, props);
+  assert.equal(nodes(tree, (n) => n.type?.name === "Album")[0].props.newCards.length, 0);
+  assert.ok(other.storage.has("mq_album_baseline:Leo"));
+});
+
+test("F36.3: spoiler-free reveal and reduced motion", () => {
+  for (const revealDelay of [0, 2400]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    const props = { place: state.catalog.places.seattle, bearName: "Maple", to: "Mia", collectedAt: h.now, revealDelay };
+    let tree = h.render(h.exports.FlipPostcard, props); h.flush();
+    assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
+    assert.equal(nodes(tree, (n) => n.props.className === "postmark").length, 0);
+    assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "");
+    nodes(tree, (n) => n.props.role === "button")[0].props.onClick();
+    tree = h.render(h.exports.FlipPostcard, props);
+    assert.match(tree.props.className, /flipped/);
+    h.timeouts[0](); // start the flip, still no readable spoiler
+    tree = h.render(h.exports.FlipPostcard, props);
+    assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
+    h.timeouts[1](); // finish the flip
+    tree = h.render(h.exports.FlipPostcard, props);
+    assert.match(text(tree), /Seattle/);
+    assert.match(text(tree), /hydrangeas/);
+    assert.equal(nodes(tree, (n) => n.props.className === "postmark").length, 1);
+    const reduced = harness("Child.jsx"); reduced.window.matchMedia = () => ({ matches: true });
+    tree = reduced.render(reduced.exports.FlipPostcard, props);
+    assert.doesNotMatch(tree.props.className, /flipped/);
+    assert.match(text(tree), /Seattle/);
+    assert.match(text(tree), /hydrangeas/);
+  }
+});
+
+test("F36.4: paper envelope body and flap", async () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  const tree = h.render(h.exports.ReturnReveal, { state, latest: { postcardIds: [] }, onSeen: noop, onDone: noop });
+  assert.equal(nodes(tree, (n) => n.type === "rect" && n.props.className === "envelope-body" && n.props.fill === "#FFF0CF").length, 1);
+  assert.equal(nodes(tree, (n) => n.type === "path" && n.props.className === "envelope-flap").length, 1);
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.return-envelope\s*\{[^}]*margin: 10px auto -22px;[^}]*drop-shadow/);
+});
+
+test("F36.5: collector and Maple copy", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  const tile = h.render(h.exports.PostcardTile, { id: "seattle", place: state.catalog.places.seattle, count: 0 });
+  assert.match(text(tile), /Collector's value/);
+  assert.doesNotMatch(text(tile), /Album value|pts/);
+  const chat = harness("Child.jsx");
+  const tree = chat.render(chat.exports.Buddy, { state, startTalk: noop });
+  assert.match(text(tree), /Maple\s+explains and plans/);
+  assert.doesNotMatch(text(tree), /Money Buddy/);
+  const bear = harness("Child.jsx");
+  assert.match(bear.render(bear.exports.BearFigure, { bear: state.child.bear, mood: "happy" }).props["aria-label"], /feeling happy/);
+});
+
+test("F36.6: intrinsic stamp width", async () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  state.postcards.push({ defId: "seattle", source: "trip" });
+  const tree = h.render(h.exports.PlaceSheet, { state, id: "seattle", close: noop });
+  assert.equal(nodes(tree, (n) => n.type?.name === "Stamp").length, 1);
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.stamp\s*\{[^}]*width:\s*fit-content;[^}]*justify-self:\s*start/);
+});
+
+test("F36.7: legible sound toggle", () => {
+  for (const muted of [false, true]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    let toggles = 0;
+    const tree = h.render(h.exports.TalkBar, { state, talk: { muted, toggleMute: () => toggles++, close: noop }, open: noop });
+    const button = nodes(tree, (n) => n.type === "button" && n.props["aria-label"] === (muted ? "Sound off" : "Sound on"))[0];
+    assert.equal(button.props["aria-pressed"], muted);
+    assert.equal(button.props.title, muted ? "Sound off" : "Sound on");
+    assert.equal(nodes(button, (n) => n.type?.name === "Icon")[0].props.name, muted ? "speakerOff" : "speaker");
+    button.props.onClick(); assert.equal(toggles, 1);
+  }
+});
+
+test("F36.8: visible map clues", () => {
+  for (const open of [true, false]) {
+    const h = harness("Child.jsx"), state = stateFixture();
+    state.catalog.places.seattle = { ...state.catalog.places.seattle, open, clue: "Follow the rainy trail.", lockReason: "Save money 3 times" };
+    const tree = h.render(h.exports.PlaceSheet, { state, id: "seattle", close: noop });
+    assert.equal(nodes(tree, (n) => n.type === "p" && text(n) === "Follow the rainy trail.").length, 1);
+    if (!open) assert.match(text(tree), /Save money 3 times/);
+    assert.doesNotMatch(text(tree), /Send|Earn/);
+  }
+});
+
+test("D1: first install never shows update, existing controller offers reload and dismiss", () => {
+  const first = harness("App.jsx");
+  let tree = first.render(first.exports.default); first.flush();
+  first.navigator.serviceWorker.controller = {};
+  for (let i = 0; i < 2; i++) {
+    first.navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
+    tree = first.render(first.exports.default); first.flush();
+    assert.equal(byText(tree, "Updated!"), undefined);
+  }
+  const upgrade = harness("App.jsx", { controller: {} });
+  upgrade.render(upgrade.exports.default); upgrade.flush();
+  upgrade.navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
+  tree = upgrade.render(upgrade.exports.default);
+  assert.ok(byText(tree, "Updated! Tap to reload"));
+  nodes(tree, (n) => n.props["aria-label"] === "Dismiss update")[0].props.onClick();
+  assert.equal(byText(upgrade.render(upgrade.exports.default), "Updated!"), undefined);
+});
+
+test("D2: impossible lesson goals ask a grown-up and zero remaining never suggests a lesson", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  state.child.lessonsDone = catalog.LESSONS.map((l) => l.id);
+  state.parentGoals = [{ id: "old", title: "Old impossible goal", status: "active", type: "lessons", count: 5, progress: 3, reward: 500 }];
+  const tree = h.render(h.exports.Home, { state });
+  assert.match(text(tree), /Ask your grown-up about this goal/);
+  assert.doesNotMatch(text(tree), /more money lessons|Try the .* lesson/);
+  const parent = harness("Parent.jsx");
+  state.child.lessonsDone = catalog.LESSONS.slice(0, 3).map((l) => l.id);
+  let goals = parent.render(parent.exports.Goals, { state });
+  assert.match(text(goals), /2\s+lessons remaining/);
+  const count = nodes(goals, (n) => n.type === "input" && n.props.type === "number")[0];
+  assert.equal(count.props.max, 2);
+  let request;
+  goals = parent.render(parent.exports.Goals, { state, run: (...args) => { request = args; } });
+  byText(goals, "Cancel").props.onClick();
+  assert.equal(request[0], "parent/goal/old/cancel");
+  state.parentGoals[0].status = "cancelled";
+  goals = parent.render(parent.exports.Goals, { state });
+  assert.equal(nodes(goals, (n) => n.type === "tr" && n.props.className === "struck").length, 1);
+  assert.equal(byText(goals, "Cancel"), undefined);
+});
+
+test("D3: Album, Map and Overview use the same trip-place and card metrics", () => {
+  const state = stateFixture();
+  state.postcards.push({ id: "trip", defId: "seattle", source: "trip" }, { id: "trade", defId: "san_francisco", source: "trade" });
+  state.metrics = { postcards: { places: 2, cards: 4, total: 15 } };
+  for (const [file, name, expected] of [["Child.jsx", "Album", /2 of 15 places · 4 cards/], ["Child.jsx", "MapScreen", /2 of 15 places/], ["Parent.jsx", "Overview", /2 of 15 places \(\s*4 cards\)/]]) {
+    const h = harness(file);
+    assert.match(text(h.render(h.exports[name], { state })).replace(/\s+/g, " "), expected);
+  }
+  const old = harness("api.js");
+  delete state.metrics;
+  assert.deepEqual(JSON.parse(JSON.stringify(old.exports.postcardMetrics(state))), { places: 2, cards: 4, total: 15 });
+});
+
+test("D4 / D12: handled notifications hide, and both inbox lists get warm empty states", () => {
+  const h = harness("Parent.jsx"), state = stateFixture();
+  state.notifications = [{ id: "handled", read: true, text: "Old approval reminder", ts: Date.now() }];
+  const tree = h.render(h.exports.Inbox, { state, pending: [] });
+  assert.doesNotMatch(text(tree), /Old approval reminder/);
+  assert.equal(nodes(tree, (n) => n.type === "p" && text(n) === "Nothing waiting — nice!").length, 2);
+});
+
+test("D6: date, time, money and postcard postmarks consistently use en-US", async () => {
+  const h = harness("api.js"), ts = Date.parse("2026-10-24T12:34:00Z");
+  assert.equal(h.exports.money(123456), "$1,234.56");
+  assert.equal(h.exports.moneyShort(123400), "$1,234");
+  assert.equal(h.exports.formatDate(ts), new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(ts)));
+  assert.equal(h.exports.formatTime(ts), new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(ts)));
+  const child = harness("Child.jsx"), state = stateFixture();
+  const card = child.render(child.exports.FlipPostcard, { place: state.catalog.places.chicago, bearName: "Maple", to: "Mia", collectedAt: ts });
+  const postmark = nodes(card, (n) => n.props.className === "postmark")[0];
+  assert.equal(postmark.props["aria-label"], `Collected ${h.exports.formatDate(ts)}`);
+  for (const name of ["Child.jsx", "Parent.jsx", "Postcard.jsx"]) {
+    const source = await readFile(new URL(`src/${name}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /toLocale(?:Date|Time)?String\(/, name);
+  }
+});
+
+test("D7: reversed ledgers carry visible and accessible status copy", () => {
+  const state = stateFixture();
+  state.transactions = [{ id: "dup", status: "reversed", amount: 500, memo: "Allowance", ts: Date.now(), from: "parent", to: "savings" }];
+  const kid = harness("Child.jsx");
+  const ledger = kid.render(kid.exports.MoneySheet, { state });
+  const reversed = nodes(ledger, (n) => n.type === "li" && n.props.className === "reversed")[0];
+  assert.match(reversed.props["aria-label"], /Allowance, \$5.00, reversed/);
+  assert.match(text(reversed), /reversed/);
+  const parent = harness("Parent.jsx");
+  assert.match(text(parent.render(parent.exports.Activity, { state })), /duplicate reversed by Guardian/);
+});
+
+test("D8: upcoming milestone names the item and Dress-up explains saving to unlock", () => {
+  const state = stateFixture();
+  state.child.milestonesUnlocked.push(2500);
+  const home = harness("Child.jsx");
+  const tree = home.render(home.exports.Home, { state });
+  assert.match(text(tree).replace(/\s+/g, " "), /Next: Flower crown at \$50/);
+  assert.doesNotMatch(text(tree), /Flower crown unlocked/);
+  const dress = harness("Child.jsx");
+  assert.match(text(dress.render(dress.exports.DressSheet, { state })), /Save \$50 to unlock/);
+});
+
+test("D9: savings changes preserve reward drafts; unrelated security changes preserve allowance drafts", () => {
+  const state = stateFixture(), goals = harness("Parent.jsx");
+  let tree = goals.render(goals.exports.Goals, { state });
+  const savingsKey = nodes(tree, (n) => n.type?.name === "SavingsGoal")[0].props.key;
+  nodes(tree, (n) => n.type === "input")[0].props.onChange({ target: { value: "A draft worth keeping" } });
+  state.goals[0] = { ...state.goals[0], target: 7000 };
+  tree = goals.render(goals.exports.Goals, { state });
+  assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, "A draft worth keeping");
+  assert.notEqual(nodes(tree, (n) => n.type?.name === "SavingsGoal")[0].props.key, savingsKey);
+  const allowance = harness("Parent.jsx");
+  tree = allowance.render(allowance.exports.Allowance, { state });
+  nodes(tree, (n) => n.type === "input")[0].props.onChange({ target: { value: "17" } });
+  state.settings.buddyEnabled = false;
+  state.settings.timezone = "America/Los_Angeles";
+  tree = allowance.render(allowance.exports.Allowance, { state });
+  assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, "17");
+});
+
+test("D10: server reveal receipts suppress replay on a fresh device; offline acknowledgements sync", async () => {
+  const state = stateFixture();
+  state.adventures = [{ id: "seen", status: "returned", revealedAt: Date.now(), postcardIds: [] }];
+  const fresh = harness("Child.jsx");
+  assert.equal(nodes(fresh.render(fresh.exports.default, { state, toast: noop }), (n) => n.type?.name === "ReturnReveal").length, 0);
+  const offline = harness("Child.jsx"), calls = [];
+  delete state.adventures[0].revealedAt;
+  offline.fetch = async (url) => { calls.push(url); return new Response("{}"); };
+  const render = (isOffline) => offline.render(offline.exports.default, { state, toast: noop, offline: isOffline });
+  let tree = render(true); offline.flush();
+  nodes(tree, (n) => n.type?.name === "ReturnReveal")[0].props.onSeen();
+  tree = render(true); offline.flush();
+  assert.equal(calls.length, 0);
+  assert.equal(nodes(tree, (n) => n.type?.name === "ReturnReveal").length, 0);
+  render(false); offline.flush();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(calls, ["/api/child/adventure/seen/seen"]);
+  assert.ok(offline.storage.get("mq_seen_adv").includes("seen"));
+});
+
+test("D12: feedback replaces earlier saves, Map has points once, Lock follows kid-view button", async () => {
+  const app = await appHarness(meFixture("child"));
+  let tree = app.tree();
+  let root = nodes(tree, (n) => n.type?.name === "ChildRoot")[0];
+  root.props.toast("Saved $1"); root.props.toast("Saved $2"); root.props.toast("Saved $3");
+  tree = app.render(app.exports.default);
+  const toasts = nodes(tree, (n) => n.props.className === "toast ok");
+  assert.equal(toasts.length, 1);
+  assert.match(text(toasts[0]), /Saved \$3/);
+  app.timeouts[0]();
+  assert.match(text(app.render(app.exports.default)), /Saved \$3/);
+  const kid = harness("Child.jsx"), state = stateFixture();
+  kid.storage.set("mq_tab", "map");
+  tree = kid.render(kid.exports.default, { state, toast: noop });
+  assert.equal(nodes(tree, (n) => n.props.title?.startsWith("Adventure points")).length, 1);
+  assert.doesNotMatch(text(kid.render(kid.exports.MapScreen, { state })), /40\s+pts/);
+  const parent = await appHarness(meFixture("parent", true));
+  // Enter parent mode through the authenticated PIN sheet.
+  tree = parent.tree();
+  const gate = nodes(tree, (n) => n.type?.name === "PinGate")[0];
+  gate.props.onOk({ unlockedUntil: parent.now + 900000 });
+  tree = parent.render(parent.exports.default);
+  const actions = nodes(tree, (n) => n.props.className === "appbar-actions")[0];
+  assert.deepEqual(nodes(actions, (n) => n.type === "button").map(text), ["Kid mode", "Lock"]);
+  assert.equal(actions.props.children.at(-1).props.children[0], "Lock");
+  assert.equal(nodes(actions, (n) => n.type?.name === "SignOut").length, 1);
+});
+
+test("D1 / D12: narrow layout keeps badge in flow, feedback below header and tables contained", async () => {
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.surprise-badge \{ position: relative;/);
+  assert.match(css, /\.toasts \{ position: fixed; bottom:/);
+  assert.match(css, /@media \(max-width: 640px\)[\s\S]*\.toasts \{ top: calc\(112px/);
+  assert.match(css, /\.role-parent \.appbar \{ height: calc\(144px/);
+  assert.match(css, /\.role-parent \.toasts \{ top: calc\(152px/);
+  assert.match(css, /\.ptable \{ table-layout: fixed; overflow-wrap: anywhere;/);
+  const h = harness("Child.jsx"), state = stateFixture();
+  const tree = h.render(h.exports.FlipPostcard, { place: state.catalog.places.chicago, surprise: true });
+  assert.equal(tree.props.children[0].props.className, "surprise-badge");
+  assert.equal(nodes(tree.props.children[1], (n) => n.props.className === "surprise-badge").length, 0);
+});
+
+test("D9: visiting Security keeps previously opened goal and allowance forms mounted", () => {
+  const h = harness("Parent.jsx"), state = stateFixture();
+  const render = () => h.render(h.exports.default, { state, toast: noop });
+  let tree = render();
+  byText(tree, "Goals & tasks").props.onClick();
+  tree = render();
+  assert.equal(nodes(tree, (n) => n.type?.name === "Goals").length, 1);
+  byText(tree, "Allowance").props.onClick();
+  tree = render();
+  const allowance = nodes(tree, (n) => n.type?.name === "Allowance")[0];
+  byText(tree, "Friends & privacy").props.onClick();
+  state.settings.buddyEnabled = false;
+  tree = render();
+  assert.equal(nodes(tree, (n) => n.type?.name === "Allowance")[0].props.key, allowance.props.key);
+  assert.equal(nodes(tree, (n) => n.type?.name === "Goals").length, 1);
+  assert.equal(nodes(tree, (n) => n.type === "div" && n.props.hidden === true).length, 2);
 });

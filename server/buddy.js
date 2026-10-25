@@ -80,7 +80,7 @@ export function snapshot(db) {
     spending_balance: dollars(db.accounts.spending.balance),
     weekly_allowance: dollars(db.allowance.amount),
     allowance_saved_percent: db.allowance.savePct,
-    next_allowance_date: new Date(db.allowance.nextRun).toDateString(),
+    next_allowance_date: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(db.allowance.nextRun)),
     purchase_limit_without_parent: dollars(db.allowance.spendLimit),
     adventure_points: db.child.points,
     savings_goals: goals,
@@ -368,10 +368,10 @@ export function offlineReply(db, text, childId = childIdFor(db)) {
     return "A need is something you must have to be safe and healthy, like food, a warm coat or school supplies. A want is something fun that's nice to have, like a new toy. It's good to pay for needs first, then save for wants!";
   }
   if (has(text, /\b(points?|trip|adventure|travel|map|postcard|secret places?)\b/)) {
-    return `You have ${db.child.points} adventure points. Points are game points, not money, so trips never touch your savings. Earn more by doing missions and lessons, then send ${bear} somewhere on the Map!`;
+    return `You have ${db.child.points} adventure points. Points are game points, not money, so trips never touch your savings. Earn more by doing missions and lessons, then send ${bear} on a trip from Home! Secret places turn up on trips as you build good saving habits.`;
   }
   if (has(text, /\b(allowance|payday|get paid)\b/)) {
-    return `Your allowance is ${dollars(db.allowance.amount)} a week, and ${db.allowance.savePct}% goes straight into savings. The next one comes on ${new Date(db.allowance.nextRun).toDateString()}.`;
+    return `Your allowance is ${dollars(db.allowance.amount)} a week, and ${db.allowance.savePct}% goes straight into savings. The next one comes on ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(db.allowance.nextRun))}.`;
   }
   if (has(text, /\b(how much|balance|money do i have|saved)\b/)) {
     return `You have ${dollars(db.accounts.savings.balance)} in savings and ${dollars(db.accounts.spending.balance)} to spend.`;
@@ -380,7 +380,7 @@ export function offlineReply(db, text, childId = childIdFor(db)) {
     return "Three saving tricks: save first when money comes in, wait one day before buying something you want, and compare prices before you buy. Small amounts add up!";
   }
   if (has(text, /^(hi|hey|hello|yo|good (morning|afternoon|evening))\b/)) {
-    return `Hi ${db.child.name}! I'm Money Buddy. You can ask me "Can I buy a $15 toy?", "When will I get my ${goal.title.toLowerCase()}?", or "Make me a saving plan".`;
+    return `Hi ${db.child.name}! I'm ${bear}. You can ask me "Can I buy a $15 toy?", "When will I get my ${goal.title.toLowerCase()}?", or "Make me a saving plan".`;
   }
   return `I'm not sure about that one. I'm best at money questions! Try "Can I buy a $15 toy?", "When will I get my ${goal.title.toLowerCase()}?", or "Make me a saving plan".`;
 }
@@ -397,6 +397,17 @@ export function offlinePlan(db, reason) {
     steps: [weekly > 0 ? `Keep saving ${dollars(weekly)} from each allowance` : "Ask your grown-up about saving a little each week", "Finish lessons to earn reward money", "Wait a day before big buys"],
     weeklySave: weekly, goalId: goal.id, updatedAt: Date.now(), reason, offline: true,
   };
+}
+
+// Save a Home plan for affordability replies, including connection fallbacks.
+function offlineChatReply(childId, text) {
+  if (!isSafetyConcern(text) && /\b(buy(?:ing)?|get|purchase|afford|spend|cost)\b/i.test(text) && parsePrice(text)) {
+    mutateChild(childId, (d) => {
+      d.buddy.plan = offlinePlan(d, "you asked about a purchase");
+      audit(d, "buddy", "plan_updated", `Offline planner made a plan: ${d.buddy.plan.summary}`);
+    });
+  }
+  return offlineReply(readChild(childId), text, childId);
 }
 
 // ------------------------------------------------------------------ public API
@@ -428,10 +439,10 @@ export async function chat(childId, userText) {
     } catch (e) {
       console.error("[buddy] Claude error:", e.message);
       if (!canWrite()) return { reply: "Buddy is taking a break. Try again later!", toolsUsed: [] };
-      reply = offlineReply(readChild(childId), text, childId) + " (I'm having trouble connecting, so this is a quick answer.)";
+      reply = offlineChatReply(childId, text) + " (I'm having trouble connecting, so this is a quick answer.)";
     }
   } else {
-    reply = offlineReply(db, text, childId);
+    reply = offlineChatReply(childId, text);
   }
   if (found.length) reply = `Quick tip: let's keep things like your ${found.join(" and ")} private, okay?\n\n${reply}`;
   if (live) reply = await screenReply(reply, canWrite, childId);

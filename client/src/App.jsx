@@ -5,6 +5,8 @@ import Parent from "./Parent.jsx";
 import { SketchDefs } from "./Bear.jsx";
 import { Icon } from "./Icons.jsx";
 
+const hadControllerAtLoad = Boolean(navigator.serviceWorker?.controller);
+
 export default function App() {
   const [me, setMe] = useState(null);
   const [view, setView] = useState("loading");
@@ -18,7 +20,7 @@ export default function App() {
   const resettingChild = useRef(false);
   const toast = useCallback((text, tone = "ok") => {
     const id = Math.random();
-    setToasts((t) => [...t, { id, text, tone }]);
+    setToasts([{ id, text, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3800);
   }, []);
   const acceptSession = useCallback((next, restoring = false) => {
@@ -73,7 +75,7 @@ export default function App() {
         if (version === authVersion.current && err.status !== 401) toast(err.message, "error");
       } finally { resettingChild.current = false; }
     };
-    const onUpdate = () => setUpdated(true);
+    const onUpdate = () => { if (hadControllerAtLoad) setUpdated(true); };
     window.addEventListener("mq:unauthorized", unauthorized);
     window.addEventListener("mq:locked", locked);
     window.addEventListener("mq:rate-limit", limited);
@@ -166,9 +168,11 @@ export default function App() {
           <div className="brand"><img className="brand-mark" src="/bear/poses/bear_front.png" alt="" /><span>MoneyQuest</span><span className="brand-sub">for grown-ups</span></div>
           <label className="child-switcher">Child<select value={me.activeChild.id} onChange={(e) => selectChild(e.target.value)}>{me.children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}</select></label>
           {parentOffline && <span className="offline-pill" role="status">Offline</span>}
-          {me.family.pinSet && <button className="pbtn" onClick={enterParent}>Lock</button>}
-          <button className="pbtn" onClick={() => setView("kid")}>Kid mode</button>
-          <SignOut onSignOut={signOut} toast={toast} />
+          <div className="appbar-actions">
+            <button className="pbtn" onClick={() => setView("kid")}>Kid mode</button>
+            <SignOut onSignOut={signOut} toast={toast} />
+            {me.family.pinSet && <button className="pbtn" onClick={enterParent}>Lock</button>}
+          </div>
         </header>
       )}
       {view === "loading" && <Loading />}
@@ -177,7 +181,7 @@ export default function App() {
       {me?.role === "parent" && view === "parent" && <ParentRoot key={me.activeChild.id} childId={me.activeChild.id} me={me} refreshMe={refreshMe} onSignOut={signOut} onSignOutAll={signOutAll} toast={toast} onConnection={setParentOffline} />}
       {me?.role === "parent" && pinOpen && <PinGate onOk={(result) => { setMe({ ...me, unlockedUntil: result.unlockedUntil }); setPinOpen(false); setView("parent"); }} onCancel={() => { setPinOpen(false); setView("kid"); }} />}
       <div className="toasts" aria-live="polite">
-        {updated && <button className="toast ok" onClick={() => location.reload()}>Updated! Tap to reload</button>}
+        {updated && <div className="toast ok update-toast"><button onClick={() => location.reload()}>Updated! Tap to reload</button><button aria-label="Dismiss update" onClick={() => setUpdated(false)}>×</button></div>}
         {toasts.map((t) => <div key={t.id} className={`toast ${t.tone}`}>{t.tone === "ok" && <Icon name="sparkle" size={18} />}{t.text}</div>)}
       </div>
     </div>

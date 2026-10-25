@@ -13,7 +13,7 @@ import * as auth from "./auth.js";
 import { takeLimit, withChat, openFamilyStream } from "./limits.js";
 import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
-import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, placeStatus } from "./catalog.js";
+import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, TRIP, placeStatus } from "./catalog.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SENT = Symbol("response sent");
@@ -85,8 +85,9 @@ export function childView(db, now = Date.now()) {
     missions: db.missions,
     transactions: db.transactions.filter((t) => t.from !== "parent" || t.to !== "parent").slice(-30).reverse(),
     notifications: db.notifications.filter((n) => n.to === "child").slice(-20).reverse(),
-    adventures: db.adventures.slice(-10).reverse(),
+    adventures: db.adventures.slice(-10).reverse().map(({ destId, ...adventure }) => adventure.status === "away" ? adventure : { ...adventure, destId }),
     postcards: db.postcards,
+    metrics: { postcards: game.postcardMetrics(db) },
     friends: db.friends.filter((f) => f.status !== "declined").map(game.friendView),
     trades: db.trades.slice(-10).reverse(),
     pendingRequests: db.approvals.filter((a) => a.status === "pending" && ["spend", "extra", "reward", "task", "friend", "trade"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.title })),
@@ -102,6 +103,7 @@ export function childView(db, now = Date.now()) {
       cosmetics: COSMETICS.map((c) => ({ ...c, unlocked: game.cosmeticUnlocked(db, c) })),
       milestones: MILESTONES,
       points: POINTS,
+      trip: TRIP,
       greetings: game.GREETINGS,
     },
     integrations: { buddy: buddyMode(), voice: voiceEnabled() ? "cartesia" : "browser", bank: nessieEnabled() ? "nessie" : "simulated" },
@@ -118,13 +120,15 @@ export function parentView(db, before) {
   const chat = db.buddy.chat.slice(Math.max(0, end - 200), end);
   return {
     ...childView(db),
+    adventures: db.adventures.slice(-10).reverse(),
     family: { parentName: db.family.parentName },
     chat,
     chatNextBefore: end > chat.length ? chat[0]?.id : null,
     accounts: db.accounts,
     allowance: db.allowance,
     approvals: db.approvals.slice().reverse(),
-    notifications: db.notifications.filter((n) => n.to === "parent").slice(-30).reverse(),
+    notifications: db.notifications.filter((n) => n.to === "parent").slice().reverse()
+      .filter((n, i, all) => !n.ref || all.findIndex((other) => other.ref === n.ref) === i).slice(0, 30),
     transactions: db.transactions.slice(-60).reverse(),
     audit: db.audit.slice(-120).reverse(),
     tracking: db.tracking.slice(-20).reverse(),
@@ -203,12 +207,21 @@ register("GET", "/api/stream", "child", stream);
 
 const childActions = {
   save: "save", spend: "spend", journal: "journal", extra: "extra", lesson: "lesson", budget: "budget",
-  adventure: "adventure", "cosmetic/buy": "buyCosmetic", "cosmetic/equip": "equip", "bear/name": "renameBear",
+  "cosmetic/buy": "buyCosmetic", "cosmetic/equip": "equip", "bear/name": "renameBear",
   friend: "friend", trade: "trade", greet: "greet",
 };
 for (const [path, action] of Object.entries(childActions)) {
   register("POST", `/api/child/${path}`, "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now));
 }
+// Surprise destinations stay private in action responses as well as state.
+for (const action of ["trip", "adventure"]) {
+  register("POST", `/api/child/${action}`, "child", (req, ctx, res, now) => {
+    const { destId, ...adventure } = runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now);
+    return adventure;
+  });
+}
+register("POST", "/api/child/adventure/:id/seen", "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.adventureSeen(db, req.params.id), "adventure_seen", now));
+register("POST", "/api/parent/goal/:id/cancel", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.cancelGoal(db, req.params.id), "goal_cancelled", now));
 register("POST", "/api/child/mission/:id/done", "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.missionDone(db, req.params.id), "mission_done", now));
 register("POST", "/api/child/notifications/read", "child", (req, ctx) => {
   mutateChild(ctx.childId, (db) => { db.notifications.forEach((n) => { if (n.to === "child") n.read = true; }); });

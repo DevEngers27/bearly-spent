@@ -439,3 +439,46 @@ test("API handoff lists every exported route and reset script targets the demo S
   assert.match(pkg.scripts.reset, /resetChild\(DEMO_CHILD_ID\)/);
   assert.ok(!pkg.scripts.reset.includes("rm "));
 });
+
+test("merged trips, reveal receipts and goal cancellation obey account roles and selected-child isolation", async () => {
+  const a = await family("trip-parent"), outsider = await family("outsider");
+  const sibling = (await a.browser.call("POST", "/api/parent/children", { name: "Sibling", age: 8, bearName: "Maple" })).body;
+  const child = await pair(a.browser, sibling.id);
+  const original = structuredClone(readChild(a.id));
+  mutateChild(sibling.id, (d) => { d.child.points = 60; });
+  const trip = await child.call("POST", "/api/child/trip", {});
+  assert.equal(trip.status, 200);
+  assert.equal(trip.body.status, "away");
+  assert.equal(Object.hasOwn(trip.body, "destId"), false);
+  assert.equal(readChild(sibling.id).child.points, 30);
+  const away = (await child.call("GET", "/api/state")).body;
+  assert.equal(Object.hasOwn(away.adventures[0], "destId"), false);
+  assert.equal(away.catalog.trip.cost, 30);
+  assert.equal((await a.browser.call("GET", `/api/parent/state?child=${sibling.id}`)).body.adventures[0].destId, readChild(sibling.id).adventures[0].destId);
+  assert.equal((await outsider.browser.call("POST", `/api/child/trip?child=${sibling.id}`, {})).status, 404);
+  assert.equal((await child.call("POST", `/api/child/trip?child=${a.id}`, {})).status, 404);
+  mutateChild(sibling.id, (d) => { d.adventures[0].returnsAt = Date.now() - 1; });
+  tick();
+  const receiptPath = `/api/child/adventure/${trip.body.id}/seen`;
+  assert.equal((await a.browser.call("POST", `${receiptPath}?child=${a.id}`, {})).status, 400);
+  assert.equal((await outsider.browser.call("POST", `${receiptPath}?child=${sibling.id}`, {})).status, 404);
+  assert.equal((await child.call("POST", receiptPath, {})).status, 200);
+  const receipt = readChild(sibling.id).adventures[0].revealedAt;
+  assert.ok(receipt);
+  assert.equal((await child.call("POST", receiptPath, {})).status, 200);
+  assert.equal(readChild(sibling.id).adventures[0].revealedAt, receipt);
+  const goal = await a.browser.call("POST", `/api/parent/goal?child=${sibling.id}`, { title: "Help out", type: "tasks", count: 1, reward: 0 });
+  assert.equal(goal.status, 200);
+  const cancelPath = `/api/parent/goal/${goal.body.id}/cancel`;
+  assert.equal((await child.call("POST", cancelPath, {})).status, 403);
+  assert.equal((await a.browser.call("POST", `${cancelPath}?child=${a.id}`, {})).status, 400);
+  assert.equal((await outsider.browser.call("POST", `${cancelPath}?child=${sibling.id}`, {})).status, 404);
+  assert.equal((await a.browser.call("POST", `${cancelPath}?child=${sibling.id}`, {})).status, 200);
+  assert.equal(readChild(sibling.id).parentGoals[0].status, "cancelled");
+  assert.deepEqual(readChild(a.id), original);
+  // Legacy adventure callers retain the same response privacy as surprise trips.
+  mutateChild(sibling.id, (d) => { d.child.points = 90; });
+  const legacy = await child.call("POST", "/api/child/adventure", { destId: "chicago" });
+  assert.equal(legacy.status, 200);
+  assert.equal(Object.hasOwn(legacy.body, "destId"), false);
+});

@@ -12,7 +12,7 @@
 // postings that exceed an obligation, and anything outside that is escalated.
 // Every decision lands in the audit log with the policy that produced it.
 import { transfer, reverse, BankError } from "./bank.js";
-import { audit, notify, checkMilestones } from "./domain.js";
+import { audit, notify, checkMilestones, allowanceLastPaidAt, allowancePaidRecently, resolveEscalation } from "./domain.js";
 import { uid } from "./store.js";
 import { dayKey } from "./time.js";
 
@@ -100,19 +100,19 @@ export function reconcileNow(db, now = Date.now(), trigger = "reconcile") {
         try {
           reverse(db, extra.id, `Duplicate of ${f.keep.id} for obligation ${f.ref}`);
           notify(db, "parent", `Guardian caught a duplicate ${dollars(extra.amount)} posting and reversed it. Your balance is correct.`, "guardian");
-          log("duplicate_reversed", `G3: Found ${f.extras.length + 1} postings for one obligation (${f.ref}). Kept ${f.keep.id}, reversed ${extra.id} (${dollars(extra.amount)}). Ledger now matches approvals.`, { ref: f.ref, kept: f.keep.id, reversed: extra.id });
+          log("duplicate_reversed", `Kept the first posting, reversed the duplicate (${dollars(extra.amount)})`, { ref: f.ref, kept: f.keep.id, reversed: extra.id });
         } catch (e) {
           if (!(e instanceof BankError)) throw e;
           extra.flagged = true;
-          escalate(db, "review", `Duplicate posting ${extra.id} (${dollars(extra.amount)}) couldn't be auto-reversed: ${e.message}.`, "Review the transaction history.", { txnId: extra.id }, now);
-          log("duplicate_escalated", `G3: Duplicate ${extra.id} could not be reversed safely (${e.message}); escalated to parent.`, { txnId: extra.id });
+          escalate(db, "review", `A duplicate posting (${dollars(extra.amount)}) couldn't be auto-reversed: ${e.message}.`, "Review the transaction history.", { txnId: extra.id }, now);
+          log("duplicate_escalated", `A duplicate could not be reversed safely (${e.message}); asked you to review it.`, { txnId: extra.id });
         }
       }
     } else {
       f.txn.flagged = true;
       const mismatch = f.type === "amount_mismatch";
       escalate(db, "review", mismatch ? `A ${dollars(f.txn.amount)} posting doesn't match its ${dollars(f.expected)} approval.` : `A ${dollars(f.txn.amount)} posting has no matching approval.`, "Confirm it's expected or ask the bank to reverse it.", { txnId: f.txn.id }, now);
-      log(mismatch ? "amount_mismatch" : "unauthorised_flagged", mismatch ? `G3: Posting ${f.txn.id} amount ${dollars(f.txn.amount)} differs from obligation ${f.ref} (${dollars(f.expected)}). Flagged for parent review.` : `G3: Posting ${f.txn.id} (${dollars(f.txn.amount)}) has no matching obligation. Flagged for parent review — guardian will not move money it can't justify.`, { txnId: f.txn.id, ref: f.ref });
+      log(mismatch ? "amount_mismatch" : "unauthorised_flagged", mismatch ? `A posting of ${dollars(f.txn.amount)} differs from its approval (${dollars(f.expected)}). Asked you to review it.` : `A posting of ${dollars(f.txn.amount)} has no matching approval. Asked you to review it.`, { txnId: f.txn.id, ref: f.ref });
     }
   }
   return actions;
@@ -132,6 +132,7 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
   // G1 — scheduled allowance
   let safety = 0;
   const backPaid = [];
+  allowanceLastPaidAt(db);
   while (now >= db.allowance.nextRun && safety++ < 4) {
     const period = `allowance:${dayKey(db.allowance.nextRun, db.settings.timezone)}`;
     const { amount, savePct } = db.allowance;
@@ -142,13 +143,17 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
       { to: "spending", amount: spend, key: `${period}:spend`, memo: "Weekly allowance (spending)" },
     ].filter((leg) => leg.amount > 0);
     const unpaid = legs.filter((leg) => !db.transactions.some((t) => t.status === "posted" && t.idempotencyKey === leg.key));
+    if (unpaid.length && allowancePaidRecently(db, now)) {
+      db.allowance.nextRun = Math.max(db.allowance.nextRun, db.allowance.lastPaidAt + db.allowance.cadenceDays * DAY);
+      break;
+    }
     const required = unpaid.reduce((sum, leg) => sum + leg.amount, 0);
     if (db.accounts.parent.balance < required) {
       if (db.allowance.escalatedPeriod !== period) {
         db.allowance.escalatedPeriod = period;
         escalate(db, "topup", `Allowance of ${dollars(amount)} is due but the funding account only has ${dollars(db.accounts.parent.balance)}.`,
           "Top up the funding account; the allowance will pay automatically on the next check.");
-        log("allowance_blocked", `G1: Allowance ${period} blocked — insufficient parent funds. Escalated to parent instead of overdrawing.`, { policy: "G1" });
+        log("allowance_blocked", "Allowance is waiting for more funding. Asked you to top up.", { policy: "G1", period });
       }
       break;
     }
@@ -157,16 +162,21 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
       tagRef(db, leg.key, period);
       return result;
     });
+    const paidAt = db.allowance.nextRun;
     db.allowance.lastPeriod = period;
     db.allowance.nextRun += db.allowance.cadenceDays * DAY;
     if (payouts.length && payouts.every((p) => p.duplicate)) {
       // Audit only: the server treats payout actions as a reason to replan.
-      audit(db, "guardian", "allowance_skipped", `allowance period ${period} already paid; skipped`, { policy: "G1", trigger });
+      audit(db, "guardian", "allowance_skipped", `allowance period for this week already paid; skipped`, { policy: "G1", trigger, period });
       continue;
     }
+    // Use the scheduled period time so overdue weeks can still catch up.
+    db.allowance.lastPaidAt = Math.max(db.allowance.lastPaidAt ?? paidAt, paidAt);
+    for (const related of db.approvals) if (related.kind === "topup" && related.status === "pending" && !related.approvalId) resolveEscalation(db, related);
     backPaid.push(period.slice(10));
+    notify(db, "parent", `Allowance paid: ${dollars(save).replace(".00", "")} to savings, ${dollars(spend).replace(".00", "")} to spending`, "money", period);
     notify(db, "child", `Allowance arrived! ${dollars(save)} to savings, ${dollars(spend)} to spend.`, "money");
-    log("allowance_paid", `G1: Paid allowance ${period}: ${dollars(save)} → savings, ${dollars(spend)} → spending (split per parent rule ${savePct}%).`, { policy: "G1" });
+    log("allowance_paid", `Paid allowance for the week of ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${period.slice(10)}T12:00:00Z`))}`, { policy: "G1", period, save, spend });
   }
 
   if (backPaid.length > 1) notify(db, "parent", `Back-paid ${backPaid.length} weeks of allowance (${backPaid[0]} → ${backPaid.at(-1)})`, "guardian");
@@ -184,12 +194,12 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
       const { txn, duplicate } = transfer(db, { ...plan, amount: a.amount, kind: a.kind === "spend" ? "spend" : a.kind, idempotencyKey: `approval:${a.id}`, ts: now });
       txn.ref = a.id;
       a.paidTxnId = txn.id;
-      for (const related of db.approvals) if (related.approvalId === a.id && ["topup", "child_funds"].includes(related.kind)) related.status = "resolved";
+      for (const related of db.approvals) if (related.approvalId === a.id && ["topup", "child_funds"].includes(related.kind)) resolveEscalation(db, related);
       if (a.kind === "reward") {
         const g = db.parentGoals.find((x) => x.id === a.goalId);
         if (g) g.status = "paid";
       }
-      if (!duplicate) log("obligation_paid", `G2: Executed parent-approved ${a.kind} — ${dollars(a.amount)} ${plan.from} → ${plan.to} (idempotency key approval:${a.id}).`, { policy: "G2", approvalId: a.id, txnId: txn.id });
+      if (!duplicate) log("obligation_paid", `G2: Executed parent-approved ${a.kind} — ${dollars(a.amount)} ${plan.from} → ${plan.to}.`, { policy: "G2", approvalId: a.id, txnId: txn.id });
     } catch (e) {
       if (!(e instanceof BankError)) throw e;
       a.escalatedAt = now;
@@ -264,6 +274,6 @@ export function injectDuplicatePosting(db, now = Date.now()) {
   db.accounts[target.from].balance -= target.amount;
   db.accounts[target.to].balance += target.amount;
   db.transactions.push(dup);
-  audit(db, "system", "fault_injected", `Simulated bank fault: duplicate posting of ${dollars(target.amount)} (${target.ref}).`, { txnId: dup.id });
+  audit(db, "system", "fault_injected", `Simulated bank fault: duplicate posting of ${dollars(target.amount)}.`, { txnId: dup.id, ref: target.ref });
   return dup;
 }

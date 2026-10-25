@@ -84,7 +84,8 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | `parentGoals`, `missions` | Goal and mission records described in the parent-action table |
 | `transactions` | Latest 30, newest first; `{id, ts, from, to, amount, kind, memo, idempotencyKey, status, ref?, ...reviewFields}` |
 | `notifications` | Latest 20 child notifications, newest first; `{id, ts, to, text, kind, ref, read}` |
-| `adventures` | Latest 10, newest first; `{id, destId, startedAt, returnsAt, status, postcardIds, returnedAt?}` |
+| `adventures` | Latest 10, newest first; `destId` omitted while away in child state; `{id, destId, startedAt, returnsAt, status, postcardIds, returnedAt?}` |
+| `metrics` | `{postcards:{places,cards,total}}`; unique trip places, all cards, and catalog total |
 | `postcards` | `[{id, defId, source, collectedAt, fromAdventure?, from?, lockedForTrade?}]` |
 | `friends` | Non-declined public `friendView` records: `{id, name, status, bear, postcards, greetings, coopLearning}` |
 | `trades` | Latest 10, newest first; `{id, friendId, give, get, status, createdAt, ...executionFields}` |
@@ -92,11 +93,12 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | `plan` | Null or `{summary, steps, weeklySave, goalId, updatedAt, reason?, offline?}` |
 | `chat` | Last 30, oldest first; `{id, role, text, ts, redacted?, tools?, auto?}` |
 | `settings` | `{requireTradeApproval, buddyEnabled, coopChallenge}` |
-| `catalog` | `{places, home, lessons, cosmetics, milestones, points, greetings}`. Lessons omit answer keys; hidden places omit their name/image, expose `{rarity:"secret", hidden:true, clue, lon, lat}` until discovered. Visible places include `image, open, lockReason, progress`. Cosmetics include `unlocked`. |
+| `catalog` | `{places, home, lessons, cosmetics, milestones, points, trip, greetings}`. Lessons omit answer keys; hidden places omit their name/image, expose `{rarity:"secret", hidden:true, clue, lon, lat}` until discovered. Visible places include `image, open, lockReason, progress`. Cosmetics include `unlocked`. |
 | `integrations` | `{buddy:"claude"|"offline", voice:"cartesia"|"browser", bank:"nessie"|"simulated"}` |
 
 `ParentState` extends `ChildState` and overrides/adds:
 
+- `adventures` includes `destId` while away; parent notification refs are deduplicated.
 - `family: {parentName}`, `accounts: {parent, savings, spending}` (each `{id,label,balance}`), full `allowance` including cadence, destination and schedule bookkeeping.
 - All `approvals`, newest first; `{id,kind,status,createdAt,title,detail,...kindSpecificFields}`. Approval IDs belong to the selected child's document.
 - Latest 30 parent `notifications`, 60 `transactions`, 120 `audit` entries (all newest first), latest 20 `tracking` entries (newest first), and unfiltered `friends`.
@@ -125,7 +127,9 @@ All routes below have **Child** auth and support parent `?child=` selection. Unl
 | `POST /api/child/lesson` | `{lessonId,answers:[integer,...]}` | `{passed,correct,total,firstTime?}`; one choice for every question. |
 | `POST /api/child/budget` | `{allocations:{save,needs,fun,give}}` | `{pointsAwarded}`; dollar amounts must total $20, save >=$4, needs >=$5. |
 | `POST /api/child/mission/:id/done` | No fields | Updated mission record, now `pending_review`. |
-| `POST /api/child/adventure` | `{destId}` | Adventure record; catalog eligibility and whole available points required, at most one `away` trip. |
+| `POST /api/child/trip` | No fields | Surprise adventure record without `destId`; costs `catalog.trip.cost` (30 points), at most one away trip; draws only open places. |
+| `POST /api/child/adventure/:id/seen` | No fields | Returned adventure record; records idempotent `revealedAt` on the selected child's returned adventure. |
+| `POST /api/child/adventure` | `{destId}` | Adventure record without `destId`; catalog eligibility and whole available points required, at most one `away` trip. |
 | `POST /api/child/cosmetic/buy` | `{id}` | `{ok:true}`; catalog item must be purchasable and affordable. |
 | `POST /api/child/cosmetic/equip` | `{kind,value}` | `{ok:true}`; owned item ID; null unequips except background requires a scene. |
 | `POST /api/child/bear/name` | `{name}` | `{ok:true}`; 1–24 trimmed characters. |
@@ -144,7 +148,8 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | Method and route | JSON request | Response / limits |
 | --- | --- | --- |
 | `POST /api/parent/approval/:id` | `{approve:boolean,note?:string}` | Updated approval record. Can decline approved-but-unpaid money requests. Paid requests cannot be declined. |
-| `POST /api/parent/goal` | `{title,type,count,reward}` | Goal `{id,title,type,count,reward,progress,status,createdAt}`. Type `lessons`, `tasks`, `save_actions`; count integer 1–50; reward $0–$100 (returned in cents). |
+| `POST /api/parent/goal` | `{title,type,count,reward}` | Goal `{id,title,type,count,reward,progress,status,createdAt}`. Type `lessons`, `tasks`, `save_actions`; count integer 1–50 (lessons cannot exceed remaining unpassed lessons); reward $0–$100 (returned in cents). |
+| `POST /api/parent/goal/:id/cancel` | No fields | Cancelled active goal; kindly notifies the child and writes audit. |
 | `POST /api/parent/mission` | `{title,points?}` | Mission `{id,title,points,status,createdBy,createdAt}`; integer 5–100 points (default catalog parent points). |
 | `POST /api/parent/allowance` | Partial `{amount?,savePct?,spendLimit?,rewardDestination?}` | `{ok:true}`; amount $0–$100, savePct integer 0–100, spendLimit $0–$10,000, destination `spending` or `savings`. |
 | `POST /api/parent/settings` | Partial `{requireTradeApproval?,buddyEnabled?,coopChallenge?}` | `{ok:true}`; strict booleans. Disabling Buddy cancels this child's queued/in-flight replans. |
