@@ -17,5 +17,5 @@ rsync -az --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
   --exclude '.git' --exclude 'data' --exclude 'client/src' --exclude 'bear_app_assets' --exclude 'bear_postcard_collection_15' \
   --exclude '*.test.js' --exclude '*.test.mjs' \
   "$STAGE"/ "$TARGET":/opt/moneyquest/
-ssh "$TARGET" 'sudo systemctl restart moneyquest && sleep 2 && systemctl is-active moneyquest && sudo journalctl -u moneyquest -n 3 --no-pager'
+ssh "$TARGET" 'sudo chmod 755 /opt/moneyquest && sudo systemctl restart moneyquest && sleep 2 && systemctl is-active moneyquest && sudo journalctl -u moneyquest -n 3 --no-pager'
 echo "deployed $VERSION to $TARGET"
