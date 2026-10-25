@@ -62,6 +62,7 @@ export default function App() {
         const next = await api("auth/me", undefined, { includeChild: false });
         if (version !== authVersion.current) return;
         const activeChild = next.children[0];
+        if (!activeChild) { setSelectedChild(null); return; }
         setSelectedChild(activeChild.id);
         try { localStorage.setItem("mq_selected_child", activeChild.id); } catch {}
         const recovered = { ...next, activeChild };
