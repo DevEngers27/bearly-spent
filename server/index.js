@@ -98,7 +98,7 @@ export function childView(db, now = Date.now()) {
       postcards: { collected: postcardCounts.places, total: postcardCounts.total, cards: postcardCounts.cards },
       tripsTaken: db.adventures.length,
       lessonsFinished: db.child.lessonsDone.length,
-      missionsDone: db.missions.filter((m) => m.status === "done").length,
+      missionsDone: db.missions.filter((m) => m.status === "done").length + (db.child.stats.dailyMissionsDone || 0),
       ...(Number.isFinite(db.child.stats.longestStreak) ? { longestStreak: db.child.stats.longestStreak } : {}),
     },
     badges: db.child.milestonesUnlocked.slice().reverse().map((at) => MILESTONES.find((m) => m.at === at)).filter(Boolean),

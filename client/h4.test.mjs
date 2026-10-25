@@ -137,7 +137,7 @@ test("H4.2 bubble close button, outside scene, Escape and talk-bar close dismiss
   const home = harness("Child.jsx");
   const render = () => home.render(home.exports.Home, { state, talk: talk(), open: noop });
   render(); home.flush();
-  const outside = new Event("pointerdown");
+  const outside = new Event("click");
   home.window.dispatchEvent(outside);
   assert.equal(talk().bubble, "");
   await talk().send("More");

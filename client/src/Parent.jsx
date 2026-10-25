@@ -45,9 +45,9 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
   const ctx = { state, run, busy, demo: me?.demo === true, onAddMoney, mobile };
   const main = useRef(null);
   useEffect(() => {
-    if (!mobile) return;
+    if (!mobile || sec === "allowance") return; // Allowance manages its own focus (Add money)
     window.scrollTo({ top: 0 });
-    if (sec !== "allowance") main.current?.focus({ preventScroll: true });
+    main.current?.focus({ preventScroll: true });
   }, [mobile, sec]);
   const segments = tab === "money" ? MONEY_SECTIONS : tab === "kids" ? KIDS_SECTIONS : null;
   const pushed = mobile && MORE_SECTIONS.some(([id]) => id === sec);

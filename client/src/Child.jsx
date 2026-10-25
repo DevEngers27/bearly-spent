@@ -258,7 +258,7 @@ function ProfileSheet({ state, run, busy, close, open, onGrownUps }) {
     points: state.child.points,
     postcards: { collected: metrics.places, total: metrics.total, cards: metrics.cards },
     tripsTaken: state.child.stats.adventures, lessonsFinished: state.child.lessonsDone.length,
-    missionsDone: state.missions.filter((m) => m.status === "done").length,
+    missionsDone: state.missions.filter((m) => m.status === "done").length + (state.child.stats.dailyMissionsDone || 0),
   };
   const badges = profile?.badges || state.child.milestonesUnlocked.slice().reverse().map((at) => state.catalog.milestones.find((m) => m.at === at)).filter(Boolean);
   const rename = async (event) => {
@@ -300,7 +300,7 @@ function moodFor(state, now) {
 
 function nextUp(state, now) {
   const mission = state.missionsToday?.active[0];
-  const items = mission ? [{ id: mission.key, icon: "star", text: `${mission.title} · +${mission.pts} points`, cta: "Let's go", tab: "missions" }] : [];
+  const items = mission ? [{ id: mission.key, icon: "star", text: `${mission.title} · +${mission.pts} points`, cta: "Let's go", tab: mission.key === "save" ? "save" : "missions" }] : [];
   const goal = state.parentGoals.find((g) => g.status === "active");
   if (goal) {
     const left = goal.count - goal.progress;
@@ -342,9 +342,9 @@ function Home({ state, setTab, open, run, busy, talk }) {
   useEffect(() => {
     const outside = (event) => { if (!event.target.closest?.(".scene")) dismissRef.current?.(); };
     const escape = (event) => { if (event.key === "Escape") dismissRef.current?.(); };
-    window.addEventListener("pointerdown", outside);
+    window.addEventListener("click", outside);
     window.addEventListener("keydown", escape);
-    return () => { window.removeEventListener("pointerdown", outside); window.removeEventListener("keydown", escape); };
+    return () => { window.removeEventListener("click", outside); window.removeEventListener("keydown", escape); };
   }, []);
   const goal = currentSavingsGoal(state);
   const away = state.adventures.find((a) => a.status === "away");

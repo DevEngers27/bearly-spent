@@ -220,3 +220,19 @@ test("H2 isolation: a broken mission state never blocks a save or a spend", () =
   assert.doesNotThrow(() => game.childSave(db, 100));
   assert.equal(db.accounts.savings.balance, before + 100);
 });
+
+test("H2 eligibility: the save mission is not offered when spending money is empty, and daily missions count in the profile", () => {
+  const db = seed(Date.now());
+  db.accounts.spending.balance = 0;
+  const daily = game.ensureDailyMissions(db, Date.now());
+  assert.ok(!daily.active.some((m) => m.key === "save"));
+  db.accounts.spending.balance = 500;
+  db.child.dailyMissions = undefined;
+  const again = game.ensureDailyMissions(db, Date.now());
+  assert.ok(again.active.some((m) => m.key === "save"));
+  game.childSave(db, 100); // completes "save" and, through the tracking bonus, "track" when both are active
+  const finished = db.child.dailyMissions.done.length;
+  assert.ok(finished >= 1);
+  assert.equal(db.child.stats.dailyMissionsDone, finished);
+  assert.equal(childView(db).profile.stats.missionsDone, finished);
+});

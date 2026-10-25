@@ -297,7 +297,7 @@ const missionTitle = (db, m) => m.title.replaceAll("<bear>", db.child.bear.name)
 
 function missionEligible(db, key, day) {
   if (key === "track") return db.child.lastTrackedDay !== day;
-  if (key === "save") return db.child.lastSaveDay !== day;
+  if (key === "save") return db.child.lastSaveDay !== day && db.accounts.spending.balance >= 100;
   if (key === "lesson") return LESSONS.some((l) => !db.child.lessonsDone.includes(l.id));
   if (key === "greet") return db.friends.some((f) => f.status === "approved" && (isDemoChild(db) || f.real));
   if (key === "trip") return db.child.points >= TRIP.cost && !db.adventures.some((a) => a.status === "away");
@@ -348,6 +348,7 @@ export function missionEvent(db, key, now = Date.now()) {
     if (!m || daily.done.length >= DAILY_MISSION_CAP || !daily.active.some((a) => a.key === key) || daily.done.some((d) => d.key === key)) return false;
     daily.active = daily.active.filter((a) => a.key !== key);
     daily.done.push({ key, doneAt: now, pts: m.pts });
+    db.child.stats.dailyMissionsDone = (db.child.stats.dailyMissionsDone || 0) + 1;
     if (!["track", "save", "lesson"].includes(key)) addPoints(db, m.pts, `mission: ${missionTitle(db, m)}`);
     audit(db, "child", "daily_mission_done", `Mission done: ${missionTitle(db, m)}`, { key, points: m.pts, dayKey: daily.dayKey });
     notify(db, "child", `Mission done! +${m.pts} points`, "celebrate", `daily:${daily.dayKey}:${key}`);
