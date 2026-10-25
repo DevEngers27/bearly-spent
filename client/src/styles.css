@@ -700,7 +700,7 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .thought-dots i:nth-child(3) { animation-delay: .3s; }
 @keyframes thought-hop { 50% { transform: translateY(-4px); } }
 /* The talk bar sits in the page under the scene (never fixed): a focused input in a fixed bar made iOS scroll the whole page to the bottom. */
-.talk-bar { position: relative; z-index: 5; margin: -14px 6px 14px; padding: 12px 14px 14px; background: var(--paper-card) var(--grain); border: 2px solid var(--ink); border-radius: 18px 22px 20px 18px; box-shadow: var(--shadow); animation: fade 0.2s ease-out; }
+.talk-bar { position: relative; min-width: 0; z-index: 5; margin: -14px 6px 14px; padding: 12px 14px 14px; background: var(--paper-card) var(--grain); border: 2px solid var(--ink); border-radius: 18px 22px 20px 18px; box-shadow: var(--shadow); animation: fade 0.2s ease-out; }
 .talk-bar + .home-tools { margin-top: 0; }
 .talk-bar input { scroll-margin-block: 12px 140px; }
 .talk-links { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
