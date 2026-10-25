@@ -193,6 +193,10 @@ test("H9.4 / 0.8.8 read-aloud routes are back for kids only and answer 404 until
   assert.equal(typeof actions.speakText, "function");
   assert.deepEqual(Object.keys((await kid.call("GET", "/api/state")).body.integrations).sort(), ["bank", "buddy", "voice"]);
   assert.equal((await kid.call("GET", "/api/state")).body.integrations.voice, "browser");
+  // Read-aloud plays blob: audio (Cartesia bytes) and a data: primer clip; the CSP must allow both.
+  const csp = (await kid.call("GET", "/api/state")).headers?.["content-security-policy"] || "";
+  assert.match(csp, /media-src 'self' blob: data:/);
+  assert.match(csp, /connect-src 'self' https:\/\/api\.cartesia\.ai/);
 });
 
 test("H9.5 Buddy prompt requests the safe formatting subset", () => {
