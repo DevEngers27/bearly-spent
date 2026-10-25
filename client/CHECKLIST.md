@@ -128,3 +128,13 @@ Browser/device checks below remain **pending**. The Playwright connector require
 - [ ] Allowance, goals/tasks, funding, wallet transfers, child profiles and Account forms use one column, inputs at least 16px, decimal keyboards for money and numeric keyboards for counts/percent/PIN. Check PIN/forgot-password sheets with the keyboard open: controls remain inside the visible viewport and scroll into reach.
 - [ ] On touch and keyboard, check at least 44px targets (checkbox labels provide the hit area), visible default actions, focus rings, section focus after More pushes/Back, no clipped focus, and disabled mutations offline/pending. Enable reduced motion: push-in animation disappears. Check Safari safe-area padding in standalone PWA mode as well as Android hardware Back.
 - [ ] At desktop widths confirm unchanged sidebar, tables, multicolumn forms, header and Account behavior; no mobile tabs or segmented navigation appear.
+
+## H2 daily missions
+- Open Missions: Today shows up to three server-assigned missions with hints and rewards; Home's Next up matches the first one.
+- Finish an active mission: it is checked and struck through briefly, then slides away; its replacement slides in with New! Polling must not restart or freeze this transition.
+- Enable reduced motion: completion and replacement have no animation.
+- Complete six missions: Today says “All done for today — amazing!”; This week and parent tasks remain usable.
+- Visit a place on Map, read a postcard story, and check goals: use the confirmation button in each screen. Buttons disappear after completion and are disabled offline/busy.
+- Price detective opens Cash diary; enter a note and two prices. One price or an invalid price cannot submit; both are stored with the diary entry.
+- Finish a lesson: its card says “Review · no points”; reviewing adds no points. First-time lesson, track and save mission rewards are not doubled.
+- Reopen after family-local midnight: missions roll once and persist across refresh/restart. Parent state and Buddy show the same current missions.

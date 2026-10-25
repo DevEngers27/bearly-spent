@@ -6,7 +6,7 @@
 // configured, a small deterministic fallback keeps the demo working.
 import Anthropic from "@anthropic-ai/sdk";
 import { readChild, mutateChild, childIdFor, uid } from "./store.js";
-import { audit, notify, weeksToGoal, currentGoal, GameError } from "./domain.js";
+import { audit, notify, weeksToGoal, currentGoal, ensureDailyMissions, missionsToday, GameError } from "./domain.js";
 
 const MODEL = process.env.BUDDY_MODEL || "claude-opus-5-5";
 const EFFORT = process.env.BUDDY_EFFORT || "low"; // kid chat: keep latency low
@@ -69,6 +69,7 @@ function redactMessages(messages) {
 // ------------------------------------------------------------------ tools
 export function snapshot(db) {
   currentGoal(db);
+  const daily = missionsToday(db);
   const goals = db.savingsGoals.filter((g) => ["active", "reached"].includes(g.status)).map((g) => ({
     id: g.id, title: g.title, status: g.status, current: g.id === db.child.currentGoalId, target: dollars(g.target),
     saved_so_far: dollars(Math.min(db.accounts.savings.balance, g.target)),
@@ -89,6 +90,7 @@ export function snapshot(db) {
     recent_transactions: db.transactions.filter((t) => t.status === "posted" && (t.to !== "parent")).slice(-8).map((t) => ({
       date: new Date(t.ts).toDateString(), what: t.memo, amount: dollars(t.amount), direction: t.to === "merchant" ? "spent" : `into ${t.to}`,
     })),
+    missions_today: { active: daily.active.map(({ key, title, pts, hint, kind }) => ({ key, title, pts, hint, kind })), doneCount: daily.doneCount, cap: daily.cap },
     current_plan: db.buddy.plan?.summary || null,
   });
 }
@@ -422,6 +424,7 @@ export async function chat(childId, userText) {
   const { text, found } = redact(String(userText || "").slice(0, 500));
   if (!text.trim()) throw new GameError("Say something first!");
   mutateChild(childId, (d) => {
+    ensureDailyMissions(d);
     d.buddy.chat.push({ id: uid("msg"), role: "user", text, ts: Date.now(), redacted: found });
     if (found.length) audit(d, "buddy", "pii_redacted", `Removed ${found.join(", ")} from the child's message before sending to the AI`);
   });
@@ -453,6 +456,7 @@ export async function chat(childId, userText) {
   if (live) reply = await screenReply(reply, canWrite, childId);
   if (!canWrite()) return { reply: "Buddy is taking a break. Try again later!", toolsUsed: [] };
   mutateChild(childId, (d) => {
+    ensureDailyMissions(d);
     d.buddy.chat.push({ id: uid("msg"), role: "assistant", text: reply, ts: Date.now(), tools: toolsUsed });
     if (d.buddy.chat.length > 200) d.buddy.chat.splice(0, d.buddy.chat.length - 200);
   });

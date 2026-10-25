@@ -35,6 +35,7 @@ setNessieAuditHook((action, detail, data, document) => {
 
 export function applyAction(db, fn, trigger, { now = Date.now(), onReplan = () => {} } = {}) {
   const repairs = reconcileNow(db, now, trigger);
+  game.ensureDailyMissions(db, now);
   const out = fn(db);
   if (repairs.some((action) => /reversed/i.test(action))) onReplan("Guardian reversed a duplicate posting");
   const paid = runGuardian(db, now, trigger).filter((a) => PAYOUT.test(a));
@@ -70,6 +71,7 @@ function placesView(db, now = Date.now()) {
 
 export function childView(db, now = Date.now()) {
   game.normalizeGoals(db);
+  const todayMissions = game.missionsToday(db, now);
   const day = dayKey(now, db.settings.timezone);
   const week = weekKey(now, db.settings.timezone);
   const places = placesView(db, now);
@@ -105,6 +107,7 @@ export function childView(db, now = Date.now()) {
     allowance: { amount: db.allowance.amount, savePct: db.allowance.savePct, nextRun: db.allowance.nextRun, spendLimit: db.allowance.spendLimit },
     parentGoals: db.parentGoals,
     missions: db.missions,
+    missionsToday: todayMissions,
     transactions: db.transactions.filter((t) => t.kind !== "funding_in" && (t.from !== "parent" || t.to !== "parent")).slice(-30).reverse(),
     notifications: db.notifications.filter((n) => n.to === "child").slice(-20).reverse(),
     adventures: db.adventures.slice(-10).reverse().map(({ destId, ...adventure }) => adventure.status === "away" ? adventure : { ...adventure, destId }),
@@ -132,7 +135,7 @@ export function childView(db, now = Date.now()) {
   };
 }
 
-export function parentView(db, before) {
+export function parentView(db, before, now = Date.now()) {
   let end = db.buddy.chat.length;
   if (before !== undefined) {
     if (typeof before !== "string" || before.length > 64) throw new GameError("Pick a chat message");
@@ -141,7 +144,7 @@ export function parentView(db, before) {
   }
   const chat = db.buddy.chat.slice(Math.max(0, end - 200), end);
   return {
-    ...childView(db),
+    ...childView(db, now),
     adventures: db.adventures.slice(-10).reverse(),
     family: { parentName: db.family.parentName },
     chat,
@@ -204,7 +207,7 @@ register("POST", "/api/parent/children/:id/profile", "parent", (req, ctx) => upd
 register("POST", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.createLink(ctx, req.params.id, now));
 register("GET", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.linkStatus(ctx, req.params.id, req.query?.code, now));
 register("GET", "/api/state", "child", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...childView(readChild(ctx.childId), now) }; });
-register("GET", "/api/parent/state", "parent", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before) }; });
+register("GET", "/api/parent/state", "parent", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before, now) }; });
 register("GET", "/api/child/wallet/token", "parent", (req, ctx, res, now) => auth.walletToken(ctx, { now }));
 register("POST", "/api/child/wallet/token", "parent", (req, ctx, res, now) => {
   actions.walletPing(null, req.body);
@@ -213,12 +216,12 @@ register("POST", "/api/child/wallet/token", "parent", (req, ctx, res, now) => {
 register("POST", "/api/child/wallet/ping", "child", (req, ctx, res, now) => {
   takeLimit("walletPing", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
   actions.walletPing(null, req.body);
-  mutateChild(ctx.childId, (db) => { db.walletLastPing = now; });
+  mutateChild(ctx.childId, (db) => { game.ensureDailyMissions(db, now); db.walletLastPing = now; });
   return { ok: true, childId: ctx.childId, at: now };
 });
 register("POST", "/api/child/wallet/spend", "child", (req, ctx, res, now) => {
   takeLimit("walletSpend", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
-  return runChildAction(ctx.childId, (db) => actions.walletSpend(db, req.body), "walletSpend", now);
+  return runChildAction(ctx.childId, (db) => actions.walletSpend(db, req.body, now), "walletSpend", now);
 });
 register("POST", "/api/parent/wallet/send", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.walletSend(db, req.body), "wallet_in", now));
 
@@ -263,7 +266,7 @@ const childActions = {
   profile: "profile",
 };
 for (const [path, action] of Object.entries(childActions)) {
-  register("POST", `/api/child/${path}`, "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now));
+  register("POST", `/api/child/${path}`, "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.body, now), action, now));
 }
 for (const role of ["child", "parent"]) {
   register("POST", `/api/${role}/goals`, role, (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.goalSave(db, req.body, null, role), "savings_goal_created", now));
@@ -281,7 +284,7 @@ for (const action of ["friend", "trade", "greet"]) {
     const practice = ctx.family.id === DEMO_FAMILY_ID && (action === "friend"
       ? typeof req.body?.code === "string" && /-/.test(req.body.code)
       : d.friends.some((f) => f.id === req.body?.friendId && !f.real));
-    if (practice) return runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now);
+    if (practice) return runChildAction(ctx.childId, (db) => actions[action](db, req.body, now), action, now);
     return game.runSocialAction(ctx.childId, action, req.body, undefined, now);
   });
 }
@@ -299,15 +302,19 @@ register("POST", "/api/parent/children/:id/friend-code", "parent", (req, ctx) =>
 // Surprise destinations stay private in action responses as well as state.
 for (const action of ["trip", "adventure"]) {
   register("POST", `/api/child/${action}`, "child", (req, ctx, res, now) => {
-    const { destId, ...adventure } = runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now);
+    const { destId, ...adventure } = runChildAction(ctx.childId, (db) => actions[action](db, req.body, now), action, now);
     return adventure;
   });
 }
 register("POST", "/api/child/adventure/:id/seen", "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.adventureSeen(db, req.params.id), "adventure_seen", now));
 register("POST", "/api/parent/goal/:id/cancel", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.cancelGoal(db, req.params.id), "goal_cancelled", now));
+register("POST", "/api/child/missions/seen", "child", (req, ctx, res, now) => {
+  takeLimit("missionSeen", ctx.childId, now);
+  return runChildAction(ctx.childId, (db) => actions.missionSeen(db, req.body, now), "mission_seen", now);
+});
 register("POST", "/api/child/mission/:id/done", "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.missionDone(db, req.params.id), "mission_done", now));
-register("POST", "/api/child/notifications/read", "child", (req, ctx) => {
-  mutateChild(ctx.childId, (db) => { db.notifications.forEach((n) => { if (n.to === "child") n.read = true; }); });
+register("POST", "/api/child/notifications/read", "child", (req, ctx, res, now) => {
+  mutateChild(ctx.childId, (db) => { game.ensureDailyMissions(db, now); db.notifications.forEach((n) => { if (n.to === "child") n.read = true; }); });
 });
 register("POST", "/api/buddy/chat", "child", (req, ctx, res, now) => actions.chat(readChild(ctx.childId), req.body,
   (text) => withChat(ctx.childId, () => chat(ctx.childId, text), now)));

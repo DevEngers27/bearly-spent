@@ -2,12 +2,12 @@
 // HTTP layer wraps calls in store.mutateChild(). Throw GameError for user-facing
 // validation problems.
 import { randomInt } from "node:crypto";
-import { uid, childIdFor, childRecord, readChild, mutateChildren, childForFriendCode, familyLabel, DEMO_FAMILY_ID } from "./store.js";
+import { uid, childIdFor, childRecord, readChild, mutateChild, mutateChildren, childForFriendCode, familyLabel, DEMO_FAMILY_ID } from "./store.js";
 import { object, id, str, bool, integer } from "./validate.js";
 import { transfer, BankError } from "./bank.js";
 import { dayKey, weekKey } from "./time.js";
 import {
-  PLACES, LESSONS, COSMETICS, MILESTONES, POINTS, TRIP, SLOTS, placeStatus, bonusDiscoveries,
+  PLACES, LESSONS, COSMETICS, MILESTONES, POINTS, MISSION_POOL, TRIP, SLOTS, placeStatus, bonusDiscoveries,
 } from "./catalog.js";
 
 export class GameError extends Error {
@@ -66,9 +66,11 @@ function moneyMoved(db, reason) {
 function dailyTrackingBonus(db, now) {
   const key = dayKey(now, db.settings.timezone);
   if (db.child.lastTrackedDay === key) return false;
+  ensureDailyMissions(db, now);
   db.child.lastTrackedDay = key;
   db.child.stats.tracked += 1;
   addPoints(db, POINTS.track, "recorded today's money");
+  missionEvent(db, "track", now);
   return true;
 }
 
@@ -289,6 +291,74 @@ export function postcardMetrics(db) {
   return { places: visitedSet(db).size, cards: db.postcards.length, total: Object.keys(PLACES).length };
 }
 
+// ------------------------------------------------------------------ daily missions
+export const DAILY_MISSION_CAP = 6;
+const missionTitle = (db, m) => m.title.replaceAll("<bear>", db.child.bear.name);
+
+function missionEligible(db, key, day) {
+  if (key === "track") return db.child.lastTrackedDay !== day;
+  if (key === "save") return db.child.lastSaveDay !== day;
+  if (key === "lesson") return LESSONS.some((l) => !db.child.lessonsDone.includes(l.id));
+  if (key === "greet") return db.friends.some((f) => f.status === "approved" && (isDemoChild(db) || f.real));
+  if (key === "trip") return db.child.points >= TRIP.cost && !db.adventures.some((a) => a.status === "away");
+  return true;
+}
+
+// Stable daily rotation keeps seed() untouched and repeat reads predictable.
+export function ensureDailyMissions(db, now = Date.now()) {
+  const day = dayKey(now, db.settings.timezone);
+  if (db.child.dailyMissions?.dayKey !== day) db.child.dailyMissions = { dayKey: day, active: [], done: [] };
+  const daily = db.child.dailyMissions;
+  if (daily.done.length >= DAILY_MISSION_CAP) { daily.active = []; return daily; }
+  daily.active = daily.active.filter((m) => missionEligible(db, m.key, day));
+  const rest = MISSION_POOL.filter((m) => !["track", "save"].includes(m.key));
+  const offset = [...day].reduce((sum, c) => sum + c.charCodeAt(0), 0) % rest.length;
+  const pool = [...MISSION_POOL.slice(0, 2), ...rest.slice(offset), ...rest.slice(0, offset)];
+  for (const m of pool) {
+    if (daily.active.length >= 3) break;
+    if (!missionEligible(db, m.key, day) || daily.done.some((d) => d.key === m.key) || daily.active.some((a) => a.key === m.key)) continue;
+    daily.active.push({ key: m.key, assignedAt: now });
+  }
+  return daily;
+}
+
+export function missionsToday(db, now = Date.now()) {
+  const candidate = { ...db, child: { ...db.child, dailyMissions: structuredClone(db.child.dailyMissions) } };
+  ensureDailyMissions(candidate, now);
+  if (JSON.stringify(candidate.child.dailyMissions) !== JSON.stringify(db.child.dailyMissions)) {
+    const childId = childIdFor(db);
+    if (childId) mutateChild(childId, (d) => ensureDailyMissions(d, now));
+    else ensureDailyMissions(db, now);
+  }
+  const daily = db.child.dailyMissions;
+  const describe = (entry) => {
+    const m = MISSION_POOL.find((m) => m.key === entry.key);
+    return { ...m, ...entry, title: missionTitle(db, m) };
+  };
+  return { active: daily.active.map(describe), done: daily.done.map(describe), doneCount: daily.done.length, cap: DAILY_MISSION_CAP };
+}
+
+// Call before changing eligibility; track/save/lesson already paid their reward.
+export function missionEvent(db, key, now = Date.now()) {
+  const daily = db.child.dailyMissions?.dayKey === dayKey(now, db.settings.timezone) ? db.child.dailyMissions : ensureDailyMissions(db, now);
+  const m = MISSION_POOL.find((m) => m.key === key);
+  if (!m || daily.done.length >= DAILY_MISSION_CAP || !daily.active.some((a) => a.key === key) || daily.done.some((d) => d.key === key)) return false;
+  daily.active = daily.active.filter((a) => a.key !== key);
+  daily.done.push({ key, doneAt: now, pts: m.pts });
+  if (!["track", "save", "lesson"].includes(key)) addPoints(db, m.pts, `mission: ${missionTitle(db, m)}`);
+  audit(db, "child", "daily_mission_done", `Mission done: ${missionTitle(db, m)}`, { key, points: m.pts, dayKey: daily.dayKey });
+  notify(db, "child", `Mission done! +${m.pts} points`, "celebrate", `daily:${daily.dayKey}:${key}`);
+  ensureDailyMissions(db, now);
+  return true;
+}
+
+export function missionSeen(db, key, now = Date.now()) {
+  const daily = ensureDailyMissions(db, now);
+  if (!MISSION_POOL.some((m) => m.key === key && m.kind === "seen") || !daily.active.some((m) => m.key === key)) throw new GameError("Pick one of today's missions");
+  missionEvent(db, key, now);
+  return { ok: true };
+}
+
 // ------------------------------------------------------------------ missions
 export function createParentMission(db, { title, points = POINTS.parent, by = "parent" }) {
   if (typeof title !== "string" || !title.trim() || title.trim().length > 120) throw new GameError("Mission needs a short title");
@@ -313,7 +383,7 @@ export function childMarkMissionDone(db, missionId) {
   return m;
 }
 
-export function completeLesson(db, lessonId, answers) {
+export function completeLesson(db, lessonId, answers, now = Date.now()) {
   const lesson = LESSONS.find((l) => l.id === lessonId);
   if (!lesson) throw new GameError("Unknown lesson");
   if (!Array.isArray(answers) || answers.length !== lesson.questions.length) throw new GameError("Answer every question");
@@ -325,9 +395,11 @@ export function completeLesson(db, lessonId, answers) {
   }
   const firstTime = !db.child.lessonsDone.includes(lessonId);
   if (firstTime) {
+    ensureDailyMissions(db, now);
     db.child.lessonsDone.push(lessonId);
     db.child.stats.learningDone += 1;
     addPoints(db, POINTS.lesson, `finished lesson "${lesson.title}"`);
+    missionEvent(db, "lesson", now);
     bumpGoals(db, "lessons");
     coopProgress(db);
   }
@@ -360,11 +432,13 @@ export function childSave(db, amountCents, now = Date.now()) {
     if (e instanceof BankError && e.code === "insufficient_funds") throw new GameError("You don't have that much in spending money");
     throw e;
   }
+  ensureDailyMissions(db, now);
   const key = dayKey(now, db.settings.timezone);
   db.child.stats.savingsActions += 1;
   if (db.child.lastSaveDay !== key) {
     db.child.lastSaveDay = key;
     addPoints(db, POINTS.save, "saved toward a goal");
+    missionEvent(db, "save", now);
   }
   dailyTrackingBonus(db, now);
   bumpGoals(db, "save_actions");
@@ -442,12 +516,16 @@ export function childWalletSpend(db, { amount, merchant, at, external_id }, poli
   return { ...txn, duplicate: false };
 }
 
-export function journal(db, { direction, amount, note }, now = Date.now()) {
+export function journal(db, { direction, amount, note, prices }, now = Date.now()) {
   if (!["received", "spent", "saved"].includes(direction)) throw new GameError("Pick what happened");
   if (!Number.isInteger(amount) || !(amount >= 0 && amount <= 1000000)) throw new GameError("Enter an amount from $0 to $10,000");
   if (typeof note !== "string" || !note.trim() || note.trim().length > 120) throw new GameError("Add a short note");
-  db.tracking.push({ id: uid("trk"), ts: now, direction, amount: Math.round(amount) || 0, note: note.trim() });
+  if (prices !== undefined && (!Array.isArray(prices) || prices.length !== 2 || !prices.every((p) => Number.isInteger(p) && p > 0 && p <= 1000000))) throw new GameError("Add two prices from $0.01 to $10,000");
+  ensureDailyMissions(db, now);
+  db.tracking.push({ id: uid("trk"), ts: now, direction, amount: Math.round(amount) || 0, note: note.trim(), ...(prices ? { prices } : {}) });
   const bonus = dailyTrackingBonus(db, now);
+  missionEvent(db, "journal", now);
+  if (prices) missionEvent(db, "compare", now);
   return { bonus };
 }
 
@@ -614,10 +692,12 @@ export function startTrip(db, now = Date.now(), rng = randomInt) {
   let ticket = rng(total);
   if (!Number.isInteger(ticket) || ticket < 0 || ticket >= total) throw new GameError("Let's try packing again");
   const destId = pool.find((id) => (ticket -= weight(id)) < 0);
+  ensureDailyMissions(db, now);
   db.child.points -= TRIP.cost;
   const adv = { id: uid("adv"), destId, startedAt: now, returnsAt: now + ADVENTURE_MS, status: "away", postcardIds: [] };
   db.adventures.push(adv);
   audit(db, "child", "adventure_started", `Sent ${bear} on a surprise trip (${TRIP.cost} pts)`);
+  missionEvent(db, "trip", now);
   return adv;
 }
 
@@ -673,17 +753,23 @@ export function buyCosmetic(db, id) {
   audit(db, "child", "cosmetic_bought", `Bought ${c.label} for ${c.cost} pts`);
 }
 
-export function equip(db, kind, value) {
+export function equip(db, kind, value, now = Date.now()) {
   if (!SLOTS.includes(kind)) throw new GameError("Unknown slot");
   if (value === null) {
     if (kind === "background") throw new GameError("Pick a scene");
+    ensureDailyMissions(db, now);
+    const changed = db.child.bear[kind] !== null;
     db.child.bear[kind] = null;
+    if (changed) missionEvent(db, "dress", now);
     return;
   }
   if (typeof value !== "string") throw new GameError("Unlock it first");
   const c = COSMETICS.find((x) => x.kind === kind && x.value === value);
   if (!c || !cosmeticUnlocked(db, c)) throw new GameError("Unlock it first");
+  ensureDailyMissions(db, now);
+  const changed = db.child.bear[kind] !== value;
   db.child.bear[kind] = value;
+  if (changed) missionEvent(db, "dress", now);
 }
 
 export function renameBear(db, name) {
@@ -761,12 +847,14 @@ function executeTrade(db, t) {
 export const GREETINGS = [
   "Great job saving!", "Want to go on an adventure?", "Your bear looks so cozy!", "Happy trading!", "Let's finish our team challenge!",
 ];
-export function sendGreeting(db, friendId, idx) {
+export function sendGreeting(db, friendId, idx, now = Date.now()) {
   const f = db.friends.find((x) => x.id === friendId && x.status === "approved");
   if (!f || f.real) throw new GameError("Not an approved friend");
   const text = GREETINGS[idx];
   if (!text) throw new GameError("Pick a greeting");
-  f.greetings = [...(f.greetings || []), { ts: Date.now(), text, from: "me" }].slice(-10);
+  ensureDailyMissions(db, now);
+  f.greetings = [...(f.greetings || []), { ts: now, text, from: "me" }].slice(-10);
+  missionEvent(db, "greet", now);
 }
 
 function coopProgress(db) {
@@ -898,6 +986,7 @@ export function runSocialAction(childId, action, input, recordId, now = Date.now
   }
   return mutateChildren([childId, peerId], (docs) => {
     const [d, peer] = docs;
+    ensureDailyMissions(d, now);
     if (action === "friend") {
       const common = { id: uid("fr"), real: true, status: "pending_parent_a", createdAt: now, parentAccepted: false };
       const a = { ...common, peerId, initiator: true, childAccepted: true };
@@ -916,10 +1005,12 @@ export function runSocialAction(childId, action, input, recordId, now = Date.now
       // Shared rolling window: both directions together have 20 messages/day.
       const recent = (record.greetingTimes || []).filter((ts) => ts > now - 86400000);
       if (recent.length >= 20) throw new GameError("Let's send more notes tomorrow!", 429);
+      ensureDailyMissions(d, now);
       for (const f of [record, other]) f.greetingTimes = [...recent, now];
       record.greetings = [...(record.greetings || []), { ts: now, text, from: "me" }].slice(-10);
       other.greetings = [...(other.greetings || []), { ts: now, text, from: firstName(d) }].slice(-10);
       notify(peer, "child", `${firstName(d)}: ${text}`, "greeting");
+      missionEvent(d, "greet", now);
       return { ok: true };
     }
     if (action === "trade") {

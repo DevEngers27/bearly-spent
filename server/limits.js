@@ -10,6 +10,7 @@ export const policies = {
   loginIp: [10, 15 * MINUTE], loginEmail: [5, 15 * MINUTE],
   register: [5, HOUR], unlock: [5, 15 * MINUTE],
   kidLink: [5, 15 * MINUTE],
+  missionSeen: [30, HOUR],
   chat: [30, HOUR], speak: [60, HOUR], voice: [20, 10 * MINUTE],
   walletPing: [60, HOUR], walletSpend: [60, HOUR],
 };

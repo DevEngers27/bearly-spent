@@ -319,3 +319,15 @@ to the accepted friend, with 20 messages per rolling 24 hours per friendship
 or send greetings. Unknown or foreign request/friend/trade IDs return 404;
 paired kid sessions cannot approve parent steps (403). Cross-family mutations
 publish each changed child's version to its own family stream after commit.
+
+### Daily missions (H2)
+
+Child and parent state include `missionsToday: {active, done, doneCount, cap:6}`. Each active item has `{key,assignedAt,title,pts,hint,kind}`; done items add `{doneAt,pts}`. `child.dailyMissions` persists `{dayKey,active:[{key,assignedAt}],done:[{key,doneAt,pts}]}`. First read/action rolls up to three eligible missions using the family time zone. The first mission is track or save while either is still eligible. Completed missions are replaced immediately, with no repeated key that day. Six completions clear the active list until the next family day. Eligibility is refreshed when lessons, friends, points, or travel status change.
+
+| Method and route | Auth | Request | Response and limits |
+| --- | --- | --- | --- |
+| `POST /api/child/missions/seen` | Child | `{key}`; currently active `map`, `story`, or `goal` only | `{ok:true}`; 30 attempts/hour/child. Inactive, completed, event, or unknown keys return 400. Uses only the authenticated selected child; another family's child returns 404. |
+
+Event missions finish with their existing game actions. Track/save keep their once-per-family-day bonuses; a first-time lesson uses its existing 20 points. These awards also complete an active mission without another payment. Reviews earn no points. Other daily missions award the pool points once and emit a `daily_mission_done` audit and child celebration notification. The six-completion cap limits daily mission rewards; existing track/save, lesson, milestone, weekly budget and parent-task rules continue separately.
+
+`POST /api/child/journal` also accepts optional `prices:[price1,price2]` in dollars, both $0.01–$10,000. The diary stores them in cents. A diary entry completes `journal`; one containing two validated prices can also complete an active `compare` mission. A note containing numbers alone does not count as comparing prices. Buddy's snapshot includes `missions_today` with active mission copy, rewards, done count and cap. Parent-assigned `missions` and weekly budgeting are separate.

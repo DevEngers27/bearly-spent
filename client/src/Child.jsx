@@ -186,12 +186,12 @@ function SheetRouter({ sheet, ...ctx }) {
     case "friends": return <Sheet title="Friends" onClose={close} tall><Friends {...ctx} /></Sheet>;
     case "chat": return <Sheet title="Our chat" onClose={close} tall><Buddy {...ctx} transcriptOnly /></Sheet>;
     case "goals": return <GoalsSheet {...ctx} />;
-    case "money": return <MoneySheet {...ctx} start={sheet.start} startWallet={sheet.wallet} />;
+    case "money": return <MoneySheet {...ctx} start={sheet.start} startWallet={sheet.wallet} compare={sheet.compare} />;
     case "dress": return <DressSheet {...ctx} />;
     case "lesson": return <LessonSheet {...ctx} lesson={sheet.lesson} />;
     case "budget": return <BudgetSheet {...ctx} />;
     case "place": return <PlaceSheet {...ctx} id={sheet.id} />;
-    case "postcard": return <PostcardSheet {...ctx} id={sheet.id} />;
+    case "postcard": return <PostcardSheet {...ctx} id={sheet.id} story={sheet.story} />;
     case "news":
       return (
         <Sheet title="News" onClose={close}>
@@ -221,6 +221,7 @@ function GoalsSheet({ state, run, busy, close }) {
   useEffect(() => { if (editing) { if (edited) setDraft({ title: edited.title, target: edited.target / 100, icon: edited.icon }); else reset(); } }, [editing, edited?.title, edited?.target, edited?.icon]);
   return <Sheet title="My goals" onClose={close} tall>
     <p>What would you like to save for, {state.child.name}?</p>
+    <SeenMissionButton state={state} run={run} busy={busy} missionKey="goal">Checked my goal!</SeenMissionButton>
     <ul className="savings-goal-list">
       {state.goals.map((g) => {
         const live = !g.status || ["active", "reached"].includes(g.status);
@@ -297,22 +298,40 @@ function moodFor(state, now) {
 }
 
 function nextUp(state, now) {
-  const items = [];
+  const mission = state.missionsToday?.active[0];
+  const items = mission ? [{ id: mission.key, icon: "star", text: `${mission.title} · +${mission.pts} points`, cta: "Let's go", tab: "missions" }] : [];
   const goal = state.parentGoals.find((g) => g.status === "active");
-  const today = state.dayKey;
   if (goal) {
     const left = goal.count - goal.progress;
     const what = { lessons: "money lesson", tasks: "grown-up task", save_actions: "save" }[goal.type];
     const remainingLessons = state.catalog.lessons.filter((l) => !state.child.lessonsDone.includes(l.id)).length;
     const blocked = goal.type === "lessons" && left > remainingLessons;
-    items.push(blocked ? { id: "goal", icon: "target", text: "Ask your grown-up about this goal" } : { id: "goal", icon: "target", text: `${left} more ${what}${left > 1 ? "s" : ""} to earn ${money(goal.reward)}`, cta: "Let's go", tab: goal.type === "save_actions" ? "save" : "missions" });
+    items.push(blocked ? { id: "parent-goal", icon: "target", text: "Ask your grown-up about this goal" } : { id: "parent-goal", icon: "target", text: `${left} more ${what}${left > 1 ? "s" : ""} to earn ${money(goal.reward)}`, cta: "Let's go", tab: goal.type === "save_actions" ? "save" : "missions" });
   }
   const waiting = state.parentGoals.find((g) => g.status === "awaiting_approval");
   if (waiting) items.push({ id: "wait", icon: "hourglass", text: `Your grown-up is checking "${waiting.title}"` });
-  if (state.child.lastSaveDay !== today) items.push({ id: "save", icon: "honey", text: "Save a little today for +30 points", cta: "Save", tab: "save" });
-  const lesson = state.catalog.lessons.find((l) => !state.child.lessonsDone.includes(l.id));
-  if (lesson) items.push({ id: "lesson", icon: lesson.icon, text: `Try the "${lesson.title}" lesson`, cta: "Start", lesson });
   return items.slice(0, 2);
+}
+
+function openDailyMission(mission, { state, open, goMap, setTab }) {
+  const key = mission.key;
+  if (["track", "journal", "compare"].includes(key)) return open("money", { start: "log", compare: key === "compare" });
+  if (key === "save") return open("money", { start: "save" });
+  if (key === "lesson") return open("lesson", { lesson: state.catalog.lessons.find((l) => !state.child.lessonsDone.includes(l.id)) });
+  if (key === "dress") return open("dress");
+  if (key === "goal") return open("goals");
+  if (key === "greet") return open("friends");
+  if (key === "trip") return setTab("home");
+  if (key === "map") return goMap();
+  if (key === "story") {
+    const id = state.postcards[0]?.defId || Object.keys(state.catalog.places).find((id) => !state.catalog.places[id].hidden);
+    return open("postcard", { id, story: true });
+  }
+}
+
+function SeenMissionButton({ state, run, busy, missionKey, children }) {
+  if (!state.missionsToday?.active.some((m) => m.key === missionKey)) return null;
+  return <button className="btn sage" disabled={busy} onClick={() => run("child/missions/seen", { key: missionKey })}>{children}</button>;
 }
 
 function Home({ state, setTab, open, run, busy, talk }) {
@@ -451,19 +470,20 @@ function Jar({ pct }) {
 }
 
 // ------------------------------------------------------------------ money sheet
-function MoneySheet({ state, run, close, start, startWallet = false, busy }) {
+function MoneySheet({ state, run, close, start, startWallet = false, busy, compare = false }) {
   const [mode, setMode] = useState(start || "save");
   const [amount, setAmount] = useState(mode === "save" ? "2" : "");
   const [memo, setMemo] = useState("");
   const [direction, setDirection] = useState("received");
   const [appleCash, setAppleCash] = useState(startWallet);
+  const [prices, setPrices] = useState(["", ""]);
   const submit = async (e) => {
     e.preventDefault();
     const a = Number(amount);
     let r;
     if (mode === "save") r = await run("child/save", { amount: a }, `Saved ${money(Math.round(a * 100))}! ${state.child.bear.name} grew a little.`);
     if (mode === "spend") r = await run(appleCash ? "child/wallet/spend" : "child/spend", appleCash ? { amount: a, merchant: memo } : { amount: a, memo }, (x) => (x.held ? "That's a big buy. We asked your grown-up first." : "Recorded. Nice tracking!"));
-    if (mode === "log") r = await run("child/journal", { direction, amount: a || 0, note: memo }, "Added to your money diary.");
+    if (mode === "log") r = await run("child/journal", { direction, amount: a || 0, note: memo, ...(prices.some((p) => p !== "") ? { prices: prices.map(Number) } : {}) }, "Added to your money diary.");
     if (mode === "ask") r = await run("child/extra", { amount: a, reason: memo }, "Sent to your grown-up!");
     if (r) { setMemo(""); if (mode !== "save") close(); }
   };
@@ -502,6 +522,9 @@ function MoneySheet({ state, run, close, start, startWallet = false, busy }) {
               placeholder={mode === "spend" ? "e.g. Stickers" : mode === "ask" ? "e.g. A gift for my friend" : "e.g. Birthday money from Grandma"} />
           </label>
         )}
+        {mode === "log" && <fieldset className="diary-prices"><legend>{compare ? "Compare two prices" : "Compare two prices (optional)"}</legend>
+          {[0, 1].map((i) => <label key={i}>Price {i + 1} ($)<input type="number" min="0.01" max="10000" step="0.01" inputMode="decimal" value={prices[i]} required={compare || prices.some((p) => p !== "")} onChange={(e) => setPrices(prices.map((p, n) => n === i ? e.target.value : p))} /></label>)}
+        </fieldset>}
         <p className="fine">
           {mode === "save" && `Moves money from spending (${money(state.balances.spending)}) into savings.`}
           {mode === "spend" && (appleCash ? "Already paid? Log it here only if your Shortcut hasn't recorded it." : `Buys over ${moneyShort(state.allowance.spendLimit)} need your grown-up's OK first.`)}
@@ -575,13 +598,28 @@ function DressSheet({ state, run, close, busy }) {
 }
 
 // ------------------------------------------------------------------ missions
-function Missions({ state, run, open, busy }) {
-  const today = state.dayKey;
+function Missions({ state, run, open, busy, goMap, setTab }) {
   const P = state.catalog.points;
   const goals = state.parentGoals.filter((g) => g.status === "active" || g.status === "awaiting_approval");
+  const active = state.missionsToday?.active || [];
+  const day = state.dayKey;
+  const [recentDone, setRecentDone] = useState([]);
+  const previous = useRef({ day, active });
+  const [newKeys, setNewKeys] = useState([]);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = { day, active };
+    if (before.day !== day) { setRecentDone([]); setNewKeys([]); return; }
+    const completed = before.active.filter((m) => !active.some((a) => a.key === m.key) && state.missionsToday?.done.some((d) => d.key === m.key));
+    if (!completed.length) { setRecentDone([]); setNewKeys([]); return; }
+    setRecentDone(completed);
+    setNewKeys(active.filter((m) => !before.active.some((a) => a.key === m.key)).map((m) => m.key));
+    const timer = setTimeout(() => { setRecentDone([]); setNewKeys([]); }, 1400);
+    return () => clearTimeout(timer);
+  }, [day, active.map((m) => m.key).join(","), state.missionsToday?.doneCount]);
   const daily = [
-    { id: "track", title: "Record today's money", pts: P.track, done: Boolean(today) && state.child.lastTrackedDay === today, action: () => open("money", { start: "spend" }) },
-    { id: "save", title: "Save toward your goal", pts: P.save, done: Boolean(today) && state.child.lastSaveDay === today, action: () => open("money", { start: "save" }) },
+    ...recentDone.map((m) => ({ ...m, id: m.key, done: true })),
+    ...active.map((m) => ({ ...m, id: m.key, fresh: newKeys.includes(m.key), action: () => openDailyMission(m, { state, open, goMap, setTab }) })),
   ];
   const weekly = [
     { id: "budget", title: "Weekly budget challenge", pts: P.budget, done: Boolean(state.weekKey) && state.child.lastBudgetWeek === state.weekKey, action: () => open("budget") },
@@ -603,12 +641,13 @@ function Missions({ state, run, open, busy }) {
 
       {[["Today", daily], ["This week", weekly]].map(([label, missions]) => <section key={label}>
         <h2 className="hand section-title">{label}</h2>
-        <ul className="checklist">
+        {label === "Today" && state.missionsToday?.doneCount >= state.missionsToday?.cap && <p role="status">All done for today — amazing!</p>}
+        <ul className="checklist" aria-live={label === "Today" ? "polite" : undefined}>
           {missions.map((m) => (
-            <li key={m.id} className={m.done ? "done" : ""}>
-              <button onClick={m.action} disabled={m.done}>
+            <li key={m.id} className={m.done ? (label === "Today" ? "done mission-exit" : "done") : m.fresh ? "mission-enter" : ""}>
+              <button onClick={m.action} disabled={busy || m.done}>
                 <span className="box" aria-hidden="true">{m.done && <Icon name="check" size={18} />}</span>
-                <span className="grow">{m.title}</span>
+                <span className="grow">{m.title}{m.hint && <small>{m.hint}</small>}{m.fresh && <small className="mission-new">New!</small>}</span>
                 {!m.done && <span className="pts">+{m.pts}</span>}
               </button>
             </li>
@@ -642,7 +681,7 @@ function Missions({ state, run, open, busy }) {
               <button key={l.id} className={`lesson ${done ? "done" : ""}`} style={{ "--tilt": `${[-1.2, 0.8, -0.6, 1, -0.9][i]}deg` }} onClick={() => open("lesson", { lesson: l })}>
                 <span className="lesson-emoji"><Icon name={l.icon} size={40} /></span>
                 <strong>{l.title}</strong>
-                <small>{done ? "Done · play again" : `${l.questions.length} questions · +${P.lesson}`}</small>
+                <small>{done ? "Review · no points" : `${l.questions.length} questions · +${P.lesson}`}</small>
                 {done && <span className="done-stamp" aria-hidden="true"><Icon name="check" size={18} /></span>}
               </button>
             );
@@ -778,7 +817,7 @@ function MapScreen({ state, open, focus, clearFocus }) {
   );
 }
 
-function PlaceSheet({ id, state, close, openCard }) {
+function PlaceSheet({ id, state, close, openCard, run, busy }) {
   const p = state.catalog.places[id];
   const owned = state.postcards.some((c) => c.defId === id);
   const visits = state.postcards.filter((c) => c.defId === id && c.source === "trip").length;
@@ -804,6 +843,7 @@ function PlaceSheet({ id, state, close, openCard }) {
       {owned && <><Stamp stamp={p.stamp} name={p.name} image={p.image} /><p className="story">{storyFor(p, state.child.bear.name)}</p><p className="fine">{visits ? `Visited ${visits} ${visits === 1 ? "time" : "times"}` : `A postcard from a friend. Maybe ${state.child.bear.name} will visit one day!`}</p></>}
       {!owned && <p className="hand">{p.clue || `A little adventure in ${p.state}.`}</p>}
       {!p.open && <p className="lock-note"><Icon name="lock" size={20} /> {p.lockReason}{p.progress ? ` (${p.progress})` : ""}</p>}
+      <SeenMissionButton state={state} run={run} busy={busy} missionKey="map">Found a place!</SeenMissionButton>
       {owned && <button className="link" onClick={() => openCard(id)}>See my postcard</button>}
     </Sheet>
   );
@@ -912,13 +952,14 @@ function Album({ state, open, goMap, run, busy, newCards = [], openCard }) {
   );
 }
 
-function PostcardSheet({ id, state, close }) {
+function PostcardSheet({ id, state, close, run, busy, story = false }) {
   const p = state.catalog.places[id];
   const mine = state.postcards.filter((c) => c.defId === id);
   return (
     <Sheet title={p.name} onClose={close} tall>
-      <FlipPostcard id={id} place={p} bearName={state.child.bear.name} to={state.child.name} collectedAt={mine[0]?.collectedAt} />
+      <FlipPostcard id={id} place={p} bearName={state.child.bear.name} to={state.child.name} collectedAt={mine[0]?.collectedAt} startFlipped={story} />
       <p className="fine center">Tap the postcard to turn it over.</p>
+      <SeenMissionButton state={state} run={run} busy={busy} missionKey="story">I read the story!</SeenMissionButton>
       {mine.length > 1 && <p className="fine center">You have {mine.length} of these. Spare copies can be swapped with friends.</p>}
     </Sheet>
   );

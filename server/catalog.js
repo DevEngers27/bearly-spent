@@ -234,3 +234,18 @@ export const POINTS = {
   budget: 50,
   milestone: 100,
 };
+
+// Daily missions use existing track/save/lesson awards, never a second bonus.
+export const MISSION_POOL = [
+  { key: "track", title: "Record today's money", pts: 10, kind: "event", hint: "Save, record a purchase, or add cash to your diary." },
+  { key: "save", title: "Save toward your goal", pts: 30, kind: "event", hint: "Move a little spending money into savings." },
+  { key: "journal", title: "Write in your cash diary", pts: 10, kind: "event", hint: "Tell your diary what happened with your cash." },
+  { key: "lesson", title: "Finish a money lesson", pts: 20, kind: "event", hint: "Try a lesson you haven't finished yet." },
+  { key: "dress", title: "Try a new look on <bear>", pts: 10, kind: "event", hint: "Change something in your bear's wardrobe." },
+  { key: "map", title: "Visit the map and find a place you'd like to go", pts: 10, kind: "seen", hint: "Open a place on the map, then tap Found a place!" },
+  { key: "story", title: "Read a postcard story", pts: 10, kind: "seen", hint: "Turn a postcard over and read its little story." },
+  { key: "greet", title: "Send a friend a greeting", pts: 15, kind: "event", hint: "Pick a friendly note to send." },
+  { key: "trip", title: "Send <bear> on a trip", pts: 15, kind: "event", hint: "Use adventure points to pack a surprise trip." },
+  { key: "compare", title: "Price detective: compare two prices in the cash diary", pts: 15, kind: "event", hint: "Add two prices to a diary entry. Which costs less?" },
+  { key: "goal", title: "Check your savings goal", pts: 10, kind: "seen", hint: "Look at your goals, then tap Checked my goal!" },
+];
