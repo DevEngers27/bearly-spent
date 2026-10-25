@@ -11,6 +11,18 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.3] — 2026-10-25
+
+### Added
+- Thirty money lessons with six questions each (the first fifteen gained
+  questions). Each try shows four questions that rotate per child and per
+  attempt, so a review never repeats the same set; three of four passes.
+  Fifteen new topics: coins and bills, making change, planning an allowance,
+  needs by season, the whole price with shipping, subscriptions, choosing one
+  thing, a gift together, meeting your bank, savings that grow, a party on a
+  plan, toys finding a new home, choosing a cause, built to last, rainy-day
+  savings. 360 server tests and 217 client tests.
+
 ## [0.8.2] — 2026-10-25
 
 ### Added
