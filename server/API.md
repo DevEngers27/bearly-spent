@@ -90,7 +90,7 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | Field | Shape |
 | --- | --- |
 | `childId`, `version`, `now`, `dayKey`, `weekKey`, `offline`, `budgetDoneThisWeek` | Selected ID, child document version, server Unix milliseconds, zoned `YYYY-MM-DD`, ISO `YYYY-Www`, `false`, boolean |
-| `child` | `{name, age, points, bear, ownedCosmetics, milestonesUnlocked, stats, lessonsDone, ...progressMarkers}`; bear has `name, hat, eyes, neck, outfit, held, friend, background`; stats have `savingsActions, learningDone, tracked, budgetsDone, adventures` |
+| `child` | `{name, age, points, bear, ownedCosmetics, milestonesUnlocked, stats, lessonsDone, ...progressMarkers}`; bear has `name, hat, eyes, neck, outfit, bag, held, friend, background`; stats have `savingsActions, learningDone, tracked, budgetsDone, adventures` |
 | `profile` | `{name,age,bearName,friendCode?,since,stats,badges}`; `since` is document `createdAt` (legacy: earliest audit timestamp or migration time, persisted). `stats`: `{points,postcards:{collected,total,cards},tripsTaken,lessonsFinished,missionsDone,longestStreak?}`. Collected counts distinct places visited on trips; total counts all catalog places, matching `metrics.postcards`; trips include away trips. Badges are stored unlocked milestone definitions in reverse unlock order. Friend code is omitted until available. |
 | `balances` | `{savings, spending}` in cents |
 | `goals` | `[{id, title, icon, target, createdAt, status, activeFlag, current, weeksLeft}]`; status is active/reached/bought/archived, target is cents; weeksLeft is null for history or no weekly saving |
@@ -159,6 +159,10 @@ All routes below have **Child** auth and support parent `?child=` selection. Unl
 | `POST /api/buddy/chat` | `{text}` | `{reply,toolsUsed}`; nonempty <=500 characters, Buddy enabled. 30/hour/child and only 1 in flight/child; returns 429 while Buddy is thinking. Redacts PII, retains Haiku screening for live replies. |
 | `POST /api/buddy/speak` | `{text}` | `audio/mpeg` bytes; nonempty <=500 characters, Buddy enabled. 60/hour/child; 404 if Cartesia not configured. |
 | `POST /api/voice/token` | No fields | `{token,version,request:{model_id,voice,output_format,language,generation_config}}`; Buddy enabled, 20/10 minutes/child; 404 without Cartesia. `token` is Cartesia's short-lived TTS-only token, not the MoneyQuest session. |
+
+Wardrobe slots are `hat`, `eyes`, `neck`, `outfit`, `bag`, `held`, `friend`, `background`. The catalog has 26 illustrated items and three scenes. New children own `held:map`, `friend:bee_friend`, and `background:forest`; only the bee and forest start equipped. Buying equips that item, including bags; unknown or retired IDs are rejected. A held map, magnifying glass, leaf umbrella or mug replaces the front bear image and temporarily hides outfit, neckwear and bag layers without unequipping them. Other poses show the plain bear.
+
+The one-time per-document `wardrobeVersion: 2` refresh removes retired owned IDs, keeps IDs still in the catalog, adds the three defaults and clears unknown/unowned worn values (background falls back to forest). Recorded savings milestones re-grant the bow tie ($25), flower crown ($50) and starry camp ($100). No points are refunded or deducted. The refresh persists on read and adds one system audit entry: “Wardrobe refreshed: new outfits, old ones retired”.
 
 ## Parent actions
 

@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { COSMETICS, SLOTS } from "./catalog.js";
 import { database, transaction } from "./db.js";
 import { GameError, dueAdventures, normalizeGoals, audit, notify } from "./domain.js";
 import { hasDueWork } from "./guardian.js";
@@ -32,6 +33,7 @@ export function demoSeed(now = Date.now()) {
 export function seed(now = Date.now()) {
   return {
     version: 1,
+    wardrobeVersion: 2,
     createdAt: now,
     family: { parentName: "Jordan" },
     child: {
@@ -39,8 +41,8 @@ export function seed(now = Date.now()) {
       name: "Mia",
       age: 9,
       points: 40,
-      bear: { name: "Maple", hat: null, eyes: null, neck: null, outfit: null, held: null, friend: "bee_friend", background: "forest" },
-      ownedCosmetics: ["held:adventure_map", "friend:bee_friend", "background:forest"],
+      bear: { name: "Maple", hat: null, eyes: null, neck: null, outfit: null, bag: null, held: null, friend: "bee_friend", background: "forest" },
+      ownedCosmetics: ["held:map", "friend:bee_friend", "background:forest"],
       milestonesUnlocked: [1000], // already past $10 at seed time
       stats: { savingsActions: 0, learningDone: 0, tracked: 0, budgetsDone: 0, adventures: 0 },
       lessonsDone: [],
@@ -94,13 +96,13 @@ export function seed(now = Date.now()) {
     friends: [
       {
         id: "fr_maya", name: "Maya", status: "approved", code: "MAYA-42",
-        bear: { name: "Pip", hat: "ranger_hat", neck: "camera" },
+        bear: { name: "Pip", hat: "explorer_hat", bag: "camera" },
         postcards: ["seattle", "grand_canyon_national_park", "yosemite_national_park", "seattle"],
         coopLearning: 2,
       },
       {
         id: "fr_leo", name: "Leo", status: "pending_parent", code: "LEO-77",
-        bear: { name: "Ziggy", hat: "knit_beanie", neck: "red_scarf" },
+        bear: { name: "Ziggy", hat: "beanie", neck: "red_scarf" },
         postcards: ["great_smoky_mountains_national_park"],
         coopLearning: 0,
       },
@@ -117,8 +119,7 @@ export function seed(now = Date.now()) {
   };
 }
 
-// Older saves used the first bear's slots (backpack color, hat, accessory).
-// Map them onto the illustrated wardrobe so existing progress keeps working.
+// Refresh each child document once; retired cosmetics never change points or money.
 export function migrate(d) {
   if (d.child) normalizeGoals(d);
   if (!Number.isFinite(d.createdAt)) {
@@ -140,29 +141,36 @@ export function migrate(d) {
   }
   d.walletPending ||= [];
   for (const t of d.transactions || []) if (t.kind === "wallet_in") t.memo = "Sent via Apple Cash (before 0.7)";
-  const HATS = { beanie: "knit_beanie", ranger: "ranger_hat", flowers: "flower_crown" };
-  const fix = (b) => {
-    if (!b || !("color" in b || "accessory" in b)) return;
-    b.hat = HATS[b.hat] || (b.hat && b.hat.includes("_") ? b.hat : null);
-    if (b.accessory === "scarf") b.neck = "red_scarf";
-    if (b.accessory === "leaf") b.neck = "red_bow_tie";
-    if (b.background && !["forest", "meadow", "stars"].includes(b.background)) b.background = "forest";
-    delete b.color;
-    delete b.accessory;
-  };
-  fix(d.child?.bear);
   for (const p of d.postcards || []) {
     if (p.source === undefined) p.source = p.from ? "trade" : "trip";
   }
-  if (d.child && !d.child.bear.friend && !d.child.ownedCosmetics?.includes("friend:bee_friend")) d.child.bear.friend = "bee_friend";
-  d.friends?.forEach((f) => fix(f.bear));
-  if (d.child?.ownedCosmetics?.some((id) => id.startsWith("color:") || id.startsWith("bg:") || id.startsWith("acc:"))) {
-    const ids = new Set(["held:adventure_map", "friend:bee_friend", "background:forest"]);
-    for (const id of d.child.ownedCosmetics) {
-      const map = { "hat:beanie": "hat:knit_beanie", "hat:ranger": "hat:ranger_hat", "acc:scarf": "neck:red_scarf", "bg:meadow": "background:meadow" };
-      if (map[id]) ids.add(map[id]);
+  if (d.child && d.wardrobeVersion !== 2) {
+    const known = new Set(COSMETICS.map((c) => c.id));
+    const owned = new Set((d.child.ownedCosmetics || []).filter((id) => known.has(id)));
+    for (const id of ["held:map", "friend:bee_friend", "background:forest"]) owned.add(id);
+    for (const c of COSMETICS) {
+      if (c.milestone && d.child.milestonesUnlocked?.some((at) => at >= c.milestone)) owned.add(c.id);
     }
-    d.child.ownedCosmetics = [...ids];
+    d.child.ownedCosmetics = [...owned];
+    const bear = d.child.bear;
+    delete bear.color;
+    delete bear.accessory;
+    for (const slot of SLOTS) {
+      if (!known.has(`${slot}:${bear[slot]}`) || !owned.has(`${slot}:${bear[slot]}`)) bear[slot] = slot === "background" ? "forest" : null;
+    }
+    // Practice friends have no inventory; real friends are read from their own documents.
+    const hats = { ranger_hat: "explorer_hat", knit_beanie: "beanie", flower_sunhat: "straw_hat" };
+    for (const friend of d.friends || []) {
+      if (friend.real || !friend.bear) continue;
+      const b = friend.bear;
+      b.hat = hats[b.hat] || b.hat;
+      if (b.neck === "camera") { b.bag = "camera"; b.neck = null; }
+      for (const slot of SLOTS) if (!known.has(`${slot}:${b[slot]}`)) b[slot] = slot === "background" ? "forest" : null;
+      delete b.color;
+      delete b.accessory;
+    }
+    d.wardrobeVersion = 2;
+    audit(d, "system", "wardrobe_refreshed", "Wardrobe refreshed: new outfits, old ones retired");
   }
   return d;
 }
@@ -202,9 +210,9 @@ export function readChild(childId) {
   const row = database().prepare("SELECT doc FROM children WHERE id = ?").get(childId);
   if (!row) throw new GameError("Child not found", 404);
   const stored = JSON.parse(row.doc);
-  const needsMigration = !Number.isFinite(stored.createdAt) || !!stored.accounts?.wallet || stored.accounts?.parent?.label !== "Funding account" || !stored.walletPending;
+  const needsMigration = stored.wardrobeVersion !== 2 || !Number.isFinite(stored.createdAt) || !!stored.accounts?.wallet || stored.accounts?.parent?.label !== "Funding account" || !stored.walletPending;
   const d = migrate(stored);
-  // Persist account migration and timestamps once, including across restarts.
+  // Persist wardrobe/account migrations and timestamps once, including across restarts.
   if (needsMigration) database().prepare("UPDATE children SET doc = ? WHERE id = ?").run(JSON.stringify(d), childId);
   return remember(childId, d);
 }

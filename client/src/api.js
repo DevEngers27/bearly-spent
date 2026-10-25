@@ -100,8 +100,8 @@ export async function api(path, body, options) {
   if (path.split("?")[0] === "state" && body === undefined && version === identityVersion) {
     try { localStorage.setItem("mq_last_state", JSON.stringify(data)); } catch {}
     if (import.meta.env.PROD && "serviceWorker" in navigator) {
-      const images = ["/bear/items/mushroom.png", ...Object.values(data.catalog.places).map((p) => p.image),
-        ...data.catalog.cosmetics.map((c) => c.kind === "background" ? null : `/bear/items/${c.value}.png`),
+      const images = [...Object.values(data.catalog.places).map((p) => p.image),
+        ...data.catalog.cosmetics.flatMap((c) => c.kind === "background" ? [] : [`/bear/items/${c.value}.png`, `/bear/thumbs/${c.value}.png`]),
         ...["front", "side", "back", "three_quarter"].map((pose) => `/bear/poses/bear_${pose}.png`)].filter(Boolean);
       navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage({ type: "mq:cache-art", images })).catch(() => {});
     }

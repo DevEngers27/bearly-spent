@@ -9,16 +9,14 @@ const s = { stroke: INK, strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoi
 
 // Illustrated assets from the bear pack, used where a picture reads better.
 const ART = {
-  honey: "/bear/items/honey_jar.png",
-  basket: "/bear/items/picnic_basket.png",
-  magnifier: "/bear/items/magnifying_glass.png",
-  map: "/bear/items/adventure_map.png",
+  magnifier: "/bear/thumbs/magnifying_glass.png",
+  map: "/bear/thumbs/map.png",
   bear: "/bear/poses/bear_front.png",
-  bee: "/bear/items/bee_friend.png",
-  book: "/bear/items/green_book.png",
+  bee: "/bear/thumbs/bee_friend.png",
 };
 
 const PATHS = {
+  book: <><path d="M3 5c3-1 6-1 9 1 3-2 6-2 9-1v14c-3-1-6-1-9 1-3-2-6-2-9-1z" {...s} fill={C.cream} /><path d="M12 6v14" {...s} /></>,
   more: <>{[5, 12, 19].map((x) => <circle key={x} cx={x} cy="12" r="2" {...s} fill={C.honey} />)}</>,
   home: <><path d="M3.5 11.5 12 4l8.5 7.5" {...s} fill="none" /><path d="M6 10v9.5h12V10" {...s} fill={C.cream} /><path d="M10 19.5v-5h4v5" {...s} fill={C.rose} /></>,
   star: <path d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" {...s} fill={C.honey} />,
@@ -61,7 +59,7 @@ const PATHS = {
   map: <><path d="M3.5 6.5 9 4l6 2.5 5.5-2.5v13.5L15 20l-6-2.5-5.5 2.5z" {...s} fill={C.cream} /><path d="M9 4v13.5M15 6.5V20" {...s} /><path d="M6 13l3-2 3 2 4-4" stroke={C.rose} strokeWidth="1.6" strokeDasharray="1.5 2" fill="none" /></>,
 };
 
-export const ICON_NAMES = [...Object.keys(PATHS), ...Object.keys(ART)];
+export const ICON_NAMES = [...Object.keys(PATHS), ...Object.keys(ART), "honey", "basket"];
 // Raw paths, for drawing icons inside other SVGs (e.g. map pins).
 export const ICON_PATHS = PATHS;
 
@@ -72,7 +70,7 @@ export function Icon({ name, size = 22, label, className = "", art = true }) {
   if (art && ART[name]) {
     return <img src={ART[name]} className={`icon icon-art ${className}`} style={{ width: size, height: size }} alt={label || ""} draggable="false" {...(label ? {} : { "aria-hidden": "true" })} />;
   }
-  const paths = PATHS[name] || PATHS.sparkle;
+  const paths = PATHS[name] || (name === "honey" ? PATHS.coin : name === "basket" ? PATHS.wallet : PATHS.sparkle);
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} className={`icon ${className}`} {...a11y}>
       {paths}
