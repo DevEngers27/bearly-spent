@@ -8,9 +8,19 @@ import { fileURLToPath } from "node:url";
 let connection;
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+function restrictFiles(filename) {
+  if (filename === ":memory:" || process.platform === "win32") return;
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try { fs.chmodSync(filename + suffix, 0o600); } catch (e) {
+      if (!["ENOENT", "ENOSYS", "ENOTSUP", "EOPNOTSUPP"].includes(e.code)) throw e;
+    }
+  }
+}
+
 function open(filename) {
   if (filename !== ":memory:") fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = new DatabaseSync(filename);
+  restrictFiles(filename);
   db.exec(`
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
@@ -41,6 +51,7 @@ function open(filename) {
       child_id TEXT NOT NULL REFERENCES children(id), expires_at INTEGER NOT NULL, used_at INTEGER
     );
   `);
+  restrictFiles(filename);
   return db;
 }
 
