@@ -11,6 +11,20 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.9.1] — 2026-10-25
+
+### Fixed
+- Opening the talk bar no longer stretches the page. Since 0.8.6 the bar
+  sat in Home's grid, and its row of suggestion chips (about 660px wide)
+  made the grid item, and the whole page, about 720px wide, so phones and
+  narrow windows scrolled sideways and looked zoomed out. The bar can
+  shrink now and the chips scroll inside their own row. This was the
+  "Chat looks wrong on my phone" report.
+
+### Review trail
+- One-line CSS fix on `fix/talk-bar-width` with a regression assertion;
+  Gemini review; measured live (page width 721px → 375px). 395 server tests and 240 client tests.
+
 ## [0.9.0] — 2026-10-25
 
 ### Changed
