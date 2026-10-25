@@ -500,10 +500,9 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 }
 .msg { max-width: 85%; padding: 10px 14px; border-radius: 18px; position: relative; display: grid; gap: 6px; font-size: 16.5px; }
 .msg.user { align-self: flex-end; background: var(--sky-deep); color: #fff; border-bottom-right-radius: 6px; }
-.msg.assistant { align-self: flex-start; background: var(--paper-card); border: 2px solid var(--ink); border-bottom-left-radius: 6px; padding-right: 40px; }
+.msg.assistant { align-self: flex-start; background: var(--paper-card); border: 2px solid var(--ink); border-bottom-left-radius: 6px; }
 .msg.auto { background: #FFF6DE; border-style: dashed; }
 .auto-tag { font-weight: 900; font-size: 12px; color: var(--bear); }
-.speak { position: absolute; right: 6px; bottom: 6px; border: 0; background: none; font-size: 16px; opacity: 0.7; }
 .typing { flex-direction: row; display: flex; gap: 5px; padding: 14px 18px; }
 .typing span { width: 8px; height: 8px; border-radius: 50%; background: var(--bear); animation: dot 1s infinite; }
 .typing span:nth-child(2) { animation-delay: 0.15s; }
@@ -604,8 +603,8 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .audit li.actor-guardian { background: #EEF3F4; }
 @media (max-width: 640px) { .audit li { grid-template-columns: 1fr; gap: 0; } }
 .transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.transcript li { background: var(--paper-card); border: 2px solid var(--line); border-radius: 12px; padding: 10px 14px; display: grid; gap: 2px; }
-.transcript li.user { border-left: 6px solid var(--sky); }
+.transcript > li { background: var(--paper-card); border: 2px solid var(--line); border-radius: 12px; padding: 10px 14px; display: grid; gap: 2px; }
+.transcript > li.user { border-left: 6px solid var(--sky); }
 .transcript small { color: var(--ink-soft); }
 .switch { display: flex; gap: 10px; align-items: center; font-weight: 800; }
 .switch input { width: 18px; height: 18px; accent-color: var(--sky-deep); }
@@ -649,13 +648,12 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .btn .icon { margin-top: -2px; }
 .brand-mark { width: 30px; height: 30px; object-fit: contain; align-self: center; }
 .loading-bear { width: 90px; height: auto; justify-self: center; animation: bounce 1.6s ease-in-out infinite; }
-.speak .icon { display: block; }
 .big .icon { display: inline-block; }
 .walking-away .paws { display: block; opacity: .7; }
 
 .offline-pill { border: 1px solid var(--ink); border-radius: 999px; padding: 4px 9px; background: #F7DDD7; font-size: 13px; font-weight: 800; }
 button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
-.pbtn:disabled, .chip:disabled, .swatch:disabled, .speak:disabled { opacity: 0.5; cursor: not-allowed; }
+.pbtn:disabled, .chip:disabled, .swatch:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Family entry and pairing keep the same paper-and-bear language as the game. */
 .auth-page { min-height: 100dvh; padding: 32px 16px; }
@@ -704,8 +702,6 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .talk-bar .chat-input { align-items: center; }
 .talk-bar input { min-width: 0; width: 100%; }
 .talk-bar .btn { padding-inline: 14px; }
-.mic { touch-action: none; user-select: none; }
-.mic.listening { background: var(--rose); box-shadow: 0 0 0 4px var(--honey-soft); }
 .pin.open .pin-bg { fill: transparent; stroke: #9A917C; stroke-width: 2; stroke-dasharray: 4 4; }
 .pin.open .pin-ring { stroke: #9A917C; }
 .pin.open .map-label { opacity: .7; }
@@ -860,10 +856,10 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
   .parent .ptable-summary td { border: 0; }
   .parent .ptable-summary td:last-child { font-weight: 800; text-align: right; }
   .parent .audit li { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 14px; }
-  .parent .audit li > *, .parent .transcript li > * { min-width: 0; }
+  .parent .audit li > *, .parent .transcript > li > * { min-width: 0; }
   .parent .audit time::before { content: "When · "; }
   .parent .audit .actor::before { content: "Who · "; color: var(--ink-soft); }
-  .parent .transcript li { padding: 14px; }
+  .parent .transcript > li { padding: 14px; }
   .parent .transcript span { white-space: pre-wrap; }
   .role-parent .sheet, .sheet[aria-label="Grown-ups only"] { max-width: 100%; max-height: calc(100dvh - env(safe-area-inset-top)); overflow-wrap: anywhere; }
   .sheet[aria-label="Grown-ups only"] button, .sheet[aria-label="Grown-ups only"] input { min-height: 44px; min-width: 44px; }
@@ -908,3 +904,13 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .goal-picture-row button:disabled { opacity: .5; cursor: default; }
 .goal-picture-row span { font-size: 12px; }
 .ask-again { display: block; margin-top: 8px; }
+
+/* Safe chat formatting stays readable in narrow bubbles and long transcripts. */
+.markdown { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.markdown p { margin: 0 0 .65em; white-space: pre-wrap; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown ul, .markdown ol { margin: .4em 0 .65em; padding-left: 1.5em; }
+.markdown li { margin: .2em 0; }
+.markdown code { font-size: .9em; background: var(--honey-soft); border-radius: 4px; padding: 1px 4px; white-space: pre-wrap; }
+.finished-lessons { margin-top: 18px; }
+.finished-lessons summary { cursor: pointer; padding: 12px 0; }

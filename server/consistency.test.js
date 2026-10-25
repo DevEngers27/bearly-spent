@@ -28,8 +28,8 @@ after(() => {
 test("D2: lesson goals respect remaining unique lessons and cancellation stops progress", () => {
   const db = seed(Date.now());
   db.child.lessonsDone = catalog.LESSONS.slice(0, 3).map((l) => l.id);
-  assert.throws(() => game.createParentGoal(db, { title: "Learn", type: "lessons", count: 3, reward: 5 }), {
-    name: "Error", message: "Mia has already passed 3 lessons — pick 2 or fewer, or choose tasks", status: 400,
+  assert.throws(() => game.createParentGoal(db, { title: "Learn", type: "lessons", count: catalog.LESSONS.length - 2, reward: 5 }), {
+    name: "Error", message: `Mia has already passed 3 lessons — pick ${catalog.LESSONS.length - 3} or fewer, or choose tasks`, status: 400,
   });
   const goal = game.createParentGoal(db, { title: "Learn two", type: "lessons", count: 2, reward: 5 });
   actions.cancelGoal(db, goal.id);

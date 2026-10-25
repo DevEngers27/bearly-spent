@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction, GOAL_ICONS, goalIconName, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
+import { api, money, moneyShort, plural, formatTime, postcardMetrics, useAction, GOAL_ICONS, goalIconName, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale, ITEMS } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
+import Markdown from "./Markdown.jsx";
 import MapView from "./MapView.jsx";
 import { Icon } from "./Icons.jsx";
 
@@ -27,7 +28,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
 };
 
-export default function Child({ state, toast, onGrownUps, offline }) {
+export default function Child({ state, toast, onGrownUps, onSignOut, offline }) {
   const [tab, setTabRaw] = useState(() => { const saved = store.get("mq_tab", "home"); return TABS.some((t) => t.id === saved) ? saved : "home"; });
   const [sheet, setSheet] = useState(null); // { type, ...props }
   const [mapFocus, setMapFocus] = useState(null);
@@ -64,7 +65,7 @@ export default function Child({ state, toast, onGrownUps, offline }) {
     store.set(openedKey, JSON.stringify(next)); setOpenedCards(next);
     open("postcard", { id });
   };
-  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard, onGrownUps, seen };
+  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard, onGrownUps, onSignOut, seen, lessonSheetOpen: sheet?.type === "lesson" };
   // Replay locally acknowledged receipts on reconnect (including older devices).
   useEffect(() => {
     if (offline) return;
@@ -250,7 +251,8 @@ function GoalsSheet({ state, run, busy, close }) {
   </Sheet>;
 }
 
-function ProfileSheet({ state, run, busy, close, open, onGrownUps }) {
+function ProfileSheet({ state, run, busy, close, open, onGrownUps, onSignOut }) {
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [editing, setEditing] = useState(false);
   const [bearName, setBearName] = useState(state.child.bear.name);
   useEffect(() => { setBearName(state.child.bear.name); }, [state.child.bear.name]);
@@ -285,6 +287,7 @@ function ProfileSheet({ state, run, busy, close, open, onGrownUps }) {
     </dl>{Number.isFinite(profile?.since) && <p className="fine">Saving since {new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: state.settings.timezone || "UTC" }).format(profile.since)}</p>}</section>
     <section><h3 className="hand">Badges</h3>{badges.length ? <ul className="profile-badges">{badges.map((badge) => <li key={badge.at}><Icon name="star" size={22} /><div><strong>{badge.label}</strong><p className="fine">{badge.reward}</p></div></li>)}</ul> : <p className="fine">Keep saving to earn your first badge!</p>}</section>
     <div className="profile-shortcuts"><button className="btn sage" onClick={() => open("friends")}>Add a friend</button><button className="btn honey" onClick={() => open("dress")}>Dress up</button>{onGrownUps && <button className="btn" onClick={() => { close(); onGrownUps(); }}>Grown-ups</button>}</div>
+    {onSignOut && <section><h3 className="hand">This device</h3>{confirmSignOut ? <><p>You'll need a new kid code from your grown-up to come back.</p><div className="btn-row"><button className="btn" disabled={busy} onClick={() => run(onSignOut)}>Confirm sign out</button><button className="btn" disabled={busy} onClick={() => setConfirmSignOut(false)}>Stay here</button></div></> : <button className="btn" disabled={busy} onClick={() => setConfirmSignOut(true)}>Sign out</button>}</section>}
   </Sheet>;
 }
 
@@ -645,7 +648,7 @@ function DressSheet({ state, run, close, busy }) {
 }
 
 // ------------------------------------------------------------------ missions
-function Missions({ state, run, open, busy, goMap, setTab }) {
+function Missions({ state, run, open, busy, goMap, setTab, lessonSheetOpen }) {
   const P = state.catalog.points;
   const goals = state.parentGoals.filter((g) => g.status === "active" || g.status === "awaiting_approval");
   const active = state.missionsToday?.active || [];
@@ -668,6 +671,30 @@ function Missions({ state, run, open, busy, goMap, setTab }) {
     ...recentDone.map((m) => ({ ...m, id: m.key, done: true })),
     ...active.map((m) => ({ ...m, id: m.key, fresh: newKeys.includes(m.key), action: () => openDailyMission(m, { state, open, goMap, setTab }) })),
   ];
+  // The server supplies the ordered window; old offline snapshots use catalog order.
+  const nextLessons = state.lessons?.next || state.catalog.lessons.filter((l) => !state.child.lessonsDone.includes(l.id)).slice(0, 5);
+  const finishedLessons = state.lessons?.finished || state.catalog.lessons.filter((l) => state.child.lessonsDone.includes(l.id));
+  const previousLessons = useRef(nextLessons);
+  const [leavingLessons, setLeavingLessons] = useState([]);
+  const [newLessons, setNewLessons] = useState([]);
+  useEffect(() => {
+    if (lessonSheetOpen) { setLeavingLessons([]); setNewLessons([]); return; }
+    const before = previousLessons.current;
+    previousLessons.current = nextLessons;
+    const passed = before.filter((l) => finishedLessons.some((f) => f.id === l.id));
+    if (!passed.length) { setLeavingLessons([]); setNewLessons([]); return; }
+    setLeavingLessons(passed);
+    setNewLessons(nextLessons.filter((l) => !before.some((b) => b.id === l.id)).map((l) => l.id));
+    const timer = setTimeout(() => { setLeavingLessons([]); setNewLessons([]); }, 1400);
+    return () => clearTimeout(timer);
+  }, [lessonSheetOpen, nextLessons.map((l) => l.id).join(","), finishedLessons.map((l) => l.id).join(",")]);
+  const lessonCard = (l, i, done = false) => <button key={l.id} disabled={busy || (!done && leavingLessons.some((p) => p.id === l.id))} className={`lesson ${done ? "done" : leavingLessons.some((p) => p.id === l.id) ? "done mission-exit" : newLessons.includes(l.id) ? "mission-enter" : ""}`} style={{ "--tilt": `${[-1.2, 0.8, -0.6, 1, -0.9][i % 5]}deg` }} onClick={() => open("lesson", { lesson: l })}>
+    <span className="lesson-emoji"><Icon name={l.icon} size={40} /></span>
+    <strong>{l.title}</strong>
+    <small>{done ? "Review · no points" : leavingLessons.some((p) => p.id === l.id) ? "Finished!" : `${l.questions.length} questions · +${P.lesson}`}</small>
+    {!done && newLessons.includes(l.id) && <small className="mission-new">New!</small>}
+    {done && <span className="done-stamp" aria-hidden="true"><Icon name="check" size={18} /></span>}
+  </button>;
   const weekly = [
     { id: "budget", title: "Weekly budget challenge", pts: P.budget, done: Boolean(state.weekKey) && state.child.lastBudgetWeek === state.weekKey, action: () => open("budget") },
   ];
@@ -720,26 +747,18 @@ function Missions({ state, run, open, busy, goMap, setTab }) {
       )}
 
       <section>
-        <h2 className="hand section-title">Money lessons</h2>
-        <div className="lesson-grid">
-          {state.catalog.lessons.map((l, i) => {
-            const done = state.child.lessonsDone.includes(l.id);
-            return (
-              <button key={l.id} className={`lesson ${done ? "done" : ""}`} style={{ "--tilt": `${[-1.2, 0.8, -0.6, 1, -0.9][i]}deg` }} onClick={() => open("lesson", { lesson: l })}>
-                <span className="lesson-emoji"><Icon name={l.icon} size={40} /></span>
-                <strong>{l.title}</strong>
-                <small>{done ? "Review · no points" : `${l.questions.length} questions · +${P.lesson}`}</small>
-                {done && <span className="done-stamp" aria-hidden="true"><Icon name="check" size={18} /></span>}
-              </button>
-            );
-          })}
+        <h2 className="hand section-title">Next lessons</h2>
+        {!nextLessons.length && <p role="status">You finished every lesson — more are on the way!</p>}
+        <div className="lesson-grid" aria-live="polite">
+          {[...leavingLessons, ...nextLessons].map((l, i) => lessonCard(l, i))}
         </div>
+        {finishedLessons.length > 0 && <details className="finished-lessons"><summary>Finished · review, no points</summary><div className="lesson-grid">{finishedLessons.map((l, i) => lessonCard(l, i, true))}</div></details>}
       </section>
     </div>
   );
 }
 
-function LessonSheet({ lesson, run, close, busy }) {
+function LessonSheet({ lesson, run, close, busy, state }) {
   const [i, setI] = useState(0);
   const [answers, setAnswers] = useState([]);
   const [result, setResult] = useState(null);
@@ -763,7 +782,7 @@ function LessonSheet({ lesson, run, close, busy }) {
         <div className="quiz-result">
           <p className="big"><Icon name={result.passed ? "medal" : "heart"} size={64} /></p>
           <p className="hand big-text">{result.correct} of {result.total} right!</p>
-          <p>{result.firstTime === false ? "Nice review! No extra points for repeats." : result.passed ? `Lesson complete. +20 adventure points!` : "So close! Try again to earn your points."}</p>
+          <p>{result.firstTime === false ? "Nice review! No extra points for repeats." : result.passed ? `Lesson complete. +${state.catalog.points.lesson} adventure points!` : "So close! Try again to earn your points."}</p>
           <div className="btn-row center">
             {!result.passed && <button className="btn sage" onClick={() => { setI(0); setAnswers([]); setResult(null); }}>Try again</button>}
             <button className="btn honey" onClick={close}>Done</button>
@@ -1121,10 +1140,12 @@ function Friends({ state, run, busy }) {
         </section>
       )}
       {state.demo === false && !approved.length && <p>Add a friend with their code.</p>}
-      {pending.filter((f) => f.real && f.incoming && !f.childAccepted).map((f) => <section className="paper-card" key={f.id}>
-        <p>{f.name} wants to be friends.</p>
+      {pending.filter((f) => f.real && f.incoming).map((f) => <section className="paper-card" key={f.id}>
+        <p>{f.name ? `${f.name}${f.familyLabel ? ` (from ${f.familyLabel})` : ""} wants to be friends.` : "Friend request · grown-ups checking"}</p>
+        {!f.childAccepted && <>
         <button className="btn small sage" disabled={busy} onClick={() => run(`child/friend/${f.id}/respond`, { approve: true }, "You said yes! Your grown-ups will check too.")}>Accept friend</button>
-        <button className="btn small" disabled={busy} onClick={() => run(`child/friend/${f.id}/respond`, { approve: false }, "Request closed")}>Decline friend</button>
+        <button className="btn small" disabled={busy} onClick={() => run(`child/friend/${f.id}/respond`, { approve: false }, "Request closed")}>Decline friend</button></>}
+        {f.childAccepted && <p className="fine">You said yes · grown-ups checking</p>}
       </section>)}
       {requests.map((f) => <section className="paper-card" key={f.id}>
         <strong>Friend request</strong><p className="fine" role="status">{f.status === "pending_parent_b" ? "Sent to your friend's family" : "Waiting for your grown-up to say yes"}</p>
@@ -1186,7 +1207,7 @@ function Friends({ state, run, busy }) {
       )}
       <section className="paper-card">
         <h3 className="hand">Add a friend</h3>
-        <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Sent! Your grown-up needs to say yes before it reaches your friend.")) { setCode(""); setSent(true); setSentBefore(approved.map((f) => f.id)); try { sessionStorage.setItem(sentKey, "true"); sessionStorage.setItem(`${sentKey}:before`, JSON.stringify(approved.map((f) => f.id))); } catch {} } }}>
+        <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Sent! Your grown-ups are checking.")) { setCode(""); setSent(true); setSentBefore(approved.map((f) => f.id)); try { sessionStorage.setItem(sentKey, "true"); sessionStorage.setItem(`${sentKey}:before`, JSON.stringify(approved.map((f) => f.id))); } catch {} } }}>
           <label className="grow">Friend code<input required maxLength={state.demo === false ? 8 : 64} disabled={busy} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder={state.demo === false ? "8 letters and numbers" : "e.g. SAM-12"} /></label>
           <button className="btn small sage" disabled={busy}>Send</button>
         </form>
@@ -1198,49 +1219,6 @@ function Friends({ state, run, busy }) {
 }
 
 // ------------------------------------------------------------------ buddy
-function speakBrowser(text) {
-  if (!("speechSynthesis" in window)) return;
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1;
-  u.pitch = 1.1;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
-}
-
-let currentAudio = null;
-async function playBlob(blob) {
-  const url = URL.createObjectURL(blob);
-  currentAudio?.pause();
-  currentAudio = new Audio(url);
-  currentAudio.onended = () => URL.revokeObjectURL(url);
-  await currentAudio.play();
-}
-
-// Cartesia: get a short-lived token from our server, call Cartesia directly
-// from the browser; if that fails, use the server proxy; then browser speech.
-async function speak(text, mode, allowed = () => true) {
-  if (!allowed()) return;
-  const clean = text.replace(/[*_#]/g, "").slice(0, 500);
-  if (mode === "cartesia") {
-    try {
-      const { token, version, request } = await api("voice/token", {});
-      if (!allowed()) return;
-      const res = await fetch("https://api.cartesia.ai/tts/bytes", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Cartesia-Version": version, "Content-Type": "application/json" },
-        body: JSON.stringify({ ...request, transcript: clean }),
-      });
-      if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
-    } catch (err) { if ([401, 403, 423, 429].includes(err.status)) throw err; }
-    if (!allowed()) return;
-    try {
-      const res = await apiResponse("buddy/speak", { text: clean });
-      if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
-    } catch (err) { if ([401, 403, 423, 429].includes(err.status)) throw err; }
-  }
-  if (allowed()) speakBrowser(clean);
-}
-
 function Buddy({ state, run, busy, offline, startTalk, transcriptOnly, open }) {
   const chatRef = useRef(null);
   const chat = state.chat;
@@ -1257,12 +1235,11 @@ function Buddy({ state, run, busy, offline, startTalk, transcriptOnly, open }) {
         {chat.map((m, index) => (
           <div key={m.id} className={`msg ${m.role} ${m.auto ? "auto" : ""}`}>
             <small>{m.role === "user" ? "You" : state.child.bear.name}{m.auto ? " · Plan update" : ""}</small>
-            {m.text.split("\n").filter(Boolean).map((line, i) => <p key={i}>{line}</p>)}
+            <Markdown text={m.text} />
             {m.fallback && <button className="chip ask-again" disabled={busy || offline || !state.settings.buddyEnabled} onClick={() => {
               const question = chat.slice(0, index).reverse().find((message) => message.role === "user");
               if (question) run("buddy/chat", { text: question.text });
             }}>Ask {state.child.bear.name} again</button>}
-            {m.role === "assistant" && <button className="speak" disabled={busy || offline} onClick={() => run(() => speak(m.text, state.integrations.voice))} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
           </div>
         ))}
       </div>
@@ -1284,36 +1261,30 @@ function countdown(returnsAt, now) {
   return seconds ? `Back in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : "Any second now…";
 }
 
-function stopSpeaking() {
-  currentAudio?.pause();
-  window.speechSynthesis?.cancel();
-}
-
 function useMapleTalk({ state, run, busy, offline }) {
   const [isOpen, setOpen] = useState(false);
   const [bubble, setBubble] = useState("");
   const [bubbleId, setBubbleId] = useState(0);
   const [retryQuestion, setRetryQuestion] = useState(null);
   const showBubble = (text) => { setBubble(text); setBubbleId((id) => id + 1); };
-  const dismiss = () => { setBubble(""); setRetryQuestion(null); stopSpeaking(); };
+  const dismiss = () => { setBubble(""); setRetryQuestion(null); };
   const [mood, setMood] = useState(null);
-  const [muted, setMuted] = useState(() => store.get("mq_muted", "false") === "true");
   const turn = useRef(0);
   const inflight = useRef(false);
   const latest = useRef(null);
   const away = state.adventures.find((a) => a.status === "away");
   const previousTrip = useRef(away?.id);
-  latest.current = { offline, away, enabled: state.settings.buddyEnabled, muted };
+  latest.current = { offline, away, enabled: state.settings.buddyEnabled };
   const allowed = () => !latest.current.offline && !latest.current.away && latest.current.enabled;
   const close = () => { setOpen(false); dismiss(); };
   useEffect(() => {
     const returned = previousTrip.current && !away;
     previousTrip.current = away?.id;
-    if (returned) { setBubble(""); setMood(null); turn.current++; stopSpeaking(); }
+    if (returned) { setBubble(""); setMood(null); turn.current++; }
     if (!offline && !away && state.settings.buddyEnabled) return;
-    setOpen(false); setBubble(""); setMood(null); turn.current++; stopSpeaking();
+    setOpen(false); setBubble(""); setMood(null); turn.current++;
   }, [offline, away?.id, state.settings.buddyEnabled]);
-  useEffect(() => () => { turn.current++; stopSpeaking(); }, []);
+  useEffect(() => () => { turn.current++; }, []);
   const open = () => {
     if (offline) { showBubble("I can't chat while we're offline, but your postcards are right here!"); setMood("resting"); return; }
     if (away) { showBubble(`${state.child.bear.name} is on a trip!`); return; }
@@ -1324,7 +1295,7 @@ function useMapleTalk({ state, run, busy, offline }) {
     if (!text.trim() || busy || inflight.current || !allowed()) return false;
     inflight.current = true;
     const id = ++turn.current;
-    stopSpeaking(); setRetryQuestion(null); setMood("thinking"); showBubble("…");
+    setRetryQuestion(null); setMood("thinking"); showBubble("…");
     try {
       const result = await run("buddy/chat", { text: text.trim() });
       if (id !== turn.current || !allowed()) return false;
@@ -1332,18 +1303,10 @@ function useMapleTalk({ state, run, busy, offline }) {
       showBubble(result.reply);
       setRetryQuestion(result.fallback ? text.trim() : null);
       setMood(/Hmm|trusted grown-up|quick answer|ask.*again/i.test(result.reply) ? "resting" : "happy");
-      const maySpeak = () => id === turn.current && allowed() && !latest.current.muted;
-      if (maySpeak()) speak(result.reply, state.integrations.voice, maySpeak).catch(() => {});
       return true;
     } finally { inflight.current = false; }
   };
-  const toggleMute = () => {
-    const next = !muted;
-    latest.current.muted = next;
-    setMuted(next); store.set("mq_muted", String(next));
-    if (next) stopSpeaking();
-  };
-  return { isOpen, bubble, bubbleId, retryQuestion, tripId: away?.id || previousTrip.current, mood, muted, open, close, dismiss, send, toggleMute };
+  return { isOpen, bubble, bubbleId, retryQuestion, tripId: away?.id || previousTrip.current, mood, open, close, dismiss, send };
 }
 
 function SpeechBubble({ text, thinking, staticText, countdownText, onClose, retry, bearName, busy }) {
@@ -1362,7 +1325,7 @@ function SpeechBubble({ text, thinking, staticText, countdownText, onClose, retr
   return (
     <div className="bear-bubble" aria-live="polite" aria-atomic="true">
       <button className="round-btn bubble-close" onClick={onClose} aria-label="Close speech bubble"><Icon name="close" size={18} /></button>
-      <span className="sr-only">{text}</span><span className="bear-bubble-text" aria-hidden="true">{staticText ? text : shown || "\u00a0"}</span>{countdownText && <> <span className="trip-countdown">{countdownText}</span></>}
+      <span className="sr-only">{text}</span><div className="bear-bubble-text" aria-hidden="true"><Markdown text={staticText ? text : shown || "\u00a0"} /></div>{countdownText && <> <span className="trip-countdown">{countdownText}</span></>}
       {retry && <button className="chip ask-again" disabled={busy} onClick={retry}>Ask {bearName} again</button>}
     </div>
   );
@@ -1370,34 +1333,19 @@ function SpeechBubble({ text, thinking, staticText, countdownText, onClose, retr
 
 function TalkBar({ state, talk, busy, open }) {
   const [text, setText] = useState("");
-  const [listening, setListening] = useState(false);
   const input = useRef(null);
-  const recognition = useRef(null);
   const closeRef = useRef(talk.close);
   closeRef.current = talk.close;
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   useEffect(() => {
     const previous = document.activeElement;
     input.current?.focus();
     const escape = (e) => { if (e.key === "Escape") closeRef.current(); };
     window.addEventListener("keydown", escape);
-    return () => { recognition.current?.abort(); window.removeEventListener("keydown", escape); previous?.focus?.(); };
+    return () => { window.removeEventListener("keydown", escape); previous?.focus?.(); };
   }, []);
-  useEffect(() => { if (busy) { recognition.current?.abort(); setListening(false); } }, [busy]);
   const send = async (msg) => {
     if (await talk.send(msg)) setText((current) => current === msg ? "" : current);
     input.current?.focus();
-  };
-  const stop = () => { recognition.current?.stop(); setListening(false); };
-  const listen = () => {
-    if (!Recognition || busy || recognition.current) return;
-    const session = new Recognition();
-    recognition.current = session;
-    session.lang = "en-US";
-    session.interimResults = true;
-    session.onresult = (event) => setText(Array.from(event.results).map((r) => r[0].transcript).join(" ").slice(0, 500));
-    session.onerror = session.onend = () => { recognition.current = null; setListening(false); };
-    try { session.start(); setListening(true); } catch { recognition.current = null; setListening(false); }
   };
   const goal = currentSavingsGoal(state);
   const price = Math.max(100, Math.round(state.balances.spending * 0.8 / 100) * 100);
@@ -1406,20 +1354,13 @@ function TalkBar({ state, talk, busy, open }) {
     <section className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
       <div className="talk-links">
         <button className="link" onClick={() => open("chat")}>See our chat</button>
-        <button className="round-btn small" aria-label={talk.muted ? "Sound off" : "Sound on"} title={talk.muted ? "Sound off" : "Sound on"} aria-pressed={talk.muted} onClick={talk.toggleMute}><Icon name={talk.muted ? "speakerOff" : "speaker"} size={20} /></button>
         <button className="round-btn small" onClick={talk.close} aria-label="Close talk bar"><Icon name="close" size={16} /></button>
       </div>
       <div className="chips scroll">{suggestions.map((s) => <button type="button" key={s} className="chip" disabled={busy} onClick={() => send(s)}>{s}</button>)}</div>
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         <input ref={input} value={text} onChange={(e) => setText(e.target.value)} maxLength={500} placeholder={`Ask ${state.child.bear.name}…`} aria-label={`Message ${state.child.bear.name}`} />
-        {Recognition && <button type="button" className={`round-btn mic ${listening ? "listening" : ""}`} disabled={busy} aria-label="Hold to talk" aria-pressed={listening}
-          onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); listen(); }} onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop} onBlur={stop}
-          onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); if (!e.repeat) listen(); } }} onKeyUp={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); stop(); } }}>
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" fill="#E4AD58" stroke="currentColor" strokeWidth="2" /><path d="M6 10v2a6 6 0 0 0 12 0v-2M12 18v3M8 21h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-        </button>}
         <button className="btn honey" disabled={busy || !text.trim()}>Send</button>
       </form>
-      {listening && <p className="fine" role="status">Listening… let go when you're done.</p>}
     </section>
   );
 }

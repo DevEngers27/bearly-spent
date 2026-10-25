@@ -1,3 +1,4 @@
+import Markdown from "./Markdown.jsx";
 import { useEffect, useRef, useState } from "react";
 import { api, money, moneyShort, plural, formatTime, formatDateTime, postcardMetrics, useAction, GOAL_ICONS, goalIconName, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
@@ -108,7 +109,6 @@ function Integrations({ state }) {
     <dl className="integrations">
       <dt>Money Buddy</dt><dd>{i.buddy === "claude" ? "Claude (live)" : "Offline planner"}</dd>
       <dt>Bank</dt><dd>{i.bank === "nessie" ? "Simulated + Nessie sandbox" : "Simulated ledger"}</dd>
-      <dt>Voice</dt><dd>{i.voice === "cartesia" ? "Cartesia" : "Browser speech"}</dd>
     </dl>
   );
 }
@@ -208,7 +208,7 @@ function Overview({ state, onAddMoney, busy }) {
           <h2>Learning progress</h2>
           <table className="ptable ptable-summary" role="table">
             <tbody>
-              <tr><td>Money lessons passed</td><td>{learned.learningDone} ({state.child.lessonsDone.length}/5 unique)</td></tr>
+              <tr><td>Money lessons passed</td><td>{learned.learningDone} ({state.child.lessonsDone.length}/{state.catalog.lessons.length} unique)</td></tr>
               <tr><td>Savings actions</td><td>{learned.savingsActions}</td></tr>
               <tr><td>Days with money tracked</td><td>{learned.tracked}</td></tr>
               <tr><td>Weekly budgets planned</td><td>{learned.budgetsDone}{state.child.lastBudget && <small className="p-muted"> · {moneyShort(state.child.lastBudget.total)}: {Object.entries(state.child.lastBudget.allocations).map(([k, v]) => `${k} ${v / 100}`).join(" · ")}</small>}</td></tr>
@@ -466,7 +466,7 @@ function BuddyLog({ state, run, busy }) {
         {messages.map((m) => (
           <li key={m.id} className={m.role}>
             <b>{m.role === "user" ? state.child.name : m.auto ? "Buddy (automatic update)" : "Buddy"}</b>
-            <span>{m.text}</span>
+            <Markdown text={m.text} />
             {m.tools?.length > 0 && <small>Used: {[...new Set(m.tools)].join(", ")}</small>}
             {m.redacted?.length > 0 && <small className="neg">Removed: {m.redacted.join(", ")}</small>}
           </li>

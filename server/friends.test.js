@@ -127,8 +127,12 @@ for (const parentFirst of [true, false]) test(`G3.2 both kids and parents consen
   assert.equal(stateA.friends[0].status, "pending_parent_a");
   assert.equal(stateA.friends[0].name, undefined);
   assert.equal(stateA.friends[0].bear, undefined);
-  assert.equal((await b.browser.call("GET", "/api/state")).body.friends.length, 0);
-  assert.equal(pending(b, "friend_request"), undefined);
+  const anonymousB = (await b.browser.call("GET", "/api/state")).body;
+  assert.equal(anonymousB.friends.length, 1);
+  assert.equal(anonymousB.friends[0].name, undefined);
+  assert.equal(anonymousB.friends[0].familyLabel, undefined);
+  assert.ok(pending(b, "friend_request"));
+  assert.doesNotMatch(JSON.stringify((await b.browser.call("GET", "/api/parent/state")).body), /Ava|Smith/);
   if (parentFirst) assert.equal((await a.browser.call("POST", "/api/parent/family", { displayName: "The Smiths" })).status, 200);
   await parentYes(a);
   assert.match(pending(b, "friend_request").title, parentFirst ? /Ava \(from The Smiths\) wants to be friends with Ben/ : /Ava \(from Ava's family\) wants to be friends with Ben/);

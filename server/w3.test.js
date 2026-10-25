@@ -51,9 +51,9 @@ test("W3.4: lesson goal errors distinguish zero, some and all lessons passed", (
   for (const passed of [0, 3, LESSONS.length]) {
     const db = seed(Date.now());
     db.child.lessonsDone = LESSONS.slice(0, passed).map((l) => l.id);
-    const expected = passed === 0 ? /Pick up to 5 lessons/ : passed === LESSONS.length ? /has already passed all lessons — choose tasks/ : /has already passed 3 lessons — pick 2 or fewer/;
+    const expected = passed === 0 ? /Pick up to 15 lessons/ : passed === LESSONS.length ? /has already passed all lessons — choose tasks/ : /has already passed 3 lessons — pick 12 or fewer/;
     const before = structuredClone(db);
-    assert.throws(() => game.createParentGoal(db, { title: "Learn", type: "lessons", count: 6 - passed, reward: 5 }), (e) => e instanceof game.GameError && e.status === 400 && expected.test(e.message));
+    assert.throws(() => game.createParentGoal(db, { title: "Learn", type: "lessons", count: LESSONS.length + 1 - passed, reward: 5 }), (e) => e instanceof game.GameError && e.status === 400 && expected.test(e.message));
     assert.deepEqual(db, before);
     game.createParentGoal(db, { title: "Help", type: passed === LESSONS.length ? "tasks" : "lessons", count: Math.max(1, LESSONS.length - passed), reward: 5 });
   }

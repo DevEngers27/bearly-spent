@@ -88,7 +88,6 @@ export const actions = {
     if (!db.settings.buddyEnabled) throw new game.GameError("Money Buddy is turned off by your grown-up");
     return send(text);
   }),
-  speakText: action((db, body) => str(body.text, { max: 500 })),
   approval: action((db, body, approvalId) => game.decide(db, id(approvalId), bool(body.approve), optionalNote(body))),
   goal: action((db, body) => game.createParentGoal(db, {
     title: str(body.title), type: oneOf(body.type, ["lessons", "tasks", "save_actions"]),
