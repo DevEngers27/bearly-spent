@@ -309,22 +309,37 @@ async function runGuard(reply) {
   };
   // The classifier now and then returns no text at all (seen live on a plain allowance answer);
   // one retry keeps a good reply from being swapped for the fallback line. Still only "OK" passes.
+  let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await _internals.callGuard(params);
-    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
-    if (text) return text;
+    try {
+      const res = await _internals.callGuard(params);
+      const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+      if (text) return text;
+      lastError = null;
+    } catch (e) {
+      // Rate limits, overloads and network blips must not turn a good answer into the fallback line:
+      // one more try after a short pause. If that fails too, the caller fails closed.
+      lastError = e;
+      if (attempt === 0) await _internals.wait(500);
+    }
   }
+  if (lastError) throw lastError;
   return "";
 }
 
 async function screenReply(reply, canWrite = () => true, childId) {
+  let reason;
   try {
-    if (String((await _internals.runGuard(reply)) ?? "").trim() === "OK") return reply;
-  } catch {
-    // A failed check must never let an unchecked model reply through.
+    const verdict = String((await _internals.runGuard(reply)) ?? "").trim();
+    if (verdict === "OK") return reply;
+    reason = verdict ? `verdict:${verdict.slice(0, 20)}` : "verdict:empty";
+  } catch (e) {
+    // A failed check must never let an unchecked model reply through; say why, so a block can be told apart from a real verdict.
+    reason = `error:${e?.status || ""} ${e?.message || e}`.replace(/\s+/g, " ").trim().slice(0, 120);
+    console.error("[buddy] guard error:", e?.status || "", e?.message || e);
   }
   if (canWrite()) mutateChild(childId, (d) => {
-    if (canWrite()) audit(d, "buddy", "buddy_guard_blocked", reply.slice(0, 80));
+    if (canWrite()) audit(d, "buddy", "buddy_guard_blocked", reply.slice(0, 80), { reason });
   });
   return guardFallback(readChild(childId).child.bear.name);
 }
