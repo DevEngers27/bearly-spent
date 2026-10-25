@@ -830,7 +830,8 @@ function PostcardSheet({ id, state, close }) {
 // ------------------------------------------------------------------ friends
 function Friends({ state, run, busy }) {
   const approved = state.friends.filter((f) => f.status === "approved");
-  const pending = state.friends.filter((f) => f.status === "pending_parent");
+  const pending = state.friends.filter((f) => f.status.startsWith("pending_"));
+  const incomingTrades = state.trades.filter((t) => t.real && t.status === "pending" && !t.initiator && !t.childAccepted);
   const [sel, setSel] = useState(approved[0]?.id);
   const [code, setCode] = useState("");
   const [give, setGive] = useState("");
@@ -839,19 +840,31 @@ function Friends({ state, run, busy }) {
   const places = state.catalog.places;
   const nameOf = (id) => places[id]?.name || "Secret";
   const myCards = [...new Set(state.postcards.filter((p) => !p.lockedForTrade && places[p.defId]?.rarity !== "secret").map((p) => p.defId))];
-  const pendingTrade = state.trades.find((t) => t.status === "pending");
+  const pendingTrade = state.trades.find((t) => t.status === "pending" && t.friendId === friend?.id);
   const coopGoal = 6;
   const coop = (state.child.coopLearning || 0) + approved.reduce((s, f) => s + (f.coopLearning || 0), 0);
   return (
     <div className="friends">
       <p className="lede">Friends see your bear and postcards. They never see your money.</p>
-      {state.settings.coopChallenge && approved.length > 0 && (
+      {state.demo !== false && state.settings.coopChallenge && approved.length > 0 && (
         <section className="paper-card coop">
           <h3 className="hand">Team challenge: {coopGoal} money lessons together</h3>
           <div className="trail-bar"><span style={{ width: `${Math.min(100, (coop / coopGoal) * 100)}%` }} /></div>
           <p className="fine">{Math.min(coop, coopGoal)} of {coopGoal}{coop >= coopGoal ? ". You did it, team!" : ""}</p>
         </section>
       )}
+      {state.demo === false && !approved.length && <p>Add a friend with their code.</p>}
+      {pending.filter((f) => f.real && f.incoming && !f.childAccepted).map((f) => <section className="paper-card" key={f.id}>
+        <p>{f.name} wants to be friends.</p>
+        <button className="btn small sage" disabled={busy} onClick={() => run(`child/friend/${f.id}/respond`, { approve: true }, "You said yes! Your grown-ups will check too.")}>Accept friend</button>
+        <button className="btn small" disabled={busy} onClick={() => run(`child/friend/${f.id}/respond`, { approve: false }, "Request closed")}>Decline friend</button>
+      </section>)}
+      {incomingTrades.map((t) => <section className="paper-card" key={t.id}>
+        <h3 className="hand">A postcard swap for you</h3>
+        <p>You give {nameOf(t.give)} and get {nameOf(t.get)}.</p>
+        <button className="btn small sage" disabled={busy} onClick={() => run(`child/trade/${t.id}/respond`, { approve: true }, "You said yes! We'll check any grown-up approvals.")}>Accept swap</button>
+        <button className="btn small" disabled={busy} onClick={() => run(`child/trade/${t.id}/respond`, { approve: false }, "Swap closed")}>Decline swap</button>
+      </section>)}
       {approved.length > 1 && (
         <div className="friend-pills">
           {approved.map((f) => <button key={f.id} className={friend?.id === f.id ? "on" : ""} onClick={() => setSel(f.id)}>{f.name}</button>)}
@@ -875,7 +888,7 @@ function Friends({ state, run, busy }) {
           {pendingTrade ? (
             <p className="fine">Swap waiting: your {nameOf(pendingTrade.give)} for {nameOf(pendingTrade.get)}.{state.settings.requireTradeApproval ? " A grown-up will check it." : ""}</p>
           ) : (
-            <form className="trade-form" onSubmit={async (e) => { e.preventDefault(); if (await run("child/trade", { friendId: friend.id, give, get }, state.settings.requireTradeApproval ? "Swap sent! A grown-up will check it." : "Swap done!")) { setGive(""); setGet(""); } }}>
+            <form className="trade-form" onSubmit={async (e) => { e.preventDefault(); if (await run("child/trade", { friendId: friend.id, give, get }, friend.real ? "Swap sent! Your friend can choose next." : state.settings.requireTradeApproval ? "Swap sent! A grown-up will check it." : "Swap done!")) { setGive(""); setGet(""); } }}>
               <label>You give
                 <select value={give} onChange={(e) => setGive(e.target.value)} required>
                   <option value="">Pick one of yours</option>
@@ -888,7 +901,7 @@ function Friends({ state, run, busy }) {
               <label>You get
                 <select value={get} onChange={(e) => setGet(e.target.value)} required>
                   <option value="">Pick one of {friend.name}'s</option>
-                  {[...new Set(friend.postcards)].map((d) => <option key={d} value={d}>{nameOf(d)}</option>)}
+                  {[...new Set(friend.postcards)].filter((d) => places[d] && !places[d].hidden && places[d].rarity !== "secret").map((d) => <option key={d} value={d}>{nameOf(d)}</option>)}
                 </select>
               </label>
               <button className="btn honey" disabled={busy}>Propose swap</button>
@@ -902,11 +915,11 @@ function Friends({ state, run, busy }) {
       )}
       <section className="paper-card">
         <h3 className="hand">Add a friend</h3>
-        <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Request sent to your grown-up!")) setCode(""); }}>
-          <label className="grow">Invitation code<input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. SAM-12" /></label>
+        <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Request sent")) setCode(""); }}>
+          <label className="grow">Friend code<input required maxLength={state.demo === false ? 8 : 64} disabled={busy} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder={state.demo === false ? "8 letters and numbers" : "e.g. SAM-12"} /></label>
           <button className="btn small sage" disabled={busy}>Send</button>
         </form>
-        {pending.length > 0 && <p className="fine">Waiting for a grown-up: {pending.map((f) => f.name).join(", ")}</p>}
+        {pending.length > 0 && <p className="fine">Friend request waiting. Both friends and their grown-ups need to say yes.</p>}
       </section>
     </div>
   );

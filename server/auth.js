@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { database, transaction } from "./db.js";
-import { createChild, childRecord, listChildren, seed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
+import { CODE_ALPHABET, createChild, childRecord, listChildren, seed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
 import { GameError } from "./domain.js";
 import { object, str } from "./validate.js";
 import { takeLimit, resetLimit, MINUTE } from "./limits.js";
@@ -166,7 +166,7 @@ export function createLink(context, childId, now = Date.now()) {
   return transaction((db) => {
     // Keep spent/expired codes as tombstones so a mistyped code has distinct copy.
     db.prepare("UPDATE kid_links SET expires_at = ? WHERE child_id = ? AND used_at IS NULL AND expires_at > ?").run(now, childId, now);
-    const alphabet = "BCDFGHJKMNPQRTVWXY346789";
+    const alphabet = CODE_ALPHABET;
     for (let i = 0; i < 10; i++) {
       const code = Array.from({ length: 6 }, () => alphabet[crypto.randomInt(alphabet.length)]).join("");
       const result = db.prepare("INSERT OR IGNORE INTO kid_links (code, family_id, child_id, expires_at) VALUES (?, ?, ?, ?)")

@@ -2,7 +2,7 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readChild, mutateChild, resetChild, subscribe, childIdFor, childrenWithDueWork, createChild, DEMO_FAMILY_ID } from "./store.js";
+import { readChild, mutateChild, resetChild, subscribe, childIdFor, childrenWithDueWork, createChild, friendCode, childRecord, DEMO_FAMILY_ID } from "./store.js";
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
 import { runGuardian, injectDuplicatePosting, reconcileNow } from "./guardian.js";
@@ -49,6 +49,7 @@ export function runChildAction(childId, fn, trigger, now = Date.now()) {
 export function tick(now = Date.now()) {
   const due = childrenWithDueWork(now);
   for (const childId of due) {
+    game.expireSocialTrades(childId, now);
     runChildAction(childId, (db) => game.finalizeAdventures(db, now), "tick", now);
   }
   return due;
@@ -72,6 +73,8 @@ export function childView(db, now = Date.now()) {
   const week = weekKey(now, db.settings.timezone);
   return {
     version: db.version,
+    demo: game.isDemoChild(db),
+    friendCode: childIdFor(db) ? friendCode(childIdFor(db)) : null,
     now,
     dayKey: day,
     weekKey: week,
@@ -89,12 +92,12 @@ export function childView(db, now = Date.now()) {
     adventures: db.adventures.slice(-10).reverse().map(({ destId, ...adventure }) => adventure.status === "away" ? adventure : { ...adventure, destId }),
     postcards: db.postcards,
     metrics: { postcards: game.postcardMetrics(db) },
-    friends: db.friends.filter((f) => f.status !== "declined").map(game.friendView),
-    trades: db.trades.slice(-10).reverse(),
-    pendingRequests: db.approvals.filter((a) => a.status === "pending" && ["spend", "extra", "reward", "task", "friend", "trade"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.title })),
+    friends: game.socialFriendsView(db),
+    trades: game.socialTradesView(db),
+    pendingRequests: game.socialApprovalsView(db).filter((a) => a.status === "pending" && ["spend", "extra", "reward", "task", "friend", "friend_request", "trade"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.real && a.kind === "friend_request" ? "Friend request waiting for grown-ups" : a.title })),
     plan: db.buddy.plan,
     chat: db.buddy.chat.slice(-30),
-    settings: db.settings,
+    settings: { ...db.settings, coopChallenge: game.isDemoChild(db) && db.settings.coopChallenge },
     catalog: {
       // Secrets stay out of the payload until discovered.
       places: placesView(db, now),
@@ -127,7 +130,7 @@ export function parentView(db, before) {
     chatNextBefore: end > chat.length ? chat[0]?.id : null,
     accounts: db.accounts,
     allowance: db.allowance,
-    approvals: db.approvals.slice().reverse(),
+    approvals: game.socialApprovalsView(db).slice().reverse(),
     notifications: db.notifications.filter((n) => n.to === "parent").slice().reverse()
       .filter((n, i, all) => !n.ref || all.findIndex((other) => other.ref === n.ref) === i).slice(0, 30),
     transactions: db.transactions.slice(-60).reverse(),
@@ -135,7 +138,7 @@ export function parentView(db, before) {
     tracking: db.tracking.slice(-20).reverse(),
     walletTransactions: db.transactions.filter((t) => ["wallet_in", "wallet_spend"].includes(t.kind)).slice(-60).reverse(),
     walletLastPing: db.walletLastPing || null,
-    friends: db.friends,
+    friends: game.socialFriendsView(db),
   };
 }
 
@@ -174,8 +177,8 @@ register("GET", "/api/parent/children/:id/devices", "parent", (req, ctx, res, no
 register("DELETE", "/api/parent/children/:id/devices/:sessionId", "parent", (req, ctx) => auth.unlinkDevice(ctx, req.params.id, req.params.sessionId));
 register("POST", "/api/parent/children", "parent", (req, ctx) => createChild(ctx.family.id, req.body));
 register("POST", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.createLink(ctx, req.params.id, now));
-register("GET", "/api/state", "child", (req, ctx) => ({ childId: ctx.childId, ...childView(readChild(ctx.childId)) }));
-register("GET", "/api/parent/state", "parent", (req, ctx) => ({ childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before) }));
+register("GET", "/api/state", "child", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...childView(readChild(ctx.childId), now) }; });
+register("GET", "/api/parent/state", "parent", (req, ctx, res, now) => { game.expireSocialTrades(ctx.childId, now); return { childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before) }; });
 register("GET", "/api/child/wallet/token", "parent", (req, ctx, res, now) => auth.walletToken(ctx, { now }));
 register("POST", "/api/child/wallet/token", "parent", (req, ctx, res, now) => {
   actions.walletPing(null, req.body);
@@ -231,11 +234,32 @@ register("GET", "/api/stream", "child", stream);
 const childActions = {
   save: "save", spend: "spend", journal: "journal", extra: "extra", lesson: "lesson", budget: "budget",
   "cosmetic/buy": "buyCosmetic", "cosmetic/equip": "equip", "bear/name": "renameBear",
-  friend: "friend", trade: "trade", greet: "greet",
 };
 for (const [path, action] of Object.entries(childActions)) {
   register("POST", `/api/child/${path}`, "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now));
 }
+for (const action of ["friend", "trade", "greet"]) {
+  register("POST", `/api/child/${action}`, "child", (req, ctx, res, now) => {
+    game.expireSocialTrades(ctx.childId, now);
+    const d = readChild(ctx.childId);
+    const practice = ctx.family.id === DEMO_FAMILY_ID && (action === "friend"
+      ? typeof req.body?.code === "string" && /-/.test(req.body.code)
+      : d.friends.some((f) => f.id === req.body?.friendId && !f.real));
+    if (practice) return runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now);
+    return game.runSocialAction(ctx.childId, action, req.body, undefined, now);
+  });
+}
+register("POST", "/api/child/friend/:id/respond", "child", (req, ctx, res, now) => game.runSocialAction(ctx.childId, "friendRespond", req.body, req.params.id, now));
+register("POST", "/api/child/trade/:id/respond", "child", (req, ctx, res, now) => game.runSocialAction(ctx.childId, "tradeRespond", req.body, req.params.id, now));
+register("POST", "/api/parent/friend/:id/remove", "parent", (req, ctx, res, now) => game.runSocialAction(ctx.childId, "unfriend", req.body, req.params.id, now));
+register("POST", "/api/parent/children/:id/friend-code", "parent", (req, ctx) => {
+  if (childRecord(req.params.id)?.family_id !== ctx.family.id) throw new GameError("Child not found", 404);
+  return mutateChild(req.params.id, (d) => {
+    const code = friendCode(req.params.id, true);
+    game.audit(d, "parent", "friend_code_regenerated", "Friend code replaced");
+    return { friendCode: code };
+  });
+});
 // Surprise destinations stay private in action responses as well as state.
 for (const action of ["trip", "adventure"]) {
   register("POST", `/api/child/${action}`, "child", (req, ctx, res, now) => {
@@ -272,6 +296,12 @@ register("POST", "/api/voice/token", "child", async (req, ctx, res, now) => {
 for (const action of ["approval", "goal", "mission", "allowance", "settings", "savingsGoal", "fundingAdd"]) {
   const path = action === "fundingAdd" ? "funding/add" : action === "savingsGoal" ? "savings-goal" : action === "approval" ? "approval/:id" : action;
   register("POST", `/api/parent/${path}`, "parent", (req, ctx, res, now) => {
+    if (action === "approval") {
+      const a = readChild(ctx.childId).approvals.find((a) => a.id === req.params.id);
+      if (a?.real) return game.runSocialAction(ctx.childId, "approval", req.body, req.params.id, now);
+      // Foreign social approval IDs have the same response as unknown IDs.
+      if (!a) throw new GameError("Request not found", 404);
+    }
     const out = runChildAction(ctx.childId, (db) => actions[action](db, req.body, req.params.id), action, now);
     if (action === "settings" && !readChild(ctx.childId).settings.buddyEnabled) cancelReplan(ctx.childId);
     return out;

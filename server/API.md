@@ -28,7 +28,7 @@ default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https
 
 ## Accounts, pairing and PIN
 
-`ChildSummary` is `{id, name, age, bearName, version}`.
+`ChildSummary` is `{id, name, age, bearName, version, friendCode, friends?}`; friend summaries are described under G3 below.
 
 `Me` is:
 
@@ -64,7 +64,7 @@ A paired child receives only its own summary in `children`; a parent receives al
 | `GET /api/parent/children/:id/devices` | Parent | No fields | Array of active paired child devices: `{id,created_at,last_seen,name}`. Times in Unix milliseconds; `name` is a short user-agent description. IDs are separate opaque digests, not session tokens or stored credential hashes. |
 | `DELETE /api/parent/children/:id/devices/:sessionId` | Parent | No fields | `{ok:true}`; revokes only that child's device within this family. Unknown child/device: 404. Requires PIN unlock when set. |
 
-New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Each child currently has its own funding account; shared family funding is a follow-up. New non-demo families cannot add funding through the current UI/API because top-ups are demo-only; configuring allowance alone does not fund it. The simulated `DIRECTORY` friend codes remain available through `/api/child/friend`; these are practice friends, not real multiplayer. `friendView` is unchanged and never contains money.
+New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Each child currently has its own funding account; shared family funding is a follow-up. New non-demo families cannot add funding through the current UI/API because top-ups are demo-only; configuring allowance alone does not fund it. The simulated `DIRECTORY` friend codes remain available only to the demo family. Real families use the G3 friend-code flow below; friend views never contain money.
 
 PIN is an optional quick switch **inside a parent-authenticated device**, not a way to obtain a parent session on a paired child device. If a PIN is already set, changing it requires an unlocked parent session. A new password login starts locked until `/api/parent/unlock`. Child routes remain available from that parent session.
 
@@ -137,7 +137,7 @@ All routes below have **Child** auth and support parent `?child=` selection. Unl
 | `POST /api/child/cosmetic/buy` | `{id}` | `{ok:true}`; catalog item must be purchasable and affordable. |
 | `POST /api/child/cosmetic/equip` | `{kind,value}` | `{ok:true}`; owned item ID; null unequips except background requires a scene. |
 | `POST /api/child/bear/name` | `{name}` | `{ok:true}`; 1–24 trimmed characters. |
-| `POST /api/child/friend` | `{code}` | New public `friendView` record, pending parent approval. Practice codes from `DIRECTORY` remain supported. |
+| `POST /api/child/friend` | `{code}` | Real-family anonymous request receipt (see G3 below). Demo practice codes return a pending public friend view. |
 | `POST /api/child/trade` | `{friendId,give,get}` | Trade record; catalog postcard IDs, approved friend, owned unlocked copy; secret postcards cannot be traded. |
 | `POST /api/child/greet` | `{friendId,index}` | `{ok:true}`; predefined greeting index 0 through `catalog.greetings.length-1`, approved friend. |
 | `POST /api/child/notifications/read` | No fields | `{ok:true}`; marks only child notifications read. |
@@ -230,3 +230,59 @@ Nessie defaults to `https://api.nessieisreal.com`. With `NESSIE_API_KEY` configu
 Passwords and PINs use `scrypt$32768$8$1$<16-byte-salt-base64>$<64-byte-key-base64>` with constant-time verification. The registration timezone is stored on the SQLite family row and returned by `/api/auth/me`. Game/calendar rules currently use each child document's `settings.timezone`, falling back to the server zone. The parent UI initializes a missing child setting from the browser and edits it through `/api/parent/settings`; changing it does not update the family row or siblings.
 
 The old `POST /api/parent/login` PIN-to-token flow and `x-parent-token` header are removed. The client implements account login/register, cookie auth, pairing, active-child selection, PIN unlock/reset, device unlinking and family-wide logout using the routes above.
+
+## G3 real friends and postcard swaps
+
+Every saved child has a stable eight-character `friendCode` using
+`BCDFGHJKMNPQRTVWXY346789`. This is separate from six-character, single-use
+kid-device pairing codes. `ChildState.friendCode` and each child summary expose
+it; child summaries also include `friends: [{id,name,status}]` for parent Children
+controls. `ChildState.demo` identifies the demo family. Practice friends and team
+challenges are available only in the demo; real families start with no friends.
+
+| Method and route | Auth | Request and response |
+| --- | --- | --- |
+| `POST /api/parent/children/:id/friend-code` | Parent | No fields. Replaces this child's friend code; `{friendCode}`. Old code stops working immediately. Another family's child: 404. |
+| `POST /api/child/friend/:id/respond` | Child | `{approve:boolean}`. Recipient child's yes/no to a friend request, `{ok:true,status}`. |
+| `POST /api/child/trade/:id/respond` | Child | `{approve:boolean}`. Recipient child's yes/no to a postcard swap, `{ok:true,status}`. |
+| `POST /api/parent/friend/:id/remove` | Parent | No fields. Ends the selected child's friendship for both parties and cancels pending swaps, `{ok:true}`. |
+
+`POST /api/child/friend {code}` sends a real friend request and always returns
+`{ok:true,message:"Request sent"}` for a syntactically valid string, including
+unrecognized/self/duplicate codes. No target name, family, bear or postcards are
+returned. The initiating child's submission counts as their yes. Its parent sees
+a `friend_request` approval with an anonymous title. After that parent approves,
+state advances from `pending_parent_a` to `pending_parent_b`; the recipient
+parent sees the requester's first name and family label, and the recipient kid
+sees only the first name and Accept/Decline. Recipient kid and parent can say yes
+in either order. Both parents use `POST /api/parent/approval/:id`. All four yeses
+are necessary for `approved`. Either decline closes both records with only
+“didn't go through” notices, without sharing private reasons.
+
+Pending friend views expose `{id,real:true,status,incoming,childAccepted}` plus
+only the incoming requester's first name. Approved views add `name` (first name),
+`bear` (cosmetic slots only), `postcards` (place IDs, repeated for counts), and
+`greetings`; they never expose money, family name, peer child IDs or friend codes.
+Parent state uses these same friend views. Recipient pending requests are hidden
+until the initiating parent approves. Friend approval titles in child state omit
+family labels.
+
+`POST /api/child/trade {friendId,give,get}` requires an accepted friendship and
+unlocked ordinary postcard copies in both documents. It reserves both copies and
+creates mirrored pending records. Trade views include local `give/get`,
+`initiator`, `childAccepted`, `parentRequired`, `parentAccepted`, `expiresAt`, and
+status; private peer/copy IDs are omitted. The recipient kid must accept first;
+then each family whose trade approval setting was enabled when proposed or at a later consent step gets a
+`trade` parent approval. Parent decisions can arrive in either order. Final
+approval exchanges cards, writes both audits, and notifies both kids in one
+SQLite transaction. Failure rolls back both documents and emits no store events.
+Swaps expire seven days after proposal; tick, state reads, and new social actions
+release both locks and close pending approvals. Declines and unfriending also
+release both locks. Secret postcards cannot be given or received in a swap.
+
+`POST /api/child/greet {friendId,index}` delivers only an indexed catalog greeting
+to the accepted friend, with 20 messages per rolling 24 hours per friendship
+(shared across both directions). Excess is 429. Removed friendships cannot trade
+or send greetings. Unknown or foreign request/friend/trade IDs return 404;
+paired kid sessions cannot approve parent steps (403). Cross-family mutations
+publish each changed child's version to its own family stream after commit.

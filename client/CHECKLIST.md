@@ -78,3 +78,17 @@ Socket-free regressions cover named-bear rendering, bubble structure/CSS, lockou
 - [ ] **W3.5 — Session cleanup:** Visit Album, open cards and mute speech, then unlink that kid device or Sign out everywhere. After its next authenticated 401, navigation, reveal/album receipts and mute keys are removed alongside identity/state. Re-link: Home opens. An ordinary reload of the same valid session retains navigation; failed global sign-out retains it too.
 - [ ] **W3.6 — Amount keyboard:** On a phone, check Add money, Allowance, purchase limit, goal reward, savings target, Save/Spent and Send via Apple Cash: each amount input offers the decimal keyboard.
 - [ ] **W3.7/8 — Demo/docs:** On a fresh demo follow the README's payday step before Post a duplicate. Accounts explains Add money; Known limitations links the Apple Cash Shortcut guide and explains tracking boundaries.
+
+## G3 real friends (browser checks pending)
+
+Socket-free coverage: `server/friends.test.js` and `client/g3.test.mjs`. The checks
+below require two real families in separate browser profiles and a paired kid
+device; automated rendering tests do not establish actual browser behavior.
+
+- [ ] Children shows eight-character Friend code separately from the expiring six-character Kid code. Replace an unselected sibling's friend code: only their code changes, the old code sends no new request, and device pairing remains separate.
+- [ ] A sends B's code: only “Request sent” and an anonymous pending request appear. A's parent approves; B's parent sees the first name/family label, while B's kid sees only the first name. Accept as kid then parent, and repeat with parent then kid. Both children become friends only after every yes. Repeat with each participant declining: both sides see only “didn't go through”.
+- [ ] Friends shows current bear cosmetics and postcard counts, with no balances or family labels. Real families have no Maya/Sam/Zoe/Leo practice friends and no Team challenge or team-setting switch. Demo retains practice friends and simulated team progress.
+- [ ] Propose a swap: both physical copies become unavailable for another swap; B sees their own give/get orientation. Accept as B's kid, then approve each required parent in either order. With neither family's approval switch enabled, kid acceptance completes it. Both albums, notices, and audit logs update. Secret postcards never appear as trade choices.
+- [ ] Decline as kid or parent, expire after seven days, and unfriend during a pending swap: both locks release and parent reminders close. With both family pages open, changes arrive through SSE without a manual reload. A failed request preserves form input.
+- [ ] Send preset greetings in both directions; the 21st shared message within 24 hours is refused kindly. Unfriend from either Children or Friends & privacy: both views remove the friendship, swaps cancel, and greeting/trade attempts fail. Kid devices cannot perform code replacement, unfriend, or parent approval actions.
+- [ ] At 390×844 and with keyboard only, check request/swap decisions, eight-character codes, parent Children cards, focus, disabled controls during network delay, and the empty Friends state.
