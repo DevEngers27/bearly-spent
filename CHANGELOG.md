@@ -13,7 +13,14 @@ merged by Claude (see `docs/VERSIONING.md`).
   codes, PIN lockout, multi-child, per-family SSE, rate limits, security
   headers (`fix/b5a-accounts-server`, merged into `wave2`; client in
   `fix/b5b-accounts-client`).
-- `feat/f5-bear-fit` — accessory anchors tuned per pose.
+
+## [0.3.2] — 2026-10-24
+
+### Fixed
+- Hats sit on the crown, scarves and the camera on the neck, outfits at the
+  collar, held items in the paw; accessories now also appear in the
+  three-quarter, side and back poses (walking away, return reveal) instead
+  of vanishing. Items whose art cannot work in a pose are hidden there.
 
 ## [0.3.1] — 2026-10-24
 
@@ -94,7 +101,8 @@ First hardening wave after the eight-way review. 148 server tests and
 
 Baseline: the Cal Hacks demo as reviewed. 11 rule tests.
 
-[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/DevEngers27/moneyquest/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/DevEngers27/moneyquest/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/DevEngers27/moneyquest/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/DevEngers27/moneyquest/compare/v0.1.0...v0.2.0
