@@ -210,8 +210,8 @@ export default function App() {
       <a className="skip" href="#main">Skip to content</a>
       {me?.role === "parent" && view === "parent" && (
         <header className="appbar">
-          <div className="brand"><img className="brand-mark" src="/bear/poses/bear_front.png" alt="" /><span>MoneyQuest</span><span className="brand-sub">for grown-ups</span></div>
-          <label className="child-switcher">Child<select value={me.activeChild.id} onChange={(e) => selectChild(e.target.value)}>{me.children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}</select></label>
+          <div className="brand"><img className="brand-mark" src="/bear/poses/bear_front.png" alt="" /><span>MoneyQuest</span><span className="brand-sub">for grown-ups</span><strong className="parent-account-label">{me.activeChild.name}'s account</strong></div>
+          <label className={`child-switcher${me.children.length === 1 ? " only-child" : ""}`}><span>Child</span><select aria-label="Child" value={me.activeChild.id} onChange={(e) => selectChild(e.target.value)}>{me.children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}</select></label>
           {parentOffline && <span className="offline-pill" role="status">Offline</span>}
           <div className="appbar-actions">
             <button className="pbtn" disabled={lockBusy} onClick={() => leaveParent()}>Kid mode</button>

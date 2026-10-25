@@ -19,6 +19,7 @@ const ART = {
 };
 
 const PATHS = {
+  more: <>{[5, 12, 19].map((x) => <circle key={x} cx={x} cy="12" r="2" {...s} fill={C.honey} />)}</>,
   home: <><path d="M3.5 11.5 12 4l8.5 7.5" {...s} fill="none" /><path d="M6 10v9.5h12V10" {...s} fill={C.cream} /><path d="M10 19.5v-5h4v5" {...s} fill={C.rose} /></>,
   star: <path d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" {...s} fill={C.honey} />,
   mapNav: <><path d="M3.5 6.5 9 4l6 2.5 5.5-2.5v13.5L15 20l-6-2.5-5.5 2.5z" {...s} fill={C.cream} /><path d="M9 4v13.5M15 6.5V20" {...s} /></>,

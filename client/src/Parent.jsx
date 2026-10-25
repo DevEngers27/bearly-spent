@@ -3,6 +3,8 @@ import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAct
 import { BearFigure, bearScale } from "./Bear.jsx";
 import ChildProfileForm from "./ChildProfileForm.jsx";
 import Account from "./Account.jsx";
+import { Icon } from "./Icons.jsx";
+import { useParentNavigation, MONEY_SECTIONS, KIDS_SECTIONS, MORE_SECTIONS, PARENT_TABS } from "./ParentNavigation.js";
 
 const SECTIONS = [
   ["inbox", "Approvals"],
@@ -23,9 +25,7 @@ const BROWSER_TIMEZONE = Intl.DateTimeFormat("en-US").resolvedOptions().timeZone
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
 export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignOutAll, offline }) {
-  const [sec, setSec] = useState("inbox");
-  const [opened, setOpened] = useState(["inbox"]);
-  const selectSection = (id) => { setSec(id); setOpened((previous) => previous.includes(id) ? previous : [...previous, id]); };
+  const { mobile, sec, opened, tab, selectSection, selectTab, backToMore } = useParentNavigation();
   const [fundingFocus, setFundingFocus] = useState(0);
   const onAddMoney = () => { selectSection("allowance"); setFundingFocus((current) => current + 1); };
   const [run, pendingAction] = useAction(toast, offline);
@@ -41,10 +41,18 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
     run("parent/settings", { timezone: BROWSER_TIMEZONE });
   }, [state.settings.timezone, run]);
   const pending = state.approvals.filter((a) => a.status === "pending" || (a.kind === "goal_purchase" && a.status === "approved" && !a.paidTxnId));
-  const ctx = { state, run, busy, demo: me?.demo === true, onAddMoney };
+  const ctx = { state, run, busy, demo: me?.demo === true, onAddMoney, mobile };
+  const main = useRef(null);
+  useEffect(() => {
+    if (!mobile) return;
+    window.scrollTo({ top: 0 });
+    if (sec !== "allowance") main.current?.focus({ preventScroll: true });
+  }, [mobile, sec]);
+  const segments = tab === "money" ? MONEY_SECTIONS : tab === "kids" ? KIDS_SECTIONS : null;
+  const pushed = mobile && MORE_SECTIONS.some(([id]) => id === sec);
   return (
     <div className="parent">
-      <aside className="p-nav">
+      {!mobile && <aside className="p-nav">
         <div className="p-family">
           <BearFigure bear={state.child.bear} size={44} />
           <div><strong>{state.child.name}'s account</strong><small>Managed by {state.family.parentName}</small></div>
@@ -58,8 +66,19 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
           ))}
         </nav>
         <Integrations state={state} />
-      </aside>
-      <main className="p-main" id="main">
+      </aside>}
+      <main className={`p-main${pushed ? " p-pushed" : ""}`} id="main" ref={main} tabIndex={-1}>
+        {mobile && segments && <nav className="p-segments" aria-label={tab === "money" ? "Money sections" : "Kids sections"}>
+          {segments.map(([id, label]) => <button key={id} className={sec === id ? "on" : ""} aria-current={sec === id ? "page" : undefined} onClick={() => selectSection(id)}>{label}</button>)}
+        </nav>}
+        {pushed && <button className="p-back" onClick={backToMore}><span aria-hidden="true">‹</span> Back to More</button>}
+        {mobile && sec === "more" && <div className="p-stack">
+          <h1>More</h1>
+          <nav className="p-more" aria-label="More sections">
+            {MORE_SECTIONS.map(([id, label]) => <button key={id} onClick={() => selectSection(id)}>{label}<span aria-hidden="true">›</span></button>)}
+          </nav>
+          <section className="p-card p-status"><h2>Integrations & status</h2><Integrations state={state} /></section>
+        </div>}
         {sec === "inbox" && <Inbox {...ctx} pending={pending} />}
         {sec === "overview" && <Overview {...ctx} />}
         {opened.includes("goals") && <div hidden={sec !== "goals"}><Goals {...ctx} /></div>}
@@ -72,6 +91,12 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
         {sec === "account" && <Account key={JSON.stringify([me.user, me.family.displayName])} me={me} refreshMe={refreshMe} run={run} busy={busy} />}
         {sec === "security" && <Security me={me} refreshMe={refreshMe} onSignOut={onSignOut} onSignOutAll={onSignOutAll} {...ctx} />}
       </main>
+      {mobile && <nav className="p-tabs" aria-label="Parent tabs">
+        {PARENT_TABS.map(([id, label, icon]) => <button key={id} className={tab === id ? "on" : ""} aria-current={tab === id ? "page" : undefined} aria-label={id === "inbox" && pending.length ? `Inbox, ${pending.length} pending` : label} onClick={() => selectTab(id)}>
+          <span className="p-tab-icon"><Icon name={icon} size={24} art={false} />{id === "inbox" && pending.length > 0 && <span className="badge">{pending.length}</span>}</span>
+          <span>{label}</span>
+        </button>)}
+      </nav>}
     </div>
   );
 }
@@ -87,12 +112,12 @@ function Integrations({ state }) {
   );
 }
 
-function Inbox({ state, run, demo, pending, busy, onAddMoney }) {
+function Inbox({ state, run, demo, pending, busy, onAddMoney, mobile }) {
   const notifications = state.notifications.filter((n) => !n.read);
   const decided = state.approvals.filter((a) => a.status !== "pending").slice(0, 8);
   return (
     <div className="p-stack">
-      <h1>Approvals</h1>
+      <h1>Approvals{mobile && pending.length > 0 && <span className="badge">{pending.length}</span>}</h1>
       {pending.length === 0 && <p className="empty">Nothing waiting — nice!</p>}
       <ul className="approval-list">
         {pending.map((a) => (
@@ -125,13 +150,13 @@ function Inbox({ state, run, demo, pending, busy, onAddMoney }) {
       {decided.length > 0 && (
         <>
           <h2>Recently decided</h2>
-          <table className="ptable">
+          <table className="ptable" role="table">
             <tbody>
               {decided.map((a) => (
                 <tr key={a.id}>
-                  <td>{KIND_LABEL[a.kind] || a.kind}</td>
-                  <td>{a.title}</td>
-                  <td className={a.status === "approved" ? "pos" : "neg"}>{a.status}{a.paidTxnId ? " · paid" : ""}</td>
+                  <td data-label="Kind"><span className="p-cell-value">{KIND_LABEL[a.kind] || a.kind}</span></td>
+                  <td data-label="Request"><span className="p-cell-value">{a.title}</span></td>
+                  <td data-label="Status" className={a.status === "approved" ? "pos" : "neg"}><span className="p-cell-value">{a.status}{a.paidTxnId ? " · paid" : ""}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -170,7 +195,7 @@ function Overview({ state, onAddMoney, busy }) {
       <div className="p-two">
         <section>
           <h2>Learning progress</h2>
-          <table className="ptable">
+          <table className="ptable ptable-summary" role="table">
             <tbody>
               <tr><td>Money lessons passed</td><td>{learned.learningDone} ({state.child.lessonsDone.length}/5 unique)</td></tr>
               <tr><td>Savings actions</td><td>{learned.savingsActions}</td></tr>
@@ -196,7 +221,7 @@ const Figure = ({ label, value, sub }) => (
   <div className="p-figure"><span>{label}</span><b>{value}</b>{sub && <small>{sub}</small>}</div>
 );
 
-function Goals({ state, run, busy }) {
+function Goals({ state, run, busy, mobile }) {
   const remaining = state.catalog.lessons.filter((l) => !state.child.lessonsDone.includes(l.id)).length;
   const [g, setG] = useState({ title: "Complete money lessons", type: remaining ? "lessons" : "tasks", count: remaining || 1, reward: 5 });
   const [m, setM] = useState({ title: "", points: 40 });
@@ -216,7 +241,7 @@ function Goals({ state, run, busy }) {
                 <option value="tasks">Tasks you confirm</option>
                 <option value="save_actions">Times saved</option>
               </select></label>
-              <label>How many{g.type === "lessons" && <small>{remaining} lessons remaining</small>}<input type="number" min="1" max={g.type === "lessons" ? remaining : 50} value={g.count} aria-invalid={Boolean(lessonCountError)} aria-describedby={lessonCountError ? "lesson-count-error" : undefined} onChange={(e) => setG({ ...g, count: e.target.value })} />{lessonCountError && <small id="lesson-count-error" role="status">{lessonCountError}</small>}</label>
+              <label>How many{g.type === "lessons" && <small>{remaining} lessons remaining</small>}<input type="number" inputMode={mobile ? "numeric" : undefined} min="1" max={g.type === "lessons" ? remaining : 50} value={g.count} aria-invalid={Boolean(lessonCountError)} aria-describedby={lessonCountError ? "lesson-count-error" : undefined} onChange={(e) => setG({ ...g, count: e.target.value })} />{lessonCountError && <small id="lesson-count-error" role="status">{lessonCountError}</small>}</label>
               <label>Reward ($)<input type="number" inputMode="decimal" min="0" max="100" step="0.5" value={g.reward} onChange={(e) => setG({ ...g, reward: e.target.value })} /></label>
             </div>
             <button disabled={busy || Boolean(lessonCountError)} className="pbtn primary">Create goal</button>
@@ -227,7 +252,7 @@ function Goals({ state, run, busy }) {
           <p className="p-muted">Tasks earn adventure points after you confirm them.</p>
           <form className="pform" onSubmit={async (e) => { e.preventDefault(); if (await run("parent/mission", m, "Task assigned")) setM({ ...m, title: "" }); }}>
             <label>Task<input value={m.title} onChange={(e) => setM({ ...m, title: e.target.value })} placeholder="e.g. Compare prices on 3 cereals" required /></label>
-            <label>Points<input type="number" min="5" max="100" value={m.points} onChange={(e) => setM({ ...m, points: e.target.value })} /></label>
+            <label>Points<input type="number" inputMode="numeric" min="5" max="100" value={m.points} onChange={(e) => setM({ ...m, points: e.target.value })} /></label>
             <button disabled={busy} className="pbtn primary">Assign task</button>
           </form>
         </section>
@@ -236,21 +261,21 @@ function Goals({ state, run, busy }) {
       {state.goals.map((goal) => <SavingsGoal key={JSON.stringify([goal.id, goal.title, goal.target, goal.icon])} goal={goal} state={state} run={run} busy={busy} />)}
       <SavingsGoal key="new" create state={state} run={run} busy={busy} />
       <h2>All goals</h2>
-      <table className="ptable">
+      <table className="ptable" role="table">
         <thead><tr><th>Goal</th><th>Progress</th><th>Reward</th><th>Status</th></tr></thead>
         <tbody>
           {state.parentGoals.length === 0 && <tr><td colSpan="4" className="p-muted">No goals yet. Create one above.</td></tr>}
           {state.parentGoals.slice().reverse().map((x) => (
-            <tr key={x.id} className={x.status === "cancelled" ? "struck" : ""}><td>{x.title}</td><td>{x.progress}/{x.count}</td><td>{money(x.reward)}</td><td>{x.status.replace("_", " ")}{x.status === "active" && <button disabled={busy} className="pbtn" onClick={() => run(`parent/goal/${x.id}/cancel`, {}, "Goal cancelled")}>Cancel</button>}</td></tr>
+            <tr key={x.id} className={x.status === "cancelled" ? "struck" : ""}><td data-label="Goal"><span className="p-cell-value">{x.title}</span></td><td data-label="Progress"><span className="p-cell-value">{x.progress}/{x.count}</span></td><td data-label="Reward"><span className="p-cell-value">{money(x.reward)}</span></td><td data-label="Status"><span className="p-cell-value">{x.status.replace("_", " ")}{x.status === "active" && <button disabled={busy} className="pbtn" onClick={() => run(`parent/goal/${x.id}/cancel`, {}, "Goal cancelled")}>Cancel</button>}</span></td></tr>
           ))}
         </tbody>
       </table>
       <h2>Tasks</h2>
-      <table className="ptable">
+      <table className="ptable" role="table">
         <tbody>
           {state.missions.length === 0 && <tr><td className="p-muted">No tasks assigned yet.</td></tr>}
           {state.missions.slice().reverse().map((x) => (
-            <tr key={x.id}><td>{x.title}</td><td>+{x.points} pts</td><td>{x.status.replace("_", " ")}</td><td className="p-muted">{x.createdBy}</td></tr>
+            <tr key={x.id}><td data-label="Task"><span className="p-cell-value">{x.title}</span></td><td data-label="Points"><span className="p-cell-value">+{x.points} pts</span></td><td data-label="Status"><span className="p-cell-value">{x.status.replace("_", " ")}</span></td><td data-label="Created by" className="p-muted"><span className="p-cell-value">{x.createdBy}</span></td></tr>
           ))}
         </tbody>
       </table>
@@ -304,7 +329,7 @@ function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
       <form className="p-card pform" onSubmit={(e) => { e.preventDefault(); run("parent/allowance", f, "Allowance rules saved"); }}>
         <div className="pform-row">
           <label>Weekly allowance ($)<input type="number" inputMode="decimal" min="0" max="100" step="0.5" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
-          <label>Saved automatically (%)<input type="number" min="0" max="100" value={f.savePct} onChange={(e) => setF({ ...f, savePct: e.target.value })} /></label>
+          <label>Saved automatically (%)<input type="number" inputMode="numeric" min="0" max="100" value={f.savePct} onChange={(e) => setF({ ...f, savePct: e.target.value })} /></label>
           <label>Purchase limit without approval ($)<input type="number" inputMode="decimal" min="0" step="1" value={f.spendLimit} onChange={(e) => setF({ ...f, spendLimit: e.target.value })} /></label>
           <label>Rewards go to<select value={f.rewardDestination} onChange={(e) => setF({ ...f, rewardDestination: e.target.value })}>
             <option value="savings">Savings</option><option value="spending">Spending</option>
@@ -337,16 +362,16 @@ function Activity({ state }) {
     <div className="p-stack">
       <h1>Transactions</h1>
       <p className="p-muted">Every movement in the simulated ledger. Reversed rows were corrected by the Guardian.</p>
-      <table className="ptable">
+      <table className="ptable" role="table">
         <thead><tr><th>When</th><th>What</th><th>From → to</th><th className="num">Amount</th><th>Status</th></tr></thead>
         <tbody>
           {state.transactions.map((t) => (
             <tr key={t.id} className={t.status !== "posted" ? "struck" : t.flagged ? "flag" : ""}>
-              <td>{formatDateTime(t.ts)}</td>
-              <td>{t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</td>
-              <td>{label[t.from]} → {label[t.to]}</td>
-              <td className="num">{money(t.amount)}</td>
-              <td>{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}{t.uncovered ? " · uncovered" : ""}</td>
+              <td data-label="When"><span className="p-cell-value">{formatDateTime(t.ts)}</span></td>
+              <td data-label="What"><span className="p-cell-value">{t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</span></td>
+              <td data-label="From → to"><span className="p-cell-value">{label[t.from]} → {label[t.to]}</span></td>
+              <td data-label="Amount" className="num"><span className="p-cell-value">{money(t.amount)}</span></td>
+              <td data-label="Status"><span className="p-cell-value">{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}{t.uncovered ? " · uncovered" : ""}</span></td>
             </tr>
           ))}
         </tbody>
@@ -458,9 +483,9 @@ function Settings({ state, run, demo, busy }) {
       </section>
       <h2>Friends</h2>
       {!state.friends.length && <p className="p-muted">Add a friend with their code. Both children and both parents must agree.</p>}
-      <table className="ptable">
+      <table className="ptable" role="table">
         <tbody>
-          {state.friends.map((f) => <tr key={f.id}><td>{f.name || "Friend request"}</td><td>{f.status.replaceAll("_", " ")}</td><td>{f.real && f.status === "approved" && <button className="pbtn danger" disabled={busy} onClick={() => run(`parent/friend/${f.id}/remove`, {}, "Friend removed")}>Unfriend</button>}</td></tr>)}
+          {state.friends.map((f) => <tr key={f.id}><td data-label="Friend"><span className="p-cell-value">{f.name || "Friend request"}</span></td><td data-label="Status"><span className="p-cell-value">{f.status.replaceAll("_", " ")}</span></td><td data-label="Action"><span className="p-cell-value">{f.real && f.status === "approved" && <button className="pbtn danger" disabled={busy} onClick={() => run(`parent/friend/${f.id}/remove`, {}, "Friend removed")}>Unfriend</button>}</span></td></tr>)}
         </tbody>
       </table>
       {demo && <section className="p-card">
@@ -585,9 +610,9 @@ function WalletLedger({ state, run, busy }) {
     </form>
     {state.walletLastPing && <p>Last connection test: {formatDateTime(state.walletLastPing)}</p>}
     <h3>Wallet ledger</h3>
-    <table className="ptable"><thead><tr><th>When</th><th>What</th><th>Amount</th><th>Status</th></tr></thead><tbody>
+    <table className="ptable" role="table"><thead><tr><th>When</th><th>What</th><th>Amount</th><th>Status</th></tr></thead><tbody>
       {!(state.walletTransactions?.length) && <tr><td colSpan="4">No Apple Cash activity yet.</td></tr>}
-      {state.walletTransactions?.map((t) => <tr key={t.id}><td>{formatDateTime(t.ts)}</td><td>{t.memo}{t.note && <small> · {t.note}</small>}</td><td>{t.kind === "wallet_in" ? "+" : "−"}{money(t.amount)}</td><td>{t.uncovered ? "Uncovered — check outside transfers" : t.status}</td></tr>)}
+      {state.walletTransactions?.map((t) => <tr key={t.id}><td data-label="When"><span className="p-cell-value">{formatDateTime(t.ts)}</span></td><td data-label="What"><span className="p-cell-value">{t.memo}{t.note && <small> · {t.note}</small>}</span></td><td data-label="Amount"><span className="p-cell-value">{t.kind === "wallet_in" ? "+" : "−"}{money(t.amount)}</span></td><td data-label="Status"><span className="p-cell-value">{t.uncovered ? "Uncovered — check outside transfers" : t.status}</span></td></tr>)}
     </tbody></table>
   </section>;
 }
