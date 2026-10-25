@@ -6,8 +6,9 @@ import { readChild, mutateChild, resetChild, subscribe, childIdFor, childrenWith
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
 import { runGuardian, injectDuplicatePosting, reconcileNow } from "./guardian.js";
-import { chat, queueReplan, cancelReplan, replanPending, buddyMode, offlinePlan } from "./buddy.js";
-import { appleCashHelp } from "./help.js";
+import { chat, queueReplan, cancelReplan, replanPending, buddyMode, offlinePlan, askParentHelp } from "./buddy.js";
+import { appleCashHelp, appHelp } from "./help.js";
+import { object, str } from "./validate.js";
 import { actions } from "./actions.js";
 import { dayKey, weekKey } from "./time.js";
 import * as auth from "./auth.js";
@@ -199,6 +200,19 @@ function signedIn(req, res, result, now) {
 register("GET", "/help/apple-cash", "public", (req, ctx, res) => {
   res.type("html").send(appleCashHelp(req));
   return SENT;
+});
+register("GET", "/help", "public", (req, ctx, res) => {
+  res.type("html").send(appHelp());
+  return SENT;
+});
+register("POST", "/api/parent/help/ask", "parent", (req, ctx, res, now) => {
+  const question = str(object(req.body).question, { max: 500 });
+  takeLimit("parentHelp", ctx.family.id, now, { retryAfter: true });
+  const me = auth.me(ctx);
+  const first = (name) => name.trim().split(/\s+/)[0];
+  const facts = { children: me.children.map((c) => first(c.name)), selected_child: first(me.activeChild.name),
+    pin_set: me.family.pinSet, shortcut_connected: me.family.pinSet ? auth.walletToken(ctx, { now }).connected : false };
+  return askParentHelp(question, facts, readChild(ctx.childId).child.bear.name);
 });
 register("POST", "/api/auth/register", "public", (req, ctx, res, now) => signedIn(req, res, auth.register(req.body, options(req, now)), now));
 register("POST", "/api/auth/login", "public", (req, ctx, res, now) => signedIn(req, res, auth.login(req.body, options(req, now)), now));
@@ -457,6 +471,7 @@ export function createApp() {
   app.use(express.json({ limit: "32kb" }));
   app.use("/api", (req, res) => dispatch(req.method, `/api${req.path}`, req, res));
   app.get("/help/apple-cash", (req, res) => dispatch("GET", "/help/apple-cash", req, res));
+  app.get("/help", (req, res) => dispatch("GET", "/help", req, res));
   const dist = path.join(here, "..", "dist");
   app.use(express.static(dist));
   app.get(/^(?!\/api).*/, (req, res, next) => res.sendFile(path.join(dist, "index.html"), (err) => err && next()));

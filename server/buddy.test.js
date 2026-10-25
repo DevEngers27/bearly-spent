@@ -410,7 +410,7 @@ test("a completed model plan update posts one cheerful auto note", async (t) => 
 
 const guardFallback = "Hmm, let's talk about your savings or Maple's next trip instead! Want to see how close you are to your goal?";
 
-test("systemPrompt includes child background, every content rule and money-tool rules under 900 words", () => {
+test("systemPrompt includes child background, every content rule and money-tool rules under 1800 words (the kid guide rides along)", () => {
   const prompt = _internals.systemPrompt(read());
   for (const keyword of [
     "Who you are talking to", "7–12", "alone with the device", "parent reads every transcript",
@@ -421,7 +421,7 @@ test("systemPrompt includes child background, every content rule and money-tool 
     "trusted grown-up", "return to money or the bear", "get_snapshot", "simulate_purchase",
     "update_savings_plan", "propose_mission", "cannot move, send, or spend money",
   ]) assert.ok(prompt.includes(keyword), keyword);
-  assert.ok(prompt.split(/\s+/).length < 900);
+  assert.ok(prompt.split(/\s+/).length < 1800);
 });
 
 test("guard BLOCK replaces a chat reply and only audits the first 80 blocked characters", async (t) => {
@@ -480,7 +480,8 @@ test("guard request uses its own model, strict prompt, five tokens and no thinki
   assert.deepEqual(requests[1].messages, [{ role: "user", content: "Save with [email removed]" }]);
   for (const params of requests) {
     assert.equal(params.max_tokens, 5);
-    assert.equal(params.system, "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, real-money promises, or anything a careful parent would not want a 9-year-old to read. Otherwise OK.");
+    assert.equal(params.system, "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, real-money promises, or anything a careful parent would not want a 9-year-old to read. Plain instructions for using the MoneyQuest app are always OK: friend codes and friend requests, postcard swaps, the bear's trips, savings goals, missions, lessons, the weekly budget, Apple Cash receipts, dressing the bear, the Me sheet, signing out, or what a parent sees. Otherwise OK.");
+    for (const allowed of ["friend codes", "trips", "savings goals", "missions", "lessons", "dressing the bear", "signing out", "what a parent sees"]) assert.ok(params.system.includes(allowed), allowed);
     for (const key of ["thinking", "output_config", "tools", "betas", "fallbacks"]) assert.ok(!(key in params), key);
   }
 });

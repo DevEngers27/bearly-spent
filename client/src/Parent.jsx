@@ -15,6 +15,7 @@ const SECTIONS = [
   ["activity", "Transactions"],
   ["guardian", "Guardian log"],
   ["buddy", "Buddy chats"],
+  ["help", "Ask about MoneyQuest"],
   ["settings", "Friends & privacy"],
   ["children", "Children"],
   ["account", "Account"],
@@ -68,6 +69,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
           ))}
         </nav>
         <Integrations state={state} />
+        <a className="p-help-link" href="/help" target="_blank" rel="noopener noreferrer">Help</a>
       </aside>}
       <main className={`p-main${pushed ? " p-pushed" : ""}`} id="main" ref={main} tabIndex={-1}>
         {mobile && segments && <nav className="p-segments" aria-label={tab === "money" ? "Money sections" : "Kids sections"}>
@@ -80,6 +82,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
             {MORE_SECTIONS.map(([id, label]) => <button key={id} onClick={() => selectSection(id)}>{label}<span aria-hidden="true">›</span></button>)}
           </nav>
           <section className="p-card p-status"><h2>Integrations & status</h2><Integrations state={state} /></section>
+          <a href="/help" target="_blank" rel="noopener noreferrer">Help</a>
         </div>}
         {sec === "inbox" && <Inbox {...ctx} pending={pending} />}
         {sec === "overview" && <Overview {...ctx} />}
@@ -88,6 +91,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
         {sec === "activity" && <Activity {...ctx} />}
         {sec === "guardian" && <Guardian {...ctx} />}
         {sec === "buddy" && <BuddyLog {...ctx} />}
+        {sec === "help" && <ParentHelp offline={offline} />}
         {sec === "settings" && <Settings {...ctx} />}
         {sec === "children" && <Children me={me} refreshMe={refreshMe} {...ctx} />}
         {sec === "account" && <Account key={JSON.stringify([me.user, me.family.displayName])} me={me} refreshMe={refreshMe} run={run} busy={busy} />}
@@ -101,6 +105,43 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
       </nav>}
     </div>
   );
+}
+
+function ParentHelp({ offline }) {
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const inflight = useRef(false);
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  const ask = async (event) => {
+    event.preventDefault();
+    if (inflight.current || offline || !question.trim()) return;
+    inflight.current = true; setPending(true); setError(""); setAnswer("");
+    try {
+      const result = await api("parent/help/ask", { question: question.trim() });
+      if (active.current) setAnswer(result.answer);
+    } catch (err) {
+      if (active.current) setError(err.message);
+    } finally {
+      inflight.current = false;
+      if (active.current) setPending(false);
+    }
+  };
+  return <div className="p-stack parent-help">
+    <h1>Ask about MoneyQuest</h1>
+    <p className="p-muted">Get steps for using the app. Questions and answers aren't saved. Keep passwords, codes and tokens private.</p>
+    <form className="p-card pform" onSubmit={ask}>
+      <label htmlFor="parent-help-question">Your question</label>
+      <textarea id="parent-help-question" required maxLength={500} rows={3} value={question} disabled={pending || offline} onChange={(event) => setQuestion(event.target.value)} placeholder="How do I connect my child's device?" />
+      <button className="pbtn primary" disabled={pending || offline || !question.trim()}>{pending ? "Finding help…" : "Ask"}</button>
+    </form>
+    {offline && <p role="status">Connect to ask a question. The Help guide is also available below when connected.</p>}
+    {error && <p role="alert">{error}</p>}
+    <div aria-live="polite" aria-busy={pending}>{answer && <section className="p-card" aria-label="Help answer"><Markdown text={answer} /></section>}</div>
+    <a href="/help" target="_blank" rel="noopener noreferrer">Help</a>
+  </div>;
 }
 
 function Integrations({ state }) {

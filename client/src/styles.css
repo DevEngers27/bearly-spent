@@ -914,3 +914,8 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .markdown code { font-size: .9em; background: var(--honey-soft); border-radius: 4px; padding: 1px 4px; white-space: pre-wrap; }
 .finished-lessons { margin-top: 18px; }
 .finished-lessons summary { cursor: pointer; padding: 12px 0; }
+.parent-help { max-width: 760px; }
+.parent-help textarea { width: 100%; min-height: 88px; resize: vertical; font: inherit; padding: 12px; border: 1px solid currentColor; border-radius: 8px; }
+.parent-help .markdown { overflow-wrap: anywhere; }
+.p-help-link { display: block; padding: 12px; }
+.auth-help { margin-top: 20px; text-align: center; }

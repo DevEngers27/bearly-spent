@@ -1360,6 +1360,7 @@ function TalkBar({ state, talk, busy, open }) {
         <button className="round-btn small" onClick={talk.close} aria-label="Close talk bar"><Icon name="close" size={16} /></button>
       </div>
       <div className="chips scroll">{suggestions.map((s) => <button type="button" key={s} className="chip" disabled={busy} onClick={() => send(s)}>{s}</button>)}</div>
+      <button type="button" className="chip" disabled={busy} onClick={() => { setText("How do I "); input.current?.focus(); }}>How do I…?</button>
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         <input ref={input} value={text} onChange={(e) => setText(e.target.value)} maxLength={500} placeholder={`Ask ${state.child.bear.name}…`} aria-label={`Message ${state.child.bear.name}`} />
         <button className="btn honey" disabled={busy || !text.trim()}>Send</button>

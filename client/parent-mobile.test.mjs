@@ -152,7 +152,7 @@ test("G2.1: all existing section IDs map to the right mobile tab and Kids has bo
 test("G2.1: More lists Guardian, Buddy, Account, Security and integration status; browser Back closes pushes", () => {
   const h = parent();
   button(nav(h.tree(), "Parent tabs"), "More").props.onClick();
-  assert.deepEqual(nodes(nav(h.tree(), "More sections"), (n) => n.type === "button").map(text), ["Guardian log ›", "Buddy chats ›", "Account ›", "Security ›"]);
+  assert.deepEqual(nodes(nav(h.tree(), "More sections"), (n) => n.type === "button").map(text), ["Guardian log ›", "Buddy chats ›", "Ask about MoneyQuest ›", "Account ›", "Security ›"]);
   assert.match(text(h.tree()), /Integrations & status/);
   assert.ok(component(h.tree(), "Integrations"));
   for (const [label, name] of [["Guardian log", "Guardian"], ["Buddy chats", "BuddyLog"], ["Account", "Account"], ["Security", "Security"]]) {

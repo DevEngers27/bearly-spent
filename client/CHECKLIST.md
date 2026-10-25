@@ -245,3 +245,11 @@ Socket-free coverage: `client/h9.test.mjs` and `server/h9.test.js`. These checks
 - [ ] Open a lesson: see “Question 1 of 4” and four progress marks. Finish four choices; 3 or 4 correct passes, while 0–2 correct shows “Nearly! Try again — the questions will be a little different.” Try again changes the subset, including when the state refresh arrives late.
 - [ ] Refresh/reopen after a graded try: the persisted attempt count selects the next subset for that child and lesson. Review a passed lesson: different questions, no extra points, goal/team steps or daily mission reward. Money balances stay unchanged.
 - [ ] A failed final network request leaves the fourth question ready to retry, with exactly four answers submitted. A background state refresh during an open quiz does not switch its questions. If another device grades that lesson first, submitting the stale quiz asks you to close and retry, without grading a different subset.
+
+## H11 app help and Buddy knowledge
+
+Socket-free coverage: `server/h11.test.js` and `client/h11.test.mjs`.
+
+- [ ] At 360/390px and desktop widths, open Ask about MoneyQuest from More or the sidebar. Ask about kid codes and Apple Cash; check loading, errors/retry, keyboard focus, wrapped Markdown steps, and Help links. Navigate away or switch children during a pending answer; the old answer must not appear in the new panel. Device-offline disables asking; no-key server mode still returns guide text.
+- [ ] Open Help from Welcome and parent More. Parent guide appears first, kid guide second, with readable numbered steps and a working Apple Cash setup link. No credentials or family data appear in the public page.
+- [ ] Tap the How do I…? chip in the kid talk bar. Finish a question about friends or goals and check exact UI steps and the custom bear name. With Claude configured, inspect lookup_help's kid-only results and personalised wardrobe, postcards, budget, pending Apple Cash and current-goal facts. No model/provider live verification is implied by stubbed tests.
