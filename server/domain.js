@@ -37,6 +37,7 @@ export function notify(db, to, text, kind = "info", ref = null) {
 }
 
 function addPoints(db, n, reason) {
+  if (!Number.isInteger(db.child.points) || !Number.isInteger(n) || !Number.isInteger(db.child.points + n)) throw new GameError("Points need a whole number");
   db.child.points += n;
   audit(db, "system", "points_awarded", `+${n} adventure points: ${reason}`, { points: n });
 }
@@ -93,11 +94,11 @@ function bumpGoals(db, type) {
 export function createParentGoal(db, { title, type, count, reward }) {
   const allowedTypes = ["lessons", "tasks", "save_actions"];
   if (!allowedTypes.includes(type)) throw new GameError("Unknown goal type");
+  if (typeof title !== "string" || !title.trim() || title.trim().length > 120) throw new GameError("Give the goal a short title");
+  if (!["number", "string"].includes(typeof count) || !Number.isInteger(Number(count)) || !(Number(count) >= 1 && Number(count) <= 50)) throw new GameError("Count must be between 1 and 50");
+  if (!["number", "string"].includes(typeof reward) || (typeof reward === "string" && !reward.trim()) || !Number.isFinite(Number(reward)) || !(Number(reward) >= 0 && Number(reward) <= 100)) throw new GameError("Reward must be between $0 and $100");
   count = Number(count);
   reward = Math.round(Number(reward) * 100);
-  if (!title?.trim()) throw new GameError("Give the goal a title");
-  if (!(count >= 1 && count <= 50)) throw new GameError("Count must be between 1 and 50");
-  if (!(reward >= 0 && reward <= 10000)) throw new GameError("Reward must be between $0 and $100");
   const g = { id: uid("pg"), title: title.trim(), type, count, reward, progress: 0, status: "active", createdAt: Date.now() };
   db.parentGoals.push(g);
   notify(db, "child", `New goal from your grown-up: "${g.title}" — earn ${dollars(reward)}!`, "mission");
@@ -107,8 +108,9 @@ export function createParentGoal(db, { title, type, count, reward }) {
 
 // ------------------------------------------------------------------ missions
 export function createParentMission(db, { title, points = POINTS.parent, by = "parent" }) {
-  if (!title?.trim()) throw new GameError("Mission needs a title");
-  points = Math.max(5, Math.min(100, Number(points) || POINTS.parent));
+  if (typeof title !== "string" || !title.trim() || title.trim().length > 120) throw new GameError("Mission needs a short title");
+  if (!["number", "string"].includes(typeof points) || !Number.isInteger(Number(points)) || !(Number(points) >= 5 && Number(points) <= 100)) throw new GameError("Pick 5 to 100 whole points");
+  points = Number(points);
   const m = { id: uid("msn"), title: title.trim(), points, status: "open", createdBy: by, createdAt: Date.now() };
   db.missions.push(m);
   notify(db, "child", `New mission: ${m.title} (+${points} pts)`, "mission");
@@ -196,8 +198,8 @@ export function childSave(db, amountCents, now = Date.now()) {
  * posts immediately or is held for a parent.
  */
 export function childSpend(db, { amount, memo }, policy, now = Date.now()) {
-  if (!(amount >= 1)) throw new GameError("Enter how much you spent");
-  if (!memo?.trim()) throw new GameError("What did you buy?");
+  if (!Number.isInteger(amount) || !(amount >= 1 && amount <= 1000000)) throw new GameError("Enter how much you spent");
+  if (typeof memo !== "string" || !memo.trim() || memo.trim().length > 120) throw new GameError("What did you buy?");
   if (db.accounts.spending.balance < amount) throw new GameError("That's more than your spending money");
   const verdict = policy(db, amount, memo);
   if (verdict.hold) {
@@ -218,15 +220,16 @@ export function childSpend(db, { amount, memo }, policy, now = Date.now()) {
 
 export function journal(db, { direction, amount, note }, now = Date.now()) {
   if (!["received", "spent", "saved"].includes(direction)) throw new GameError("Pick what happened");
-  if (!note?.trim()) throw new GameError("Add a short note");
+  if (!Number.isInteger(amount) || !(amount >= 0 && amount <= 1000000)) throw new GameError("Enter an amount from $0 to $10,000");
+  if (typeof note !== "string" || !note.trim() || note.trim().length > 120) throw new GameError("Add a short note");
   db.tracking.push({ id: uid("trk"), ts: now, direction, amount: Math.round(amount) || 0, note: note.trim() });
   const bonus = dailyTrackingBonus(db, now);
   return { bonus };
 }
 
 export function requestExtraAllowance(db, { amount, reason }) {
-  if (!(amount >= 100 && amount <= 5000)) throw new GameError("Ask for between $1 and $50");
-  if (!reason?.trim()) throw new GameError("Tell your grown-up why");
+  if (!Number.isInteger(amount) || !(amount >= 100 && amount <= 5000)) throw new GameError("Ask for between $1 and $50");
+  if (typeof reason !== "string" || !reason.trim() || reason.trim().length > 120) throw new GameError("Tell your grown-up why");
   const approval = { id: uid("apr"), kind: "extra", status: "pending", createdAt: Date.now(), amount, reason: reason.trim(),
     title: `${db.child.name} asked for ${dollars(amount)} extra`, detail: `"${reason.trim()}"` };
   db.approvals.push(approval);
@@ -301,8 +304,9 @@ export function visitedSet(db) {
 }
 
 export function startAdventure(db, destId, now = Date.now()) {
+  if (typeof destId !== "string" || !Object.hasOwn(PLACES, destId)) throw new GameError("Unknown destination");
   const dest = PLACES[destId];
-  if (!dest) throw new GameError("Unknown destination");
+  if (!Number.isInteger(db.child.points) || !Number.isInteger(db.child.points - dest.cost)) throw new GameError("Points need a whole number");
   const bear = db.child.bear.name;
   if (db.adventures.some((a) => a.status === "away")) throw new GameError(`${bear} is already on an adventure!`);
   const owned = visitedSet(db);
@@ -353,10 +357,12 @@ export function cosmeticUnlocked(db, c) {
 }
 
 export function buyCosmetic(db, id) {
+  if (typeof id !== "string") throw new GameError("Unknown item");
   const c = COSMETICS.find((x) => x.id === id);
   if (!c) throw new GameError("Unknown item");
   if (cosmeticUnlocked(db, c)) throw new GameError("You already have it");
   if (c.cost == null) throw new GameError("This one is unlocked by a savings milestone");
+  if (!Number.isInteger(db.child.points) || !Number.isInteger(db.child.points - c.cost)) throw new GameError("Points need a whole number");
   if (db.child.points < c.cost) throw new GameError(`You need ${c.cost - db.child.points} more points`);
   db.child.points -= c.cost;
   db.child.ownedCosmetics.push(c.id);
@@ -371,6 +377,7 @@ export function equip(db, kind, value) {
     db.child.bear[kind] = null;
     return;
   }
+  if (typeof value !== "string") throw new GameError("Unlock it first");
   const c = COSMETICS.find((x) => x.kind === kind && x.value === value);
   if (!c || !cosmeticUnlocked(db, c)) throw new GameError("Unlock it first");
   db.child.bear[kind] = value;

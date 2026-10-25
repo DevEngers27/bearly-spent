@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 import { read, mutate, reset, subscribe } from "./store.js";
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
-import { runGuardian, hasDueWork, spendPolicy, injectDuplicatePosting } from "./guardian.js";
-import { chat, replan, buddyMode, offlinePlan } from "./buddy.js";
+import { runGuardian, hasDueWork, injectDuplicatePosting } from "./guardian.js";
+import { replan, buddyMode, offlinePlan } from "./buddy.js";
+import { actions } from "./actions.js";
 import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
 import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, placeStatus } from "./catalog.js";
@@ -67,7 +68,6 @@ function requireParent(req, res, next) {
   if (!tok || !parentTokens.has(tok)) return res.status(401).json({ error: "Parent PIN required" });
   next();
 }
-const cents = (v) => Math.round(Number(v) * 100);
 
 // ------------------------------------------------------------------ views
 function placesView(db) {
@@ -153,32 +153,29 @@ app.get("/api/stream", (req, res) => {
 });
 
 app.post("/api/parent/login", route((req) => {
-  if (String(req.body.pin) !== read().family.parentPin) throw new GameError("Wrong PIN", 401);
+  actions.login(read(), req.body);
   const token = crypto.randomBytes(16).toString("hex");
   parentTokens.add(token);
   return { token };
 }));
 
 // ------------------------------------------------------------------ routes: child
-app.post("/api/child/save", route((req) => act((db) => game.childSave(db, cents(req.body.amount)), "child_save")));
-app.post("/api/child/spend", route((req) => act((db) => game.childSpend(db, { amount: cents(req.body.amount), memo: req.body.memo }, spendPolicy), "child_spend")));
-app.post("/api/child/journal", route((req) => act((db) => game.journal(db, { direction: req.body.direction, amount: cents(req.body.amount || 0), note: req.body.note }), "journal")));
-app.post("/api/child/extra", route((req) => act((db) => game.requestExtraAllowance(db, { amount: cents(req.body.amount), reason: req.body.reason }), "extra_request")));
-app.post("/api/child/lesson", route((req) => act((db) => game.completeLesson(db, req.body.lessonId, req.body.answers), "lesson")));
-app.post("/api/child/budget", route((req) => act((db) => game.completeBudget(db, Object.fromEntries(Object.entries(req.body.allocations || {}).map(([k, v]) => [k, cents(v)]))), "budget")));
-app.post("/api/child/mission/:id/done", route((req) => act((db) => game.childMarkMissionDone(db, req.params.id), "mission_done")));
-app.post("/api/child/adventure", route((req) => act((db) => game.startAdventure(db, req.body.destId), "adventure")));
-app.post("/api/child/cosmetic/buy", route((req) => act((db) => game.buyCosmetic(db, req.body.id), "cosmetic")));
-app.post("/api/child/cosmetic/equip", route((req) => act((db) => game.equip(db, req.body.kind, req.body.value ?? null), "equip")));
-app.post("/api/child/bear/name", route((req) => act((db) => game.renameBear(db, req.body.name), "rename")));
-app.post("/api/child/friend", route((req) => act((db) => game.friendView(game.addFriendByCode(db, req.body.code)), "friend")));
-app.post("/api/child/trade", route((req) => act((db) => game.proposeTrade(db, req.body.friendId, req.body.give, req.body.get), "trade")));
-app.post("/api/child/greet", route((req) => act((db) => game.sendGreeting(db, req.body.friendId, Number(req.body.index)), "greet")));
+app.post("/api/child/save", route((req) => act((db) => actions.save(db, req.body), "child_save")));
+app.post("/api/child/spend", route((req) => act((db) => actions.spend(db, req.body), "child_spend")));
+app.post("/api/child/journal", route((req) => act((db) => actions.journal(db, req.body), "journal")));
+app.post("/api/child/extra", route((req) => act((db) => actions.extra(db, req.body), "extra_request")));
+app.post("/api/child/lesson", route((req) => act((db) => actions.lesson(db, req.body), "lesson")));
+app.post("/api/child/budget", route((req) => act((db) => actions.budget(db, req.body), "budget")));
+app.post("/api/child/mission/:id/done", route((req) => act((db) => actions.missionDone(db, req.params.id), "mission_done")));
+app.post("/api/child/adventure", route((req) => act((db) => actions.adventure(db, req.body), "adventure")));
+app.post("/api/child/cosmetic/buy", route((req) => act((db) => actions.buyCosmetic(db, req.body), "cosmetic")));
+app.post("/api/child/cosmetic/equip", route((req) => act((db) => actions.equip(db, req.body), "equip")));
+app.post("/api/child/bear/name", route((req) => act((db) => actions.renameBear(db, req.body), "rename")));
+app.post("/api/child/friend", route((req) => act((db) => actions.friend(db, req.body), "friend")));
+app.post("/api/child/trade", route((req) => act((db) => actions.trade(db, req.body), "trade")));
+app.post("/api/child/greet", route((req) => act((db) => actions.greet(db, req.body), "greet")));
 app.post("/api/child/notifications/read", route(() => mutate((db) => db.notifications.forEach((n) => n.to === "child" && (n.read = true)))));
-app.post("/api/buddy/chat", route(async (req) => {
-  if (!read().settings.buddyEnabled) throw new GameError("Money Buddy is turned off by your grown-up");
-  return chat(req.body.text);
-}));
+app.post("/api/buddy/chat", route((req) => actions.chat(read(), req.body)));
 // Cartesia voice: hand the browser a short-lived TTS-only token (the API key
 // stays here). Light rate limit, since anyone who can load the page can call it.
 let tokenWindow = { start: 0, count: 0 };
@@ -198,9 +195,10 @@ app.post("/api/voice/token", async (req, res) => {
 app.post("/api/buddy/speak", async (req, res) => {
   if (!voiceEnabled()) return res.status(404).json({ error: "voice not configured" });
   try {
-    const audio = await synthesize(String(req.body.text || ""));
+    const audio = await synthesize(actions.speakText(null, req.body));
     res.set("Content-Type", "audio/mpeg").send(audio);
   } catch (e) {
+    if (e instanceof GameError) return res.status(e.status).json({ error: e.message });
     console.error("[voice]", e.message);
     res.status(502).json({ error: "voice unavailable" });
   }
@@ -208,40 +206,17 @@ app.post("/api/buddy/speak", async (req, res) => {
 
 // ------------------------------------------------------------------ routes: parent
 app.use("/api/parent", requireParent);
-app.post("/api/parent/approval/:id", route((req) => act((db) => game.decide(db, req.params.id, Boolean(req.body.approve), req.body.note), "parent_decision")));
-app.post("/api/parent/goal", route((req) => act((db) => game.createParentGoal(db, req.body), "goal_created")));
-app.post("/api/parent/mission", route((req) => act((db) => game.createParentMission(db, req.body), "mission_created")));
-app.post("/api/parent/allowance", route((req) => act((db) => {
-  const a = db.allowance;
-  if (req.body.amount != null) a.amount = Math.max(0, Math.min(10000, cents(req.body.amount)));
-  if (req.body.savePct != null) a.savePct = Math.max(0, Math.min(100, Math.round(Number(req.body.savePct))));
-  if (req.body.spendLimit != null) a.spendLimit = Math.max(0, cents(req.body.spendLimit));
-  if (req.body.rewardDestination) a.rewardDestination = req.body.rewardDestination === "spending" ? "spending" : "savings";
-  game.audit(db, "parent", "allowance_updated", `Allowance ${(a.amount / 100).toFixed(2)}/wk, ${a.savePct}% saved, purchase limit $${(a.spendLimit / 100).toFixed(2)}`);
-}, "allowance_settings")));
+app.post("/api/parent/approval/:id", route((req) => act((db) => actions.approval(db, req.body, req.params.id), "parent_decision")));
+app.post("/api/parent/goal", route((req) => act((db) => actions.goal(db, req.body), "goal_created")));
+app.post("/api/parent/mission", route((req) => act((db) => actions.mission(db, req.body), "mission_created")));
+app.post("/api/parent/allowance", route((req) => act((db) => actions.allowance(db, req.body), "allowance_settings")));
 // Demo control: fast-forward the schedule so the guardian pays this week's allowance now.
 app.post("/api/parent/allowance/run-now", route(() => act((db) => {
   db.allowance.nextRun = Date.now();
 }, "fast_forward")));
-app.post("/api/parent/topup", route((req) => act((db) => {
-  const amount = cents(req.body.amount || 50);
-  db.accounts.parent.balance += amount;
-  // Unblock anything the guardian escalated for lack of funds.
-  db.approvals.forEach((a) => {
-    if (a.escalatedAt && !a.paidTxnId) delete a.escalatedAt;
-    if (a.kind === "topup" && a.status === "pending") a.status = "approved";
-  });
-  game.audit(db, "parent", "topup", `Added $${(amount / 100).toFixed(2)} to the funding account (simulated deposit)`);
-}, "topup")));
-app.post("/api/parent/settings", route((req) => act((db) => {
-  for (const k of ["requireTradeApproval", "buddyEnabled", "coopChallenge"]) if (k in req.body) db.settings[k] = Boolean(req.body[k]);
-  game.audit(db, "parent", "settings", `Updated settings: ${JSON.stringify(req.body)}`);
-}, "settings")));
-app.post("/api/parent/savings-goal", route((req) => act((db) => {
-  const g = db.savingsGoals[0];
-  if (req.body.title) g.title = String(req.body.title).slice(0, 40);
-  if (req.body.target) g.target = Math.max(100, cents(req.body.target));
-}, "savings_goal")));
+app.post("/api/parent/topup", route((req) => act((db) => actions.topup(db, req.body), "topup")));
+app.post("/api/parent/settings", route((req) => act((db) => actions.settings(db, req.body), "settings")));
+app.post("/api/parent/savings-goal", route((req) => act((db) => actions.savingsGoal(db, req.body), "savings_goal")));
 app.post("/api/parent/inject-fault", route(() => mutate((db) => {
   const dup = injectDuplicatePosting(db);
   if (!dup) throw new GameError("Nothing to duplicate yet — approve a reward or run an allowance first");
