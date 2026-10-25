@@ -11,6 +11,20 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.9.2] — 2026-10-25
+
+### Fixed
+- The bear sometimes answered a perfectly good question ("How long does
+  it take to save $100?") with its fallback line. The safety check that
+  screens every reply fails closed when its own call fails, and it did so
+  in silence. A failed check is now retried once after half a second, and
+  every blocked reply records why (a real BLOCK verdict, an empty one, or
+  the error) in the audit log and the server journal.
+
+### Review trail
+- Fixed directly on `fix/guard-resilience`, Gemini review, tests added
+  for the retry, the fail-closed path and the recorded reason. 397 server tests and 240 client tests.
+
 ## [0.9.1] — 2026-10-25
 
 ### Fixed
