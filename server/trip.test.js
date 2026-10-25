@@ -6,6 +6,7 @@ import { seed } from "./store.js";
 import * as game from "./domain.js";
 import * as catalog from "./catalog.js";
 import { actions } from "./actions.js";
+import { dayKey, weekKey } from "./time.js";
 
 const now = new Date(2026, 6, 15, 12).getTime();
 const fresh = () => { const db = seed(Date.now()); db.child.points = 300; db.postcards = []; return db; };
@@ -18,7 +19,7 @@ const openIds = (db) => {
 const index = readFileSync(new URL("./index.js", import.meta.url), "utf8");
 const viewSource = index.slice(index.indexOf("function placesView("), index.indexOf("// ------------------------------------------------------------------ routes: shared"));
 const { childView, parentView } = vm.runInNewContext(`${viewSource}\n({ childView, parentView })`, {
-  Date, game, ...catalog, buddyMode: () => "offline", voiceEnabled: () => false, nessieEnabled: () => false,
+  Date, game, dayKey, weekKey, ...catalog, buddyMode: () => "offline", voiceEnabled: () => false, nessieEnabled: () => false,
 });
 
 test("F3: every weighted ticket draws only open places, never hidden, locked or out-of-season places", () => {

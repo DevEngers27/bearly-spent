@@ -355,7 +355,7 @@ export function startTrip(db, now = Date.now(), rng = randomInt) {
   if (db.child.points < TRIP.cost) throw new GameError(`Earn ${TRIP.cost - db.child.points} more points`);
   const collected = visitedSet(db);
   const open = Object.keys(PLACES).filter((id) => {
-    const status = placeStatus(id, db.child, collected, collected, new Date(now));
+    const status = placeStatus(id, db.child, collected, collected, new Date(now), db.settings.timezone);
     return status.ok && !status.hidden;
   });
   const fresh = open.filter((id) => !collected.has(id));

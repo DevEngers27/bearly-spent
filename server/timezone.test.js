@@ -23,8 +23,8 @@ const afternoon = ["2026-10-24T16:30:00-07:00", "2026-10-24T17:30:00-07:00"].map
 // Exercise the actual pure views without importing the listening entrypoint.
 const indexSource = readFileSync(new URL("./index.js", import.meta.url), "utf8");
 const views = indexSource.slice(indexSource.indexOf("function placesView("), indexSource.indexOf("function parentView("));
-const childView = new Function("game", "dayKey", "weekKey", "PLACES", "HOME", "LESSONS", "COSMETICS", "MILESTONES", "POINTS", "placeStatus", "buddyMode", "voiceEnabled", "nessieEnabled", `${views}\nreturn childView;`)(
-  game, dayKey, weekKey, catalog.PLACES, catalog.HOME, catalog.LESSONS, catalog.COSMETICS, catalog.MILESTONES, catalog.POINTS, catalog.placeStatus,
+const childView = new Function("game", "dayKey", "weekKey", "PLACES", "HOME", "LESSONS", "COSMETICS", "MILESTONES", "POINTS", "TRIP", "placeStatus", "buddyMode", "voiceEnabled", "nessieEnabled", `${views}\nreturn childView;`)(
+  game, dayKey, weekKey, catalog.PLACES, catalog.HOME, catalog.LESSONS, catalog.COSMETICS, catalog.MILESTONES, catalog.POINTS, catalog.TRIP, catalog.placeStatus,
   () => "offline", () => false, () => false,
 );
 
