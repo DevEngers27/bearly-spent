@@ -74,9 +74,9 @@ export const actions = {
   topup: action((db, body) => {
     const amount = money(body.amount, { min: 1, max: 100000 });
     db.accounts.parent.balance += amount;
-    // Unblock anything the guardian escalated for lack of funds.
+    // A parent deposit can unblock parent-funded payouts, not child spending.
     db.approvals.forEach((a) => {
-      if (a.escalatedAt && !a.paidTxnId) delete a.escalatedAt;
+      if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
       if (a.kind === "topup" && a.status === "pending") a.status = "approved";
     });
     game.audit(db, "parent", "topup", `Added $${(amount / 100).toFixed(2)} to the funding account (simulated deposit)`);

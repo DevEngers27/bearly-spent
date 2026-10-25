@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { read, mutate, reset, subscribe } from "./store.js";
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
-import { runGuardian, hasDueWork, injectDuplicatePosting } from "./guardian.js";
+import { runGuardian, hasDueWork, injectDuplicatePosting, reconcileNow } from "./guardian.js";
 import { replan, buddyMode, offlinePlan } from "./buddy.js";
 import { actions } from "./actions.js";
 import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
@@ -45,7 +45,9 @@ function guardianPass(db, trigger) {
 /** Run a mutation, then let the guardian react to the new state. */
 function act(fn, trigger) {
   return mutate((db) => {
+    const repairs = reconcileNow(db, Date.now(), trigger);
     const out = fn(db);
+    if (repairs.some((action) => /reversed/i.test(action))) queueReplan("Guardian reversed a duplicate posting");
     guardianPass(db, trigger);
     return out;
   });
@@ -212,7 +214,7 @@ app.post("/api/parent/mission", route((req) => act((db) => actions.mission(db, r
 app.post("/api/parent/allowance", route((req) => act((db) => actions.allowance(db, req.body), "allowance_settings")));
 // Demo control: fast-forward the schedule so the guardian pays this week's allowance now.
 app.post("/api/parent/allowance/run-now", route(() => act((db) => {
-  db.allowance.nextRun = Date.now();
+  game.requestAllowanceRun(db);
 }, "fast_forward")));
 app.post("/api/parent/topup", route((req) => act((db) => actions.topup(db, req.body), "topup")));
 app.post("/api/parent/settings", route((req) => act((db) => actions.settings(db, req.body), "settings")));
