@@ -5,7 +5,7 @@
 // `propose_mission` (goes to the parent's approval queue). When no API key is
 // configured, a small deterministic fallback keeps the demo working.
 import Anthropic from "@anthropic-ai/sdk";
-import { read, mutate, uid } from "./store.js";
+import { readChild, mutateChild, childIdFor, uid } from "./store.js";
 import { audit, notify, weeksToGoal, GameError } from "./domain.js";
 
 const MODEL = process.env.BUDDY_MODEL || "claude-opus-5-5";
@@ -163,8 +163,8 @@ const TOOLS = [
   },
 ];
 
-function runTool(name, input, canWrite = () => true) {
-  const db = read();
+function runTool(name, input, canWrite = () => true, childId) {
+  const db = readChild(childId);
   switch (name) {
     case "get_snapshot":
       return snapshot(db);
@@ -172,7 +172,7 @@ function runTool(name, input, canWrite = () => true) {
       return simulatePurchase(db, input);
     case "update_savings_plan":
       if (!db.settings.buddyEnabled || !canWrite()) return { error: "This plan update is no longer needed." };
-      return mutate((d) => {
+      return mutateChild(childId, (d) => {
         if (!d.settings.buddyEnabled || !canWrite()) return { error: "This plan update is no longer needed." };
         const summary = String(input.summary || "").slice(0, 240);
         const steps = (input.steps || []).slice(0, 4).map((s) => String(s).slice(0, 120));
@@ -183,7 +183,7 @@ function runTool(name, input, canWrite = () => true) {
       });
     case "propose_mission":
       if (!db.settings.buddyEnabled || !canWrite()) return { error: "This mission suggestion is no longer needed." };
-      return mutate((d) => {
+      return mutateChild(childId, (d) => {
         if (!d.settings.buddyEnabled || !canWrite()) return { error: "This mission suggestion is no longer needed." };
         const already = d.approvals.some((a) => a.kind === "mission_proposal" && a.status === "pending");
         if (already) return { ok: false, reason: "A suggested mission is already waiting for the parent." };
@@ -261,27 +261,27 @@ async function runGuard(reply) {
   return res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
 }
 
-async function screenReply(reply, canWrite = () => true) {
+async function screenReply(reply, canWrite = () => true, childId) {
   try {
     if (await _internals.runGuard(reply) === "OK") return reply;
   } catch {
     // A failed check must never let an unchecked model reply through.
   }
-  if (canWrite()) mutate((d) => {
+  if (canWrite()) mutateChild(childId, (d) => {
     if (canWrite()) audit(d, "buddy", "buddy_guard_blocked", reply.slice(0, 80));
   });
   return GUARD_FALLBACK;
 }
 
 /** Run the agentic loop. Returns { reply, toolsUsed, completed }. */
-async function runClaude(messages, { executeTool = runTool, canWrite = () => true } = {}) {
-  const db = read();
+async function runClaude(messages, { childId, canWrite = () => true, executeTool = (name, input) => runTool(name, input, canWrite, childId) } = {}) {
+  const db = readChild(childId);
   const toolsUsed = [];
   const convo = [...messages];
   for (let i = 0; i < 6; i++) {
     const res = await _internals.callClaude({ system: redact(systemPrompt(db)).text, tools: TOOLS, messages: redactMessages(convo) });
     if (res.stop_reason === "refusal") {
-      if (canWrite()) mutate((d) => {
+      if (canWrite()) mutateChild(childId, (d) => {
         if (canWrite()) audit(d, "buddy", "buddy_refusal", "Money Buddy declined a model response.");
       });
       return { reply: "Hmm, I can't help with that one. Want to talk about your savings goal or an adventure instead?", toolsUsed, completed: false };
@@ -327,7 +327,7 @@ export function parsePrice(text) {
 
 const NO_WEEKLY_SAVINGS = "Right now nothing goes to savings each week — ask your grown-up to set a saving amount, or save some yourself!";
 
-export function offlineReply(db, text) {
+export function offlineReply(db, text, childId = childIdFor(db)) {
   const goal = db.savingsGoals[0];
   const weekly = Math.round((db.allowance.amount * db.allowance.savePct) / 100);
   const bear = db.child.bear.name;
@@ -352,7 +352,7 @@ export function offlineReply(db, text) {
   }
   if (has(text, /\b(plan|budget me|help me save)\b/)) {
     const plan = offlinePlan(db, "you asked for a plan");
-    mutate((d) => {
+    mutateChild(childId, (d) => {
       d.buddy.plan = plan;
       audit(d, "buddy", "plan_updated", `Offline planner made a plan: ${plan.summary}`);
     });
@@ -400,26 +400,29 @@ export function offlinePlan(db, reason) {
 }
 
 // Save a Home plan for affordability replies, including connection fallbacks.
-function offlineChatReply(text) {
+function offlineChatReply(childId, text) {
   if (!isSafetyConcern(text) && /\b(buy(?:ing)?|get|purchase|afford|spend|cost)\b/i.test(text) && parsePrice(text)) {
-    mutate((d) => {
+    mutateChild(childId, (d) => {
       d.buddy.plan = offlinePlan(d, "you asked about a purchase");
       audit(d, "buddy", "plan_updated", `Offline planner made a plan: ${d.buddy.plan.summary}`);
     });
   }
-  return offlineReply(read(), text);
+  return offlineReply(readChild(childId), text, childId);
 }
 
 // ------------------------------------------------------------------ public API
-export async function chat(userText) {
+export async function chat(childId, userText) {
+  // One-argument calls are kept for the pre-accounts in-memory tests.
+  if (userText === undefined) [childId, userText] = [undefined, childId];
   const { text, found } = redact(String(userText || "").slice(0, 500));
   if (!text.trim()) throw new GameError("Say something first!");
-  mutate((d) => {
+  mutateChild(childId, (d) => {
     d.buddy.chat.push({ id: uid("msg"), role: "user", text, ts: Date.now(), redacted: found });
     if (found.length) audit(d, "buddy", "pii_redacted", `Removed ${found.join(", ")} from the child's message before sending to the AI`);
   });
   let reply, toolsUsed = [];
-  const db = read();
+  const db = readChild(childId);
+  const canWrite = () => readChild(childId) === db && db.settings.buddyEnabled;
   const live = buddyMode() === "claude";
   if (live) {
     // Merge consecutive same-role turns (auto plan notes) and start on a user turn.
@@ -432,19 +435,21 @@ export async function chat(userText) {
     }
     while (history.length && history[0].role !== "user") history.shift();
     try {
-      ({ reply, toolsUsed } = await _internals.runClaude(history));
+      ({ reply, toolsUsed } = await _internals.runClaude(history, { childId, canWrite }));
     } catch (e) {
       console.error("[buddy] Claude error:", e.message);
-      reply = offlineChatReply(text) + " (I'm having trouble connecting, so this is a quick answer.)";
+      if (!canWrite()) return { reply: "Buddy is taking a break. Try again later!", toolsUsed: [] };
+      reply = offlineChatReply(childId, text) + " (I'm having trouble connecting, so this is a quick answer.)";
     }
   } else {
-    reply = offlineChatReply(text);
+    reply = offlineChatReply(childId, text);
   }
   if (found.length) reply = `Quick tip: let's keep things like your ${found.join(" and ")} private, okay?\n\n${reply}`;
-  if (live) reply = await screenReply(reply);
-  mutate((d) => {
+  if (live) reply = await screenReply(reply, canWrite, childId);
+  if (!canWrite()) return { reply: "Buddy is taking a break. Try again later!", toolsUsed: [] };
+  mutateChild(childId, (d) => {
     d.buddy.chat.push({ id: uid("msg"), role: "assistant", text: reply, ts: Date.now(), tools: toolsUsed });
-    if (d.buddy.chat.length > 60) d.buddy.chat.splice(0, d.buddy.chat.length - 60);
+    if (d.buddy.chat.length > 200) d.buddy.chat.splice(0, d.buddy.chat.length - 200);
   });
   return { reply, toolsUsed };
 }
@@ -454,37 +459,46 @@ export async function chat(userText) {
  * server, debounced. Claude decides whether the plan needs to change and leaves
  * the child a short note.
  */
-let replanSequence = 0;
-let replanTimer = null;
-const pendingReasons = [];
-
-export function cancelReplan() {
-  clearTimeout(replanTimer);
-  replanTimer = null;
-  pendingReasons.length = 0;
-  replanSequence += 1;
+const replans = new Map();
+function replanState(childId) {
+  if (!replans.has(childId)) replans.set(childId, { sequence: 0, timer: null, reasons: [] });
+  return replans.get(childId);
 }
 
-export function queueReplan(reason) {
-  // A newer money event invalidates an in-flight plan even during the debounce.
-  replanSequence += 1;
-  pendingReasons.push(redact(reason).text);
-  clearTimeout(replanTimer);
-  replanTimer = setTimeout(() => {
-    replanTimer = null;
-    const why = pendingReasons.splice(0).join("; ");
-    if (read().settings.buddyEnabled) replan(why).catch((e) => console.error("[replan]", e.message));
+export function cancelReplan(childId) {
+  const states = childId === undefined ? replans.values() : [replanState(childId)];
+  for (const state of states) {
+    clearTimeout(state.timer);
+    state.timer = null;
+    state.reasons.length = 0;
+    state.sequence += 1;
+  }
+}
+
+export function queueReplan(childId, reason) {
+  if (reason === undefined) [childId, reason] = [undefined, childId];
+  const state = replanState(childId);
+  state.sequence += 1;
+  state.reasons.push(redact(reason).text);
+  clearTimeout(state.timer);
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    const why = state.reasons.splice(0).join("; ");
+    if (readChild(childId).settings.buddyEnabled) replan(childId, why).catch((e) => console.error("[replan]", e.message));
   }, 1500);
+  state.timer.unref?.();
 }
 
-export async function replan(reason) {
-  const sequence = ++replanSequence;
-  const db = read();
-  const canWrite = () => sequence === replanSequence && read() === db && db.settings.buddyEnabled;
+export async function replan(childId, reason) {
+  if (reason === undefined) [childId, reason] = [undefined, childId];
+  const state = replanState(childId);
+  const sequence = ++state.sequence;
+  const db = readChild(childId);
+  const canWrite = () => sequence === state.sequence && readChild(childId) === db && db.settings.buddyEnabled;
   if (!canWrite()) return;
   reason = redact(reason).text;
   if (buddyMode() !== "claude") {
-    mutate((d) => {
+    mutateChild(childId, (d) => {
       if (!canWrite()) return;
       d.buddy.plan = offlinePlan(d, reason);
       audit(d, "buddy", "plan_updated", `Recalculated plan after: ${reason} (offline planner)`);
@@ -494,16 +508,16 @@ export async function replan(reason) {
   const prompt = redact(`[Automatic update — not typed by ${db.child.name}] Something changed: ${reason}. Check the snapshot, then call update_savings_plan with a refreshed plan. Then write one short, cheerful note (max 35 words) telling ${db.child.name} what changed for their goal.`).text;
   let planUpdated = false;
   const executeTool = (name, input) => {
-    const out = runTool(name, input, canWrite);
+    const out = runTool(name, input, canWrite, childId);
     if (name === "update_savings_plan" && out?.ok) planUpdated = true;
     return out;
   };
   try {
-    let { reply, completed } = await _internals.runClaude([{ role: "user", content: prompt }], { executeTool, canWrite });
+    let { reply, completed } = await _internals.runClaude([{ role: "user", content: prompt }], { executeTool, canWrite, childId });
     if (!canWrite()) return;
-    if (planUpdated && completed !== false) reply = await screenReply(reply, canWrite);
+    if (planUpdated && completed !== false) reply = await screenReply(reply, canWrite, childId);
     if (!canWrite()) return;
-    mutate((d) => {
+    mutateChild(childId, (d) => {
       if (!canWrite()) return;
       if (!planUpdated || completed === false) {
         audit(d, "buddy", "replan_no_note", "Automatic replan finished without a completed plan update; no chat note posted.");
@@ -515,7 +529,7 @@ export async function replan(reason) {
   } catch (e) {
     console.error("[buddy] replan error:", e.message);
     if (!canWrite()) return;
-    mutate((d) => {
+    mutateChild(childId, (d) => {
       if (!canWrite()) return;
       d.buddy.plan = offlinePlan(d, reason);
     });

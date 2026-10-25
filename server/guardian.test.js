@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
+import { applyAction, demoRunNow } from "./index.js";
 import { seed, mutate, read, _setForTest, subscribe } from "./store.js";
 import * as game from "./domain.js";
 import { transfer } from "./bank.js";
@@ -11,28 +11,15 @@ import { dayKey } from "./time.js";
 
 const DAY = 86400000;
 const fresh = () => seed(Date.now());
-const indexSource = fs.readFileSync(new URL("./index.js", import.meta.url), "utf8");
-
-// Exercise the actual HTTP callbacks and act helper without importing the
-// server entrypoint, which starts a listener and a recurring timer.
+// Exercise the exported HTTP helpers without sockets or timers.
 function routeMutation(path, body = {}) {
-  const start = indexSource.indexOf(`app.post("${path}",`);
-  assert.ok(start >= 0);
-  const end = indexSource.indexOf("\napp.post(", start + 1);
-  let handler;
-  new Function("app", "route", "act", "cents", "game", "actions", indexSource.slice(start, end))(
-    { post: (_path, fn) => { handler = fn; } },
-    (fn) => fn, (fn) => fn, (v) => Math.round(Number(v) * 100), game, actions,
-  );
-  return handler({ body });
+  if (path === "/api/parent/topup") return (db) => actions.topup(db, body);
+  assert.equal(path, "/api/parent/allowance/run-now");
+  return demoRunNow;
 }
 
 function actionRunner(db, replans = []) {
-  const start = indexSource.indexOf("const PAYOUT =");
-  const end = indexSource.indexOf("\nconst route =", start);
-  return new Function("mutate", "runGuardian", "reconcileNow", "queueReplan", `${indexSource.slice(start, end)}\nreturn act;`)(
-    (fn) => fn(db), runGuardian, reconcileNow, (reason) => replans.push(reason),
-  );
+  return (fn, trigger) => applyAction(db, fn, trigger, { onReplan: (reason) => replans.push(reason) });
 }
 
 function approvedReward(db, amount = 500) {

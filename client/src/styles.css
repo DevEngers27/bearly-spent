@@ -542,7 +542,7 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .pform { display: grid; gap: 12px; }
 .pform label { display: grid; gap: 4px; font-size: 14px; font-weight: 800; color: var(--ink-soft); }
 .pform input, .pform select, .pin-page input { border: 2px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 16px; background: #FFFDF7; min-width: 0; }
-.pform-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
+.pform-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 12px; align-items: end; }
 .pform button { justify-self: start; }
 .ptable { width: 100%; border-collapse: collapse; background: var(--paper-card); border: 2px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 15px; }
 .ptable { table-layout: fixed; overflow-wrap: anywhere; }
@@ -594,7 +594,7 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .pin-card small, .pin-card p { color: var(--ink-soft); }
 .pin-card .err { color: var(--bad); font-weight: 800; }
 @media (max-width: 820px) {
-  .parent { grid-template-columns: 1fr; }
+  .parent { grid-template-columns: minmax(0, 1fr); }
   .p-nav { border-right: 0; border-bottom: 2px dashed var(--line); padding: 12px 16px; gap: 10px; }
   .p-nav nav { display: flex; overflow-x: auto; gap: 4px; }
   .p-nav nav button { white-space: nowrap; }
@@ -637,6 +637,26 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .offline-pill { border: 1px solid var(--ink); border-radius: 999px; padding: 4px 9px; background: #F7DDD7; font-size: 13px; font-weight: 800; }
 button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .pbtn:disabled, .chip:disabled, .swatch:disabled, .speak:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Family entry and pairing keep the same paper-and-bear language as the game. */
+.auth-page { min-height: 100dvh; padding: 32px 16px; }
+.auth-card { width: min(480px, 100%); }
+.auth-bear { width: 104px; height: 104px; object-fit: contain; justify-self: center; }
+.auth-form { display: grid; gap: 14px; }
+.auth-form input, .auth-form select { width: 100%; min-height: 48px; }
+.auth-form select, .child-switcher select { border: 2px solid var(--line); border-radius: 10px; background: #FFFDF7; padding: 9px 11px; }
+.kid-code { font-family: var(--hand); font-size: 32px !important; font-weight: 700; text-align: center; letter-spacing: 0.18em; width: 100%; }
+.code-keys { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.code-keys .pbtn { min-height: 48px; padding: 6px; font-size: 20px; }
+.code-keys .pbtn:last-child { grid-column: span 2; font-size: 16px; }
+.child-switcher { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; }
+.child-switcher select { max-width: 180px; }
+.appbar { flex-wrap: wrap; }
+@media (max-width: 420px) {
+  .auth-card { padding: 22px 18px; }
+  .auth-card h1 { font-size: 32px; }
+  .appbar .brand-sub { display: none; }
+}
 
 /* Surprise trips: a wooden note, a paper envelope, and a place to talk. */
 .home-tools { display: flex; justify-content: center; gap: 12px; margin-top: -12px; }
@@ -711,9 +731,18 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
   .appbar .brand { width: 100%; font-size: 24px; }
   .appbar .brand-mark { height: 28px; width: 28px; }
   .appbar-actions { justify-content: flex-end; }
+  /* Accounts add a child selector and sign-out: reserve a third header row. */
+  .role-parent .appbar { height: calc(144px + env(safe-area-inset-top)); display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 28px 42px 30px; align-content: space-between; }
+  .role-parent .appbar .brand, .role-parent .appbar-actions { grid-column: 1 / -1; }
+  .role-parent .child-switcher { min-width: 0; }
+  .role-parent .child-switcher select { max-width: min(180px, 100%); min-width: 0; }
+  .role-parent .toasts { top: calc(152px + env(safe-area-inset-top)); }
   .appbar-actions .pbtn { font-size: 13px; padding: 5px 9px; }
-  .p-main, .p-nav, .p-card, .p-two > *, .approval-body { min-width: 0; }
+  .p-main, .p-nav, .p-card, .p-two > *, .pform, .pform label, .approval-body { min-width: 0; }
   .ptable td, .ptable th { padding: 7px 5px; }
   .ptable .pbtn { max-width: 100%; padding: 4px; font-size: 12px; }
   .p-feed li { overflow-wrap: anywhere; }
 }
+
+.p-device { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.p-device > div { flex: 1 1 180px; min-width: 0; }

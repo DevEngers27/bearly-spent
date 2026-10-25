@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { money, formatTime, formatDateTime, postcardMetrics, useAction } from "./api.js";
+import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAction } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 
 const SECTIONS = [
@@ -11,17 +11,22 @@ const SECTIONS = [
   ["guardian", "Guardian log"],
   ["buddy", "Buddy chats"],
   ["settings", "Friends & privacy"],
+  ["children", "Children"],
+  ["security", "Security"],
 ];
 
 const KIND_LABEL = { reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
 const BROWSER_TIMEZONE = Intl.DateTimeFormat("en-US").resolvedOptions().timeZone || "UTC";
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
-export default function Parent({ state, toast }) {
+export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignOutAll, offline }) {
   const [sec, setSec] = useState("inbox");
   const [opened, setOpened] = useState(["inbox"]);
   const selectSection = (id) => { setSec(id); setOpened((previous) => previous.includes(id) ? previous : [...previous, id]); };
-  const [run, busy] = useAction(toast);
+  const [fundingFocus, setFundingFocus] = useState(0);
+  const onAddMoney = () => { selectSection("allowance"); setFundingFocus((current) => current + 1); };
+  const [run, pendingAction] = useAction(toast, offline);
+  const busy = pendingAction || offline;
   const timezoneAttempted = useRef(false);
   useEffect(() => {
     if (state.settings.timezone) {
@@ -33,7 +38,7 @@ export default function Parent({ state, toast }) {
     run("parent/settings", { timezone: BROWSER_TIMEZONE });
   }, [state.settings.timezone, run]);
   const pending = state.approvals.filter((a) => a.status === "pending");
-  const ctx = { state, run, busy };
+  const ctx = { state, run, busy, demo: me?.demo === true, onAddMoney };
   return (
     <div className="parent">
       <aside className="p-nav">
@@ -55,11 +60,13 @@ export default function Parent({ state, toast }) {
         {sec === "inbox" && <Inbox {...ctx} pending={pending} />}
         {sec === "overview" && <Overview {...ctx} />}
         {opened.includes("goals") && <div hidden={sec !== "goals"}><Goals {...ctx} /></div>}
-        {opened.includes("allowance") && <div hidden={sec !== "allowance"}><Allowance key={JSON.stringify([state.allowance.amount, state.allowance.savePct, state.allowance.spendLimit, state.allowance.rewardDestination])} {...ctx} /></div>}
+        {opened.includes("allowance") && <div hidden={sec !== "allowance"}><Allowance key={JSON.stringify([state.allowance.amount, state.allowance.savePct, state.allowance.spendLimit, state.allowance.rewardDestination])} {...ctx} fundingFocus={fundingFocus} /></div>}
         {sec === "activity" && <Activity {...ctx} />}
         {sec === "guardian" && <Guardian {...ctx} />}
         {sec === "buddy" && <BuddyLog {...ctx} />}
         {sec === "settings" && <Settings {...ctx} />}
+        {sec === "children" && <Children me={me} refreshMe={refreshMe} {...ctx} />}
+        {sec === "security" && <Security me={me} refreshMe={refreshMe} onSignOut={onSignOut} onSignOutAll={onSignOutAll} {...ctx} />}
       </main>
     </div>
   );
@@ -76,7 +83,7 @@ function Integrations({ state }) {
   );
 }
 
-function Inbox({ state, run, pending, busy }) {
+function Inbox({ state, run, demo, pending, busy, onAddMoney }) {
   const notifications = state.notifications.filter((n) => !n.read);
   const decided = state.approvals.filter((a) => a.status !== "pending").slice(0, 8);
   return (
@@ -95,7 +102,8 @@ function Inbox({ state, run, pending, busy }) {
             <div className="approval-actions">
               {a.kind === "topup" || a.kind === "review" ? (
                 <>
-                  {a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={() => run("parent/topup", { amount: 50 }, "Added $50 to funding")}>Add $50</button>}
+                  {a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>}
+                  {demo && a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={() => run("parent/topup", { amount: 50 }, "Added $50 to funding")}>Add $50</button>}
                   <button disabled={busy} className="pbtn" onClick={() => run(`parent/approval/${a.id}`, { approve: true }, "Marked as handled")}>Mark handled</button>
                 </>
               ) : (
@@ -137,7 +145,7 @@ function Inbox({ state, run, pending, busy }) {
   );
 }
 
-function Overview({ state }) {
+function Overview({ state, onAddMoney, busy }) {
   const goal = state.goals[0];
   const learned = state.child.stats;
   return (
@@ -146,9 +154,13 @@ function Overview({ state }) {
       <div className="p-figures">
         <Figure label={`${state.child.name}'s savings`} value={money(state.accounts.savings.balance)} sub={goal ? `${Math.round((state.accounts.savings.balance / goal.target) * 100)}% of ${goal.title}` : "Set a savings goal"} />
         <Figure label="Spending money" value={money(state.accounts.spending.balance)} />
-        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Simulated" />
+        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Money set aside" />
         <Figure label="Adventure points" value={state.child.points} sub="Game points, not money" />
       </div>
+      {state.accounts.parent.balance === 0 && state.allowance.amount > 0 && <section className="p-card">
+        <p>{`Add money to the funding record so ${state.child.bear.name}'s allowance can be paid`}</p>
+        <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>
+      </section>}
       {!goal && <section className="p-card"><h2>Set a savings goal</h2><p>Choose something to save for in Goals & tasks.</p></section>}
       <div className="p-two">
         <section>
@@ -160,7 +172,7 @@ function Overview({ state }) {
               <tr><td>Days with money tracked</td><td>{learned.tracked}</td></tr>
               <tr><td>Weekly budgets planned</td><td>{learned.budgetsDone}</td></tr>
               <tr><td>Adventures taken</td><td>{learned.adventures}</td></tr>
-              <tr><td>Postcards collected</td><td>{postcardMetrics(state).places} of {postcardMetrics(state).total} places ({postcardMetrics(state).cards} cards)</td></tr>
+              <tr><td>Postcards collected</td><td>{postcardMetrics(state).places} of {postcardMetrics(state).total} {plural(postcardMetrics(state).total, "place")} ({postcardMetrics(state).cards} {plural(postcardMetrics(state).cards, "card")})</td></tr>
             </tbody>
           </table>
         </section>
@@ -253,9 +265,19 @@ function SavingsGoal({ state, run, busy }) {
   );
 }
 
-function Allowance({ state, run, busy }) {
+function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
   const a = state.allowance;
   const [f, setF] = useState({ amount: a.amount / 100, savePct: a.savePct, spendLimit: a.spendLimit / 100, rewardDestination: a.rewardDestination });
+  const [funding, setFunding] = useState({ amount: "", note: "" });
+  const fundingAmount = useRef(null);
+  useEffect(() => {
+    if (fundingFocus > 0) fundingAmount.current?.focus();
+  }, [fundingFocus]);
+  const addMoney = async (event) => {
+    event.preventDefault();
+    const result = await run("parent/funding/add", funding, "Money recorded — real money stays with you");
+    if (result) setFunding({ amount: "", note: "" });
+  };
   return (
     <div className="p-stack">
       <h1>Allowance & limits</h1>
@@ -273,19 +295,25 @@ function Allowance({ state, run, busy }) {
       </form>
       <section className="p-card">
         <h2>Funding account</h2>
-        <p>{money(state.accounts.parent.balance)} available (simulated)</p>
-        <div className="row">
+        <p>{money(state.accounts.parent.balance)} recorded as set aside</p>
+        <p className="p-muted" id="funding-explanation">This is a record of money you have set aside; MoneyQuest never moves real money.</p>
+        <form className="pform" onSubmit={addMoney} aria-label="Add money" aria-describedby="funding-explanation">
+          <label>Amount ($)<input ref={fundingAmount} type="number" required min="1" max="1000" step="0.01" disabled={busy} value={funding.amount} onChange={(e) => setFunding({ ...funding, amount: e.target.value })} /></label>
+          <label>Note (optional)<input maxLength={120} disabled={busy} value={funding.note} onChange={(e) => setFunding({ ...funding, note: e.target.value })} /></label>
+          <button disabled={busy} className="pbtn primary">Add money</button>
+        </form>
+        {demo && <div className="row">
           <button disabled={busy} className="pbtn" onClick={() => run("parent/topup", { amount: 50 }, "Added $50")}>Add $50</button>
           <button disabled={busy} className="pbtn" onClick={() => run("parent/allowance/run-now", {}, "Fast-forwarded to payday")}>Fast-forward to payday</button>
-        </div>
-        <p className="p-muted">Fast-forward is a demo control: it moves the schedule to now so you can watch the Guardian pay.</p>
+        </div>}
+        {demo && <p className="p-muted">Fast-forward is a demo control: it moves the schedule to now so you can watch the Guardian pay.</p>}
       </section>
     </div>
   );
 }
 
 function Activity({ state }) {
-  const label = { parent: "Funding", savings: "Savings", spending: "Spending", merchant: "Store" };
+  const label = { external: "Set aside", parent: "Funding", savings: "Savings", spending: "Spending", merchant: "Store" };
   return (
     <div className="p-stack">
       <h1>Transactions</h1>
@@ -308,7 +336,7 @@ function Activity({ state }) {
   );
 }
 
-function Guardian({ state, run, busy }) {
+function Guardian({ state, run, demo, busy }) {
   const [all, setAll] = useState(false);
   const rows = state.audit.filter((a) => all || a.actor === "guardian" || a.actor === "buddy");
   return (
@@ -322,11 +350,11 @@ function Guardian({ state, run, busy }) {
         <div><b>G4</b> Holds purchases over your limit and flags unusual spending</div>
         <div><b>G5</b> Warns you before funding runs short</div>
       </div>
-      <section className="p-card demo">
+      {demo && <section className="p-card demo">
         <h2>Try it: simulate a bank glitch</h2>
         <p className="p-muted">Makes the simulated bank post the last reward or allowance twice, the way a replayed webhook would. Watch the Guardian catch it on its next check, within a couple of seconds.</p>
         <button disabled={busy} className="pbtn" onClick={() => run("parent/inject-fault", {}, "Bank glitch injected. Watch the log.")}>Post a duplicate</button>
-      </section>
+      </section>}
       <div className="row">
         <h2>Decision log</h2>
         <label className="toggle"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Show all activity</label>
@@ -345,14 +373,26 @@ function Guardian({ state, run, busy }) {
   );
 }
 
-function BuddyLog({ state }) {
+function BuddyLog({ state, run, busy }) {
+  const [older, setOlder] = useState([]);
+  const [cursor, setCursor] = useState(undefined);
+  const before = cursor === undefined ? state.chatNextBefore : cursor;
+  const messages = [...new Map([...older, ...state.chat].map((message) => [message.id, message])).values()];
+  const loadOlder = async () => {
+    const page = await run(() => api(`parent/state?before=${encodeURIComponent(before)}`));
+    if (page) {
+      setOlder((current) => [...page.chat, ...current]);
+      setCursor(page.chatNextBefore);
+    }
+  };
   return (
     <div className="p-stack">
       <h1>Money Buddy chats</h1>
       <p className="p-muted">Everything {state.child.name} and Money Buddy said. Personal details like phone numbers are removed before messages reach the AI. Buddy can't move money; any mission it suggests comes to you first.</p>
+      {before && <button className="pbtn" disabled={busy} onClick={loadOlder}>Load older</button>}
       <ol className="transcript">
-        {state.chat.length === 0 && <li className="p-muted">No conversations yet.</li>}
-        {state.chat.map((m) => (
+        {messages.length === 0 && <li className="p-muted">No conversations yet.</li>}
+        {messages.map((m) => (
           <li key={m.id} className={m.role}>
             <b>{m.role === "user" ? state.child.name : m.auto ? "Buddy (automatic update)" : "Buddy"}</b>
             <span>{m.text}</span>
@@ -365,7 +405,7 @@ function BuddyLog({ state }) {
   );
 }
 
-function Settings({ state, run, busy }) {
+function Settings({ state, run, demo, busy }) {
   const s = state.settings;
   const timezones = [...new Set(["UTC", BROWSER_TIMEZONE, ...TIMEZONES, ...(s.timezone ? [s.timezone] : [])])].sort();
   const toggle = (k) => run("parent/settings", { [k]: !s[k] }, "Saved");
@@ -392,11 +432,127 @@ function Settings({ state, run, busy }) {
           {state.friends.map((f) => <tr key={f.id}><td>{f.name}</td><td>{f.code}</td><td>{f.status.replace("_", " ")}</td></tr>)}
         </tbody>
       </table>
-      <section className="p-card">
+      {demo && <section className="p-card">
         <h2>Demo data</h2>
         <p className="p-muted">Restore the starting demo family. This erases all progress.</p>
         <button disabled={busy} className="pbtn danger" onClick={() => confirm("Reset all demo data?") && run("parent/reset", {}, "Demo reset")}>Reset demo</button>
-      </section>
+      </section>}
     </div>
   );
+}
+
+
+function Children({ me, refreshMe, run, busy }) {
+  const [child, setChild] = useState({ name: "", age: "9", bearName: "" });
+  const [links, setLinks] = useState({});
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const add = async (event) => {
+    event.preventDefault();
+    const result = await run(async () => {
+      const result = await api("parent/children", { ...child, age: Number(child.age) });
+      await refreshMe();
+      return result;
+    }, undefined, "Child added. Set their allowance to get started.");
+    if (result) setChild({ name: "", age: "9", bearName: "" });
+  };
+  const generate = async (id) => {
+    const link = await run(() => api(`parent/children/${encodeURIComponent(id)}/link?child=${encodeURIComponent(id)}`, {}));
+    if (link) { setLinks((current) => ({ ...current, [id]: link })); setNow(Date.now()); }
+  };
+  const field = (key) => ({ value: child[key], onChange: (event) => setChild({ ...child, [key]: event.target.value }) });
+  return <div className="p-stack">
+    <h1>Children</h1>
+    <p className="p-muted">Each saver has their own allowance, bear and adventures. Kid codes work once and last 15 minutes.</p>
+    {me.children.map((summary) => {
+      const link = links[summary.id];
+      const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
+      return <section className="p-card" key={summary.id}>
+        <div className="row"><div><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></div><button className="pbtn" disabled={busy} onClick={() => generate(summary.id)}>Generate kid code</button></div>
+        <Devices childId={summary.id} busy={busy} />
+        {link && <div className="p-stack">
+          {seconds > 0 ? <>
+            <label className="pform">Kid code<input className="kid-code" readOnly value={link.code} onFocus={(event) => event.target.select()} /></label>
+            <p role="status">Expires in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}. Open “I have a kid code” on your child's device.</p>
+            <button className="pbtn" disabled={busy || !navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(link.code), undefined, "Kid code copied")}>Copy code</button>
+          </> : <p role="status">This code expired. Generate a new one.</p>}
+        </div>}
+      </section>;
+    })}
+    <form className="p-card pform" onSubmit={add}>
+      <h2>Add a child</h2>
+      <label>Child's name<input required maxLength={24} {...field("name")} /></label>
+      <label>Age<select {...field("age")}>{[7, 8, 9, 10, 11, 12].map((age) => <option key={age} value={age}>{age}</option>)}</select></label>
+      <label>Bear's name<input required maxLength={24} {...field("bearName")} /></label>
+      <button className="pbtn primary" disabled={busy}>Add child</button>
+    </form>
+  </div>;
+}
+
+function Devices({ childId, busy }) {
+  const [devices, setDevices] = useState([]);
+  const [error, setError] = useState("");
+  const [run, pending] = useAction((message) => setError(message));
+  const url = `parent/children/${encodeURIComponent(childId)}/devices?child=${encodeURIComponent(childId)}`;
+  const refresh = async () => {
+    try { setDevices(await api(url)); setError(""); } catch (err) { setError(err.message); }
+  };
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try { const next = await api(url); if (active) { setDevices(next); setError(""); } }
+      catch (err) { if (active) setError(err.message); }
+    };
+    load();
+    const timer = setInterval(load, 10000);
+    return () => { active = false; clearInterval(timer); };
+  }, [url]);
+  const unlink = (id) => run(async () => {
+    await api(`parent/children/${encodeURIComponent(childId)}/devices/${encodeURIComponent(id)}?child=${encodeURIComponent(childId)}`, undefined, { method: "DELETE" });
+    setDevices((current) => current.filter((device) => device.id !== id));
+    return { ok: true };
+  });
+  return <div className="p-stack">
+    <h3>Devices</h3>
+    {error ? <p role="alert">{error} <button className="pbtn" disabled={busy || pending} onClick={refresh}>Try again</button></p> : devices.length === 0 && <p className="p-muted">No paired devices yet.</p>}
+    {devices.map((device) => <div className="p-device" key={device.id}>
+      <div><strong>{device.name}</strong><p className="p-muted">Paired {formatDateTime(device.created_at)} · Last seen {formatDateTime(device.last_seen)}</p></div>
+      <button className="pbtn danger" disabled={busy || pending} onClick={() => unlink(device.id)}>Unlink</button>
+    </div>)}
+  </div>;
+}
+
+function Security({ me, refreshMe, onSignOut, onSignOutAll, run, busy }) {
+  const [pin, setPin] = useState("");
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const save = async (event) => {
+    event.preventDefault();
+    const result = await run(async () => {
+      const result = await api("parent/pin", { pin });
+      await refreshMe();
+      return result;
+    }, undefined, "PIN saved");
+    if (result) setPin("");
+  };
+  return <div className="p-stack">
+    <h1>Security</h1>
+    <form className="p-card pform" onSubmit={save}>
+      <h2>{me.family.pinSet ? "Change your PIN" : "Set a parent PIN"}</h2>
+      <p className="p-muted">A PIN protects grown-up switches on this device. Keep your password for signing in.</p>
+      <label>New PIN<input type="password" inputMode="numeric" autoComplete="new-password" required pattern="[0-9]{4,8}" minLength={4} maxLength={8} value={pin} onChange={(event) => setPin(event.target.value)} /></label>
+      <button className="pbtn primary" disabled={busy}>Save PIN</button>
+    </form>
+    <section className="p-card">
+      <h2>Signed-in devices</h2>
+      <button className="pbtn" disabled={busy} onClick={() => run(onSignOut)}>Sign out</button>
+      <button className="pbtn" disabled={busy} onClick={() => setConfirmSignOut(true)}>Sign out everywhere</button>
+      {confirmSignOut && <div className="p-stack">
+        <p>Sign out of all family sessions, including kid devices; you will need new kid codes. This device will sign out too.</p>
+        <div className="row"><button className="pbtn" disabled={busy} onClick={() => setConfirmSignOut(false)}>Cancel</button><button className="pbtn primary" disabled={busy} onClick={() => run(onSignOutAll)}>Confirm sign out everywhere</button></div>
+      </div>}
+    </section>
+  </div>;
 }

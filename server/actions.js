@@ -2,16 +2,22 @@
 import * as game from "./domain.js";
 import { spendPolicy } from "./guardian.js";
 import { chat } from "./buddy.js";
+import { childIdFor } from "./store.js";
 import { PLACES, POINTS } from "./catalog.js";
 import { money, integer, str, bool, id, oneOf, object } from "./validate.js";
 
 const action = (fn) => (db, body, ...args) => fn(db, object(body), ...args);
 const optionalNote = (body) => Object.hasOwn(body, "note") ? str(body.note, { required: false }) : "";
 
+function clearFundingEscalations(db) {
+  // A parent deposit can unblock parent-funded payouts, not child spending.
+  db.approvals.forEach((a) => {
+    if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
+    if (a.kind === "topup" && a.status === "pending") game.resolveEscalation(db, a, "approved");
+  });
+}
+
 export const actions = {
-  login: action((db, body) => {
-    if (typeof body.pin !== "string" || body.pin !== db.family.parentPin) throw new game.GameError("Wrong PIN", 401);
-  }),
   save: action((db, body) => game.childSave(db, money(body.amount, { min: 100 }))),
   spend: action((db, body) => game.childSpend(db, {
     amount: money(body.amount, { min: 1 }), memo: str(body.memo),
@@ -50,7 +56,7 @@ export const actions = {
     return game.proposeTrade(db, friendId, give, get);
   }),
   greet: action((db, body) => game.sendGreeting(db, id(body.friendId), integer(body.index, { max: game.GREETINGS.length - 1 }))),
-  chat: action((db, body, send = chat) => {
+  chat: action((db, body, send = (text) => chat(childIdFor(db), text)) => {
     if (typeof body.text === "string" && !body.text.trim()) throw new game.GameError("Say something first!");
     const text = str(body.text, { max: 500 });
     if (!db.settings.buddyEnabled) throw new game.GameError("Money Buddy is turned off by your grown-up");
@@ -74,14 +80,16 @@ export const actions = {
     const a = Object.assign(db.allowance, update);
     game.audit(db, "parent", "allowance_updated", `Allowance ${(a.amount / 100).toFixed(2)}/wk, ${a.savePct}% saved, purchase limit $${(a.spendLimit / 100).toFixed(2)}`);
   }),
+  fundingAdd: action((db, body) => {
+    const amount = money(body.amount, { min: 100, max: 100000 });
+    const note = optionalNote(body);
+    game.recordFunding(db, amount, note);
+    clearFundingEscalations(db);
+  }),
   topup: action((db, body) => {
     const amount = money(body.amount, { min: 1, max: 100000 });
     db.accounts.parent.balance += amount;
-    // A parent deposit can unblock parent-funded payouts, not child spending.
-    db.approvals.forEach((a) => {
-      if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
-      if (a.kind === "topup" && a.status === "pending") game.resolveEscalation(db, a, "approved");
-    });
+    clearFundingEscalations(db);
     game.notify(db, "parent", `Funding topped up: $${(amount / 100).toFixed(2)}`, "money");
     game.audit(db, "parent", "topup", `Added $${(amount / 100).toFixed(2)} to the funding account (simulated deposit)`);
   }),

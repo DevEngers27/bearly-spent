@@ -1,6 +1,6 @@
 // MoneyQuest service worker: keeps the built shell and postcard art offline.
 // API calls always go to the network; the child snapshot lives in localStorage.
-const VERSION = "mq-v4";
+const VERSION = "mq-v5";
 const SHELL = ["/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png", "/icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
@@ -19,7 +19,11 @@ self.addEventListener("install", (e) => {
       const src = /^<script\b/i.test(tag) ? attrs.src : attrs.rel?.toLowerCase().split(/\s+/).includes("stylesheet") ? attrs.href : null;
       if (src) assets.push(new URL(src.replace(/&amp;/g, "&"), self.location.origin).href);
     }
-    await cache.addAll([...new Set(assets)]);
+    const unique = [...new Set(assets)];
+    await cache.addAll(unique.filter((src) => new URL(src, self.location.origin).origin === self.location.origin));
+    await Promise.all(unique.filter((src) => new URL(src, self.location.origin).origin !== self.location.origin).map(async (src) => {
+      try { await cache.add(src); } catch {} // Optional fonts must not prevent shell installation.
+    }));
     await cache.put("/", copy);
     await self.skipWaiting();
   })());

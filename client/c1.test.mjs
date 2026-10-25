@@ -8,10 +8,10 @@ import { build } from "esbuild";
 import { seed } from "../server/store.js";
 import * as game from "../server/domain.js";
 import * as catalog from "../server/catalog.js";
-import { dayKey, weekKey } from "../server/time.js";
+import { childView } from "../server/index.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
-  const extra = { "Child.jsx": "Home, Sheet, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings", "App.jsx": "PinGate, Loading" }[name];
+  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog, Devices", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
   const result = await build({
     stdin: { contents: await readFile(new URL(`src/${name}`, import.meta.url), "utf8") + (extra ? `\nexport { ${extra} };` : ""), resolveDir: new URL("src/", import.meta.url).pathname, loader: "jsx" },
     bundle: true, write: false, format: "cjs", external: ["react"], jsxFactory: "h", jsxFragment: "Fragment", define: { "import.meta.env.PROD": "false" },
@@ -20,12 +20,12 @@ const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Pa
 })));
 
 function harness(name, { controller = null } = {}) {
-  const slots = [], pending = [], timers = [], timeouts = [], notices = [];
+  const slots = [], pending = [], timers = [], intervalDelays = [], timeouts = [], notices = [], streams = [];
   const storage = new Map(), session = new Map();
   const window = new EventTarget();
   window.scrollTo = () => {};
   let cursor = 0;
-  const env = { now: Date.now(), fetch: async () => new Response("{}"), slots, pending, notices, storage, session, window, timers, timeouts };
+  const env = { now: Date.now(), fetch: async () => new Response("{}"), slots, pending, notices, storage, session, window, timers, intervalDelays, timeouts, streams };
   const changed = (a, b) => !a || !b || a.length !== b.length || a.some((v, i) => !Object.is(v, b[i]));
   const hooks = {
     useState(initial) {
@@ -52,9 +52,10 @@ function harness(name, { controller = null } = {}) {
     window, document: env.document, navigator: env.navigator, sessionStorage: storageApi(session), localStorage: storageApi(storage),
     location: env.location, history: { replaceState: (a, b, url) => { env.location.href = url.href; } },
     fetch: (...args) => env.fetch(...args), Event, URL, URLSearchParams, console,
+    EventSource: class { constructor(url) { this.url = url; streams.push(this); } close() { this.closed = true; } },
     SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } },
     Date: class extends Date { static now() { return env.now; } },
-    setInterval: (fn) => { timers.push(fn); return timers.length; }, clearInterval() {}, setTimeout: (fn) => { timeouts.push(fn); return timeouts.length; }, clearTimeout: (id) => { timeouts[id - 1] = null; },
+    setInterval: (fn, ms) => { timers.push(fn); intervalDelays.push(ms); return timers.length; }, clearInterval() {}, setTimeout: (fn) => { timeouts.push(fn); return timeouts.length; }, clearTimeout: (id) => { timeouts[id - 1] = null; },
   });
   env.exports = module.exports;
   env.render = (fn, props) => { cursor = 0; return fn(props); };
@@ -95,18 +96,19 @@ test("C13 / M16: shared action guard blocks same-tick duplicates and unlocks aft
   assert.equal(h.render(() => h.exports.useAction(h.toast))[1], false);
 });
 
-test("C6: 401 clears the token and emits unauthorized before the response body arrives", async () => {
+test("C6 / B5b: 401 clears cached identity and emits unauthorized before the response body arrives", async () => {
   const h = harness("api.js");
-  h.exports.setParentToken("old-token");
+  h.storage.set("mq_last_state", "private snapshot");
+  h.storage.set("mq_child_session", "cached identity");
   let events = 0, finish;
   h.window.addEventListener("mq:unauthorized", () => events++);
   h.fetch = async () => ({ status: 401, ok: false, json: () => new Promise((r) => { finish = r; }) });
   const request = h.exports.api("parent/topup", {});
   await new Promise(setImmediate);
   assert.equal(events, 1);
-  assert.equal(h.exports.hasParentToken(), false);
-  assert.equal(h.session.has("mq_parent"), false);
-  finish({ error: "Locked" });
+  assert.equal(h.storage.has("mq_last_state"), false);
+  assert.equal(h.storage.has("mq_child_session"), false);
+  finish({ error: "Sign in again" });
   await assert.rejects(request, { status: 401 });
 });
 
@@ -175,9 +177,6 @@ test("C9 / C8: saving three times preserves the amount and the label targets the
 });
 
 test("C5: childView budget flag agrees with completeBudget; completed checklist hides its points", async () => {
-  const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
-  const fn = source.slice(source.indexOf("function childView("), source.indexOf("\nfunction parentView("));
-  const childView = vm.runInNewContext(`(${fn})`, { Date, game, dayKey, weekKey, ...catalog, placesView: () => ({}), buddyMode: () => "offline", voiceEnabled: () => false, nessieEnabled: () => false });
   const db = seed(Date.now());
   assert.equal(childView(db).budgetDoneThisWeek, false);
   game.completeBudget(db, { save: 500, needs: 800, fun: 500, give: 200 });
@@ -241,27 +240,40 @@ test("C4: parent form keys change only with their server-backed editable values"
   assert.notEqual(getSection("Allowance").props.key, allowance.props.key);
 });
 
-test("S6 / C16: returning to kid or locking clears the token; PIN URL survives reload", () => {
-  const h = harness("App.jsx");
-  h.session.set("mq_parent", "stored");
-  let tree = h.render(h.exports.default); h.flush();
+function meFixture(role = "parent", pinSet = false) {
+  return { role, family: { id: "family-one", name: "Jordan", pinSet }, unlockedUntil: 0,
+    activeChild: { id: "child-one", name: "Mia", age: 9, bearName: "Maple" },
+    children: [{ id: "child-one", name: "Mia", age: 9, bearName: "Maple" }, ...(role === "parent" ? [{ id: "child-two", name: "Leo", age: 8, bearName: "Pip" }] : [])] };
+}
+async function appHarness(me, options) {
+  const h = harness("App.jsx", options);
+  h.fetch = async () => new Response(JSON.stringify(me));
+  h.render(h.exports.default); h.flush();
+  await new Promise(setImmediate);
+  h.tree = () => { const tree = h.render(h.exports.default); h.flush(); return tree; };
+  return h;
+}
+
+test("S6 / B5b: parent kid mode requires PIN on return; a child session has no parent entry", async () => {
+  const h = await appHarness(meFixture("parent", true));
+  let tree = h.tree();
+  assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, 1);
+  nodes(tree, (n) => n.type?.name === "PinGate")[0].props.onOk({ unlockedUntil: h.now + 900000 });
+  tree = h.tree();
+  await byText(tree, "Kid mode").props.onClick();
+  tree = h.tree();
   nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.onGrownUps();
-  tree = h.render(h.exports.default); h.flush();
-  assert.equal(h.session.has("mq_parent"), false);
-  assert.equal(h.location.searchParams.get("role"), "parent");
-  nodes(tree, (n) => n.type?.name === "PinGate")[0].props.onOk();
-  tree = h.render(h.exports.default); h.flush();
-  h.session.set("mq_parent", "stored");
-  byText(tree, "Back to kid view").props.onClick();
-  assert.equal(h.session.has("mq_parent"), false);
-  tree = h.render(h.exports.default); h.flush();
-  nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.onGrownUps();
-  tree = h.render(h.exports.default); h.flush();
-  nodes(tree, (n) => n.type?.name === "PinGate")[0].props.onOk();
-  tree = h.render(h.exports.default); h.flush();
-  h.session.set("mq_parent", "stored");
-  byText(tree, "Lock").props.onClick();
-  assert.equal(h.session.has("mq_parent"), false);
+  tree = h.tree();
+  assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, 1);
+  nodes(tree, (n) => n.type?.name === "PinGate")[0].props.onOk({ unlockedUntil: h.now + 900000 });
+  await byText(h.tree(), "Lock").props.onClick();
+  assert.equal(nodes(h.tree(), (n) => n.type?.name === "PinGate").length, 1);
+  const kid = await appHarness(meFixture("child"));
+  tree = kid.tree();
+  assert.equal(nodes(tree, (n) => n.type?.name === "ParentRoot" || n.type?.name === "PinGate").length, 0);
+  assert.equal(nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.onGrownUps, undefined);
+  const child = harness("Child.jsx");
+  assert.equal(nodes(child.render(child.exports.default, { state: stateFixture(), toast: noop }), (n) => n.props["aria-label"] === "Grown-ups").length, 0);
 });
 
 test("Map: auto-scroll is throttled to two seconds and pauses through a drag", () => {
@@ -292,6 +304,7 @@ async function worker() {
   const cache = {
     match: async (request) => entries.get(key(request))?.clone(),
     put: async (request, response) => { entries.set(key(request), response.clone()); await response.arrayBuffer(); },
+    add: async (request) => { const response = await w.fetch(request); if (!response.ok) throw new Error("Asset unavailable"); await cache.put(request, response); },
     addAll: async (requests) => { for (const request of requests) { const response = await w.fetch(request); assert.equal(response.ok, true); await cache.put(request, response); } },
   };
   named.set("mq-v3", cache); named.set("another-app", cache);
@@ -375,7 +388,7 @@ test("C13 / M16: all child and parent POST controls receive the shared busy stat
   ];
   for (const [file, component, extra, buttons] of checks) {
     const h = harness(file);
-    const render = () => h.render(h.exports[component], { state, busy: true, run: noop, ...extra });
+    const render = () => h.render(h.exports[component], { state, busy: true, demo: true, run: noop, ...extra });
     let tree = render();
     if (component === "PinGate") {
       h.fetch = () => new Promise(() => {});
@@ -416,12 +429,12 @@ test("C16: return reveal replaces an open sheet and dismissing never reopens it"
   assert.equal(nodes(tree, (n) => n.type?.name === "SheetRouter").length, 0);
 });
 
-test("C6 / C16 / C3: App locks on unauthorized; controllerchange offers explicit reload", () => {
-  const h = harness("App.jsx", { controller: {} });
-  let tree = h.render(h.exports.default); h.flush();
+test("C6 / C16 / C3: App returns to Welcome on unauthorized; controllerchange offers explicit reload", async () => {
+  const h = await appHarness(meFixture(), { controller: {} });
+  let tree = h.tree();
   h.window.dispatchEvent(new Event("mq:unauthorized"));
   tree = h.render(h.exports.default); h.flush();
-  assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, 1);
+  assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen")[0].props.screen, "welcome");
   let reloads = 0;
   h.location.reload = () => reloads++;
   h.navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
@@ -429,7 +442,585 @@ test("C6 / C16 / C3: App locks on unauthorized; controllerchange offers explicit
   byText(tree, "Updated! Tap to reload").props.onClick();
   assert.equal(reloads, 1);
   const loading = h.render(h.exports.Loading, { error: new Error("Failed to fetch") });
-  assert.equal(text(loading).trim(), "Can't reach MoneyQuest right now. Check your connection and try again.");
+  assert.match(text(loading), /Can't reach MoneyQuest right now\. Check your connection and try again\./);
+  assert.ok(byText(loading, "Try again"));
+});
+
+// Wave 2 account integration: exercise real event handlers without sockets.
+test("B5b: cookies and selected child reach actions, state, chat cursors and audio; public login has no child query", async () => {
+  const h = harness("api.js"), requests = [];
+  h.fetch = async (url, options) => { requests.push({ url, options }); return new Response("{}"); };
+  h.exports.setSelectedChild("child two");
+  for (const [path, body] of [["state"], ["parent/goal", { title: "Read" }], ["parent/state?before=msg-1"], ["voice/token", {}], ["buddy/speak", { text: "Hi" }], ["auth/me"], ["auth/login", { email: "a@b.test", password: "password" }]]) await h.exports.api(path, body);
+  for (const { url, options } of requests) {
+    assert.equal(options.credentials, "same-origin");
+    assert.deepEqual(Object.keys(options.headers), ["Content-Type"]);
+    assert.equal(new URL(url, h.location).searchParams.get("child"), url.includes("/auth/login") ? null : "child two");
+  }
+  assert.equal(new URL(requests[2].url, h.location).searchParams.get("before"), "msg-1");
+  assert.equal(h.session.size, 0);
+});
+
+test("B5b: parent 423 and locked 403 open unlock; child-access 403 does not; 429 preserves the server copy", async () => {
+  const h = harness("api.js");
+  let locks = 0, message;
+  h.window.addEventListener("mq:locked", () => locks++);
+  h.window.addEventListener("mq:rate-limit", (event) => { message = event.message; });
+  for (const [status, error] of [[423, "Locked"], [403, "Please unlock parent mode"], [403, "A grown-up needs to sign in"], [429, "Let's take a little break. Try again soon!"]]) {
+    h.fetch = async () => new Response(JSON.stringify({ error }), { status });
+    await assert.rejects(h.exports.api("parent/state"), { status, message: error });
+  }
+  assert.equal(locks, 2);
+  assert.equal(message, "Let's take a little break. Try again soon!");
+});
+
+test("B5b: SSE uses selected child, ignores siblings, and rechecks auth on disconnect", async () => {
+  const h = harness("api.js"), requests = [];
+  h.exports.setSelectedChild("child-one");
+  h.fetch = async (url) => { requests.push(url); return new Response(JSON.stringify(stateFixture())); };
+  h.render(() => h.exports.useLiveState("child", "child-one")); h.flush();
+  await new Promise(setImmediate);
+  const stream = h.streams[0];
+  assert.equal(stream.url, "/api/stream?child=child-one");
+  const initial = requests.length;
+  stream.onmessage({ data: JSON.stringify({ childId: "sibling", version: 5 }) });
+  assert.equal(requests.length, initial);
+  stream.onmessage({ data: JSON.stringify({ childId: "child-one", version: 5 }) });
+  await new Promise(setImmediate);
+  assert.equal(requests.length, initial + 1);
+  stream.onerror();
+  await new Promise(setImmediate);
+  assert.equal(requests.at(-1), "/api/auth/me?child=child-one");
+  h.slots.filter((slot) => slot?.cleanup).forEach((slot) => slot.cleanup());
+  assert.equal(stream.closed, true);
+});
+
+test("B5b: stale state cannot repopulate the cache after sign-out or a child switch", async () => {
+  const h = harness("api.js");
+  let finish;
+  h.exports.setSelectedChild("child-one");
+  h.fetch = () => new Promise((resolve) => { finish = resolve; });
+  const request = h.exports.api("state");
+  h.exports.clearSessionCache();
+  finish(new Response(JSON.stringify({ ...stateFixture(), childId: "child-one" })));
+  await request;
+  assert.equal(h.storage.has("mq_last_state"), false);
+});
+
+function changeField(tree, label, value) {
+  const container = nodes(tree, (n) => n.type === "label" && text(n).startsWith(label))[0];
+  nodes(container, (n) => n.type === "input" || n.type === "select")[0].props.onChange({ target: { value } });
+}
+
+test("B5b: create-family and sign-in submit the contract fields and use the returned role", async () => {
+  for (const screen of ["create", "signin"]) {
+    const h = harness("App.jsx"), calls = [], sessions = [];
+    const props = { screen, navigate: noop, onSession: (me) => sessions.push(me), toast: noop };
+    const render = () => h.render(h.exports.AuthScreen, props);
+    h.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return new Response(JSON.stringify(meFixture())); };
+    for (const [label, value] of [["Email", "parent@test.com"], ["Password", "a password"], ...(screen === "create" ? [["Your name", "Jordan"], ["Child's name", "Mia"], ["Age", "10"], ["Bear's name", "Maple"]] : [])]) changeField(render(), label, value);
+    nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+    await new Promise(setImmediate);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], screen === "create" ? "/api/auth/register" : "/api/auth/login");
+    const body = calls[0][1];
+    assert.equal(body.email, "parent@test.com");
+    assert.equal(body.password, "a password");
+    if (screen === "create") {
+      assert.equal(body.childAge, 10);
+      assert.equal(body.parentName, "Jordan");
+      assert.equal(body.childName, "Mia");
+      assert.equal(body.bearName, "Maple");
+      assert.equal(typeof body.timezone, "string");
+      assert.equal("code" in body, false);
+    }
+    assert.equal(sessions[0].role, "parent");
+  }
+});
+
+test("B5b: kid code accepts typing, big keys and delete, then opens only the child session", async () => {
+  const h = harness("App.jsx"), sessions = [], requests = [];
+  const props = { screen: "link", navigate: noop, onSession: (me) => sessions.push(me), toast: noop };
+  const render = () => h.render(h.exports.AuthScreen, props);
+  h.fetch = async (url, options) => { requests.push([url, JSON.parse(options.body)]); return new Response(JSON.stringify(meFixture("child"))); };
+  changeField(render(), "Kid code", " bc34 ");
+  byText(render(), "Delete").props.onClick();
+  byText(render(), "6").props.onClick();
+  byText(render(), "7").props.onClick();
+  byText(render(), "8").props.onClick();
+  assert.equal(nodes(render(), (n) => n.type === "input")[0].props.value, "BC3678");
+  nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  await new Promise(setImmediate);
+  assert.deepEqual(requests, [["/api/auth/link", { code: "BC3678" }]]);
+  assert.equal(sessions[0].role, "child");
+});
+
+test("B5b: demo button appears only with availability and calls demo/login", async () => {
+  const h = harness("App.jsx"), requests = [];
+  const props = { screen: "welcome", navigate: noop, onSession: noop, toast: noop };
+  assert.equal(byText(h.render(h.exports.AuthScreen, props), "Try the demo family"), undefined);
+  h.fetch = async (url) => { requests.push(url); return new Response(JSON.stringify(meFixture())); };
+  const tree = h.render(h.exports.AuthScreen, { ...props, demo: true });
+  byText(tree, "Try the demo family").props.onClick();
+  await new Promise(setImmediate);
+  assert.deepEqual(requests, ["/api/demo/login"]);
+});
+
+test("B5b: a parent without a PIN returns directly with a Security nudge; switching children remounts its view", async () => {
+  const h = await appHarness(meFixture());
+  let tree = h.tree();
+  const old = nodes(tree, (n) => n.type?.name === "ParentRoot")[0];
+  nodes(tree, (n) => n.type === "select")[0].props.onChange({ target: { value: "child-two" } });
+  tree = h.tree();
+  const next = nodes(tree, (n) => n.type?.name === "ParentRoot")[0];
+  assert.notEqual(old.props.key, next.props.key);
+  assert.equal(next.props.childId, "child-two");
+  assert.equal(h.storage.get("mq_selected_child"), "child-two");
+  byText(tree, "Kid mode").props.onClick();
+  nodes(h.tree(), (n) => n.type?.name === "ChildRoot")[0].props.onGrownUps();
+  tree = h.tree();
+  assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, 0);
+  assert.ok(byText(tree, "Kid mode"));
+  assert.match(text(tree), /Set a PIN in Security/);
+});
+
+test("B5b: lock events open a PIN sheet for parents and 429 becomes a toast", async () => {
+  const h = await appHarness(meFixture());
+  h.tree();
+  h.window.dispatchEvent(new Event("mq:locked"));
+  assert.equal(nodes(h.tree(), (n) => n.type?.name === "PinGate").length, 1);
+  const event = new Event("mq:rate-limit"); event.message = "Please wait a little";
+  h.window.dispatchEvent(event);
+  assert.match(text(h.tree()), /Please wait a little/);
+});
+
+test("B5b: PIN sheet sends parent/unlock and preserves the returned deadline", async () => {
+  const h = harness("App.jsx"), calls = [], results = [];
+  const props = { onOk: (result) => results.push(result), onCancel: noop };
+  const render = () => h.render(h.exports.PinGate, props);
+  h.fetch = async (url, options) => { calls.push([url, JSON.parse(options.body)]); return new Response(JSON.stringify({ ok: true, unlockedUntil: 1234 })); };
+  changeField(render(), "Parent PIN", "5678");
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.deepEqual(calls, [["/api/parent/unlock", { pin: "5678" }]]);
+  assert.equal(results[0].unlockedUntil, 1234);
+  assert.doesNotMatch(text(render()), /1234|demo PIN/i);
+});
+
+test("B5b: child-only offline reload requires a matching cached child; 401 never falls back", async () => {
+  for (const [role, status, matching, expected] of [["child", null, true, true], ["parent", null, true, false], ["child", null, false, false], ["child", 401, true, false]]) {
+    const h = harness("App.jsx"), me = meFixture(role);
+    h.storage.set("mq_child_session", JSON.stringify(me));
+    h.storage.set("mq_last_state", JSON.stringify({ ...stateFixture(), childId: matching ? "child-one" : "another-child" }));
+    h.fetch = async () => { if (status) return new Response('{"error":"Sign in"}', { status }); throw new Error("Offline"); };
+    h.render(h.exports.default); h.flush();
+    await new Promise(setImmediate);
+    const tree = h.render(h.exports.default); h.flush();
+    assert.equal(nodes(tree, (n) => n.type?.name === "ChildRoot").length > 0, expected);
+    if (status === 401) assert.equal(h.storage.has("mq_last_state"), false);
+  }
+});
+
+test("B5b: sign-out posts cookie logout and returns to Welcome with no cached identity", async () => {
+  const h = await appHarness(meFixture()), calls = [];
+  h.storage.set("mq_last_state", JSON.stringify(stateFixture()));
+  h.fetch = async (url, options) => { calls.push([url, options]); return new Response("{}"); };
+  await nodes(h.tree(), (n) => n.type?.name === "ParentRoot")[0].props.onSignOut();
+  const tree = h.tree();
+  assert.equal(new URL(calls[0][0], h.location).pathname, "/api/auth/logout");
+  assert.equal(calls[0][1].credentials, "same-origin");
+  assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen")[0].props.screen, "welcome");
+  assert.equal(h.storage.has("mq_child_session"), false);
+  assert.equal(h.storage.has("mq_last_state"), false);
+});
+
+test("B5b: Children pairs the path child consistently, counts down expiry, and adds a zero-start saver", async () => {
+  const h = harness("Parent.jsx"), requests = [];
+  let refreshed = 0;
+  const props = { me: meFixture(), refreshMe: async () => { refreshed++; }, run: async (action, body) => typeof action === "function" ? action() : h.exports.api?.(action, body) };
+  h.fetch = async (url, options) => {
+    requests.push([url, JSON.parse(options.body)]);
+    return new Response(JSON.stringify(url.includes("/link") ? { code: "BC3467", expiresAt: h.now + 900000 } : { id: "new-child" }));
+  };
+  const render = () => h.render(h.exports.Children, props);
+  let tree = render(); h.flush();
+  await nodes(tree, (n) => n.type === "button" && text(n).includes("Generate kid code"))[1].props.onClick();
+  tree = render();
+  assert.equal(requests[0][0], "/api/parent/children/child-two/link?child=child-two");
+  assert.match(text(tree), /Expires in\s+15\s*:\s*00/);
+  assert.equal(nodes(tree, (n) => n.type === "input" && n.props.readOnly)[0].props.value, "BC3467");
+  h.now += 900001; h.timers[0]();
+  assert.match(text(render()), /This code expired/);
+  for (const [label, value] of [["Child's name", "Leo"], ["Age", "8"], ["Bear's name", "Pip"]]) changeField(render(), label, value);
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.deepEqual(requests[1], ["/api/parent/children", { name: "Leo", age: 8, bearName: "Pip" }]);
+  assert.equal(refreshed, 1);
+});
+
+test("B5b: Security sets or changes PIN and offers global sign-out", async () => {
+  for (const pinSet of [false, true]) {
+    const h = harness("Parent.jsx"), requests = [];
+    let refreshed = 0;
+    const props = { me: meFixture("parent", pinSet), refreshMe: async () => { refreshed++; }, run: async (action) => action(), onSignOut: noop };
+    const render = () => h.render(h.exports.Security, props);
+    h.fetch = async (url, options) => { requests.push([url, JSON.parse(options.body)]); return new Response('{"ok":true,"unlockedUntil":1234}'); };
+    changeField(render(), "New PIN", "5678");
+    await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+    assert.deepEqual(requests, [["/api/parent/pin", { pin: "5678" }]]);
+    assert.equal(refreshed, 1);
+    assert.notEqual(byText(render(), "Sign out everywhere").props.disabled, true);
+    assert.equal(byText(render(), "Confirm sign out everywhere"), undefined);
+  }
+});
+
+test("B5b: Buddy chats load exclusive older pages without duplicate live messages", async () => {
+  const h = harness("Parent.jsx"), requests = [], state = stateFixture();
+  state.chat = [{ id: "new", role: "user", text: "New question" }];
+  state.chatNextBefore = "new";
+  const props = { state, run: async (action) => action() };
+  h.fetch = async (url) => { requests.push(url); return new Response(JSON.stringify({ chat: [{ id: "old", role: "assistant", text: "Earlier answer" }, state.chat[0]], chatNextBefore: null })); };
+  const render = () => h.render(h.exports.BuddyLog, props);
+  await byText(render(), "Load older").props.onClick();
+  assert.equal(requests[0], "/api/parent/state?before=new");
+  assert.equal(byText(render(), "Load older"), undefined);
+  assert.equal(nodes(render(), (n) => n.type === "li").length, 2);
+  assert.match(text(render()), /Earlier answer.*New question/);
+});
+
+test("B5b: reload preserves Kid mode or local lock even while the server unlock window is valid", async () => {
+  for (const mode of ["kid", "locked"]) {
+    const h = harness("App.jsx"), me = meFixture("parent", true);
+    me.unlockedUntil = h.now + 900000;
+    h.storage.set("mq_parent_mode", mode);
+    h.storage.set("mq_selected_child", "child-two");
+    h.fetch = async () => new Response(JSON.stringify(me));
+    h.render(h.exports.default); h.flush();
+    await new Promise(setImmediate);
+    const tree = h.render(h.exports.default); h.flush();
+    assert.equal(nodes(tree, (n) => n.type?.name === "ParentRoot").length, 0);
+    assert.equal(nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.childId, "child-two");
+    assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, mode === "locked" ? 1 : 0);
+  }
+});
+
+test("B5b: client cookie requests work against the real account dispatcher through register, PIN, pairing and logout", async (t) => {
+  const { dispatch } = await import("../server/index.js");
+  const { _databaseForTest, closeDatabase } = await import("../server/db.js");
+  const { _clearStoreForTest } = await import("../server/store.js");
+  const { _clearLimitsForTest } = await import("../server/limits.js");
+  _clearStoreForTest();
+  _clearLimitsForTest();
+  _databaseForTest();
+  t.after(() => { _clearStoreForTest(); _clearLimitsForTest(); closeDatabase(); });
+  function browser(ip) {
+    const h = harness("api.js");
+    let cookie = "";
+    h.fetch = async (path, options) => {
+      assert.equal(options.credentials, "same-origin");
+      const url = new URL(path, h.location);
+      const req = { body: options.body === undefined ? undefined : JSON.parse(options.body), headers: { cookie }, ip, query: Object.fromEntries(url.searchParams) };
+      const res = {
+        headers: {}, statusCode: 200,
+        set(key, value) { if (typeof key === "object") Object.assign(this.headers, key); else this.headers[key] = value; return this; },
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; },
+      };
+      await dispatch(options.method, url.pathname, req, res);
+      if (res.headers["Set-Cookie"]) cookie = res.headers["Set-Cookie"].split(";")[0];
+      return new Response(JSON.stringify(res.body), { status: res.statusCode });
+    };
+    return h.exports;
+  }
+  const parent = browser("parent-client"), kid = browser("kid-client");
+  const me = await parent.api("auth/register", { email: "wave2@example.test", password: "a-good-password", parentName: "Jordan", childName: "Mia", childAge: 9, bearName: "Maple", timezone: "America/Los_Angeles" });
+  assert.equal(me.role, "parent");
+  assert.equal("token" in me, false);
+  const second = await parent.api("parent/children", { name: "Leo", age: 8, bearName: "Pip" });
+  parent.setSelectedChild(second.id);
+  const state = await parent.api("parent/state");
+  assert.equal(state.childId, second.id);
+  assert.equal(state.balances.savings, 0);
+  await parent.api("parent/pin", { pin: "5678" });
+  const link = await parent.api(`parent/children/${second.id}/link`, {});
+  const linked = await kid.api("auth/link", { code: link.code });
+  assert.equal(linked.role, "child");
+  assert.equal(linked.activeChild.id, second.id);
+  kid.setSelectedChild(second.id);
+  assert.equal((await kid.api("state")).child.name, "Leo");
+  await assert.rejects(kid.api("parent/state"), { status: 403, message: "A grown-up needs to sign in" });
+  await parent.api("auth/logout", {});
+  parent.clearSessionCache();
+  const signedIn = await parent.api("auth/login", { email: "wave2@example.test", password: "a-good-password" });
+  assert.equal(signedIn.family.pinSet, true);
+  parent.setSelectedChild(second.id);
+  await assert.rejects(parent.api("parent/state"), { status: 403, message: "Please unlock parent mode" });
+  await parent.api("parent/unlock", { pin: "5678" });
+  assert.equal((await parent.api("parent/state")).childId, second.id);
+  const otherParent = browser("other-parent-client");
+  await otherParent.api("auth/login", { email: "wave2@example.test", password: "a-good-password" });
+  await assert.rejects(otherParent.api("auth/logout-all", {}), { status: 403, message: "Please unlock parent mode" });
+  await otherParent.api("parent/unlock", { pin: "5678" });
+  await otherParent.api("auth/logout-all", {});
+  await assert.rejects(otherParent.api("auth/me"), { status: 401 });
+  await assert.rejects(parent.api("auth/me"), { status: 401 });
+  await assert.rejects(kid.api("state"), { status: 401 });
+  await assert.rejects(kid.api("auth/me"), { status: 401 });
+});
+
+test("B5b: Welcome uses unauthenticated demo discovery; malformed success remains retryable", async () => {
+  for (const status of [200, 401]) {
+    const h = harness("App.jsx");
+    h.fetch = async () => new Response(JSON.stringify({ demo: true, ...(status === 401 ? { error: "Sign in" } : {}) }), { status });
+    h.render(h.exports.default); h.flush();
+    await new Promise(setImmediate);
+    const tree = h.render(h.exports.default); h.flush();
+    const welcome = nodes(tree, (n) => n.type?.name === "AuthScreen")[0];
+    if (status === 401) {
+      assert.equal(welcome.props.screen, "welcome");
+      assert.equal(welcome.props.demo, true);
+      assert.equal(welcome.props.error, null);
+    } else {
+      assert.equal(welcome, undefined);
+      assert.ok(nodes(tree, (n) => n.type?.name === "Loading")[0].props.error);
+    }
+  }
+});
+
+test("B5b follow-up R1/R4: wrong password, wrong PIN and rate limits stay inline without losing input or identity", async () => {
+  for (const form of ["signin", "pin"]) {
+    for (const status of [401, 429]) {
+      const h = harness("App.jsx");
+      h.storage.set("mq_last_state", "keep snapshot");
+      h.storage.set("mq_child_session", "keep identity");
+      let unauthorized = 0, limited = 0, accepted = 0;
+      h.window.addEventListener("mq:unauthorized", () => unauthorized++);
+      h.window.addEventListener("mq:rate-limit", () => limited++);
+      const message = status === 429 ? "Let's take a little break. Try again soon!" : form === "pin" ? "That PIN didn't match" : "Email or password didn't match";
+      const component = form === "pin" ? h.exports.PinGate : h.exports.AuthScreen;
+      const props = { screen: "signin", navigate: () => assert.fail("must stay on form"), onSession: () => accepted++, onOk: () => accepted++, onCancel: noop };
+      const render = () => h.render(component, props);
+      changeField(render(), form === "pin" ? "Parent PIN" : "Email", form === "pin" ? "5678" : "parent@example.test");
+      h.fetch = async () => new Response(JSON.stringify({ error: message }), { status });
+      await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+      await new Promise(setImmediate);
+      const tree = render();
+      assert.equal(nodes(tree, (n) => n.props.role === "alert").map(text).join(""), message);
+      assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, form === "pin" ? "5678" : "parent@example.test");
+      assert.equal(h.storage.get("mq_last_state"), "keep snapshot");
+      assert.equal(h.storage.get("mq_child_session"), "keep identity");
+      assert.equal(unauthorized, 0);
+      assert.equal(limited, status === 429 ? 1 : 0);
+      assert.equal(accepted, 0);
+    }
+  }
+  const h = harness("api.js");
+  h.fetch = async () => new Response('{"error":"Try again"}', { status: 401 });
+  let unauthorized = 0;
+  h.window.addEventListener("mq:unauthorized", () => unauthorized++);
+  await assert.rejects(h.exports.api("parent/unlock?child=one", {}), { status: 401 });
+  await assert.rejects(h.exports.api("auth/login?next=home", {}), { status: 401 });
+  assert.equal(unauthorized, 0);
+  await assert.rejects(h.exports.api("state"), { status: 401 });
+  assert.equal(unauthorized, 1);
+});
+
+test("B5b follow-up R2: only child-scoped 404 requests for the current identity trigger selection recovery", async () => {
+  const h = harness("api.js");
+  let resets = 0;
+  h.window.addEventListener("mq:child-reset", () => resets++);
+  h.fetch = async () => new Response('{"error":"Child not found"}', { status: 404 });
+  await assert.rejects(h.exports.api("auth/me"), { status: 404 });
+  assert.equal(resets, 0);
+  h.exports.setSelectedChild("stale-child");
+  for (const path of ["state", "parent/state?before=message", "child/save"]) {
+    await assert.rejects(h.exports.api(path), { status: 404 });
+  }
+  assert.equal(resets, 3);
+  await assert.rejects(h.exports.api("parent/children/other/link?child=other", {}), { status: 404 });
+  assert.equal(resets, 4);
+  let finish;
+  h.fetch = () => new Promise((resolve) => { finish = resolve; });
+  const stale = h.exports.api("state");
+  h.exports.setSelectedChild("new-selection");
+  finish(new Response('{"error":"Child not found"}', { status: 404 }));
+  await assert.rejects(stale, { status: 404 });
+  assert.equal(resets, 4);
+});
+
+test("B5b follow-up R2: scoped 404 refreshes the children list and recovers the first child in parent and Kid mode", async () => {
+  for (const kidMode of [false, true]) {
+    const h = await appHarness(meFixture());
+    let tree = h.tree();
+    nodes(tree, (n) => n.type === "select")[0].props.onChange({ target: { value: "child-two" } });
+    tree = h.tree();
+    if (kidMode) { byText(tree, "Kid mode").props.onClick(); tree = h.tree(); }
+    const rootName = kidMode ? "ChildRoot" : "ParentRoot";
+    const before = nodes(tree, (n) => n.type?.name === rootName)[0];
+    const requests = [], current = meFixture();
+    // Simulate deletion of both cached children, leaving a new first child.
+    current.children = [{ ...current.children[0], id: "server-first" }];
+    current.activeChild = current.children[0];
+    h.fetch = async (url) => {
+      requests.push(url);
+      if (url === "/api/auth/me") return new Response(JSON.stringify(current));
+      return new Response('{"error":"Child not found"}', { status: 404 });
+    };
+    const root = harness("App.jsx");
+    root.exports.setSelectedChild("child-two");
+    root.fetch = async () => new Response('{"error":"Child not found"}', { status: 404 });
+    const props = { ...before.props, toast: noop, onConnection: noop };
+    root.render(root.exports[rootName], props); root.flush();
+    await new Promise(setImmediate);
+    // API reset events are on the shared browser window in the real app.
+    root.window.addEventListener("mq:child-reset", () => h.window.dispatchEvent(new Event("mq:child-reset")));
+    const failed = root.render(root.exports[rootName], props);
+    await failed.props.onRetry();
+    await new Promise(setImmediate);
+    tree = h.tree();
+    const recovered = nodes(tree, (n) => n.type?.name === rootName)[0];
+    assert.equal(recovered.props.childId, "server-first");
+    assert.notEqual(recovered.props.key, before.props.key);
+    assert.equal(h.storage.get("mq_selected_child"), "server-first");
+    assert.deepEqual(requests, ["/api/auth/me"]);
+    assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, 0);
+    const remounted = harness("App.jsx");
+    remounted.exports.setSelectedChild(recovered.props.childId);
+    remounted.fetch = async (url) => {
+      assert.equal(new URL(url, h.location).searchParams.get("child"), "server-first");
+      return new Response(JSON.stringify({ ...stateFixture(), childId: "server-first" }));
+    };
+    remounted.render(remounted.exports[rootName], { ...recovered.props, onConnection: noop }); remounted.flush();
+    await new Promise(setImmediate);
+    assert.equal(nodes(remounted.render(remounted.exports[rootName], { ...recovered.props, onConnection: noop }), (n) => ["Child", "Parent"].includes(n.type?.name)).length, 1);
+  }
+});
+
+test("B5b follow-up R2: recovery cannot overwrite a newer manual child selection or sign-out", async () => {
+  for (const signOut of [false, true]) {
+    const h = await appHarness(meFixture());
+    let finish;
+    h.fetch = () => new Promise((resolve) => { finish = resolve; });
+    h.tree();
+    h.window.dispatchEvent(new Event("mq:child-reset"));
+    if (signOut) h.window.dispatchEvent(new Event("mq:unauthorized"));
+    else nodes(h.tree(), (n) => n.type === "select")[0].props.onChange({ target: { value: "child-two" } });
+    finish(new Response(JSON.stringify(meFixture())));
+    await new Promise(setImmediate);
+    const tree = h.tree();
+    if (signOut) assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen")[0].props.screen, "welcome");
+    else assert.equal(nodes(tree, (n) => n.type?.name === "ParentRoot")[0].props.childId, "child-two");
+  }
+});
+
+test("B5b follow-up R3: initial state failures offer retry and only parent Kid mode offers grown-up recovery", async () => {
+  for (const role of ["child", "parent", "kid-mode-parent"]) {
+    const h = harness("App.jsx"), requests = [];
+    let back = 0, fail = true;
+    h.fetch = async (url) => {
+      requests.push(url);
+      if (fail) return new Response('{"error":"Oops"}', { status: 500 });
+      return new Response(JSON.stringify(stateFixture()));
+    };
+    const component = role === "parent" ? h.exports.ParentRoot : h.exports.ChildRoot;
+    const props = { childId: "child-one", toast: noop, onConnection: noop, ...(role === "kid-mode-parent" ? { onGrownUps: () => back++ } : {}) };
+    h.render(component, props); h.flush();
+    await new Promise(setImmediate);
+    const failed = h.render(component, props);
+    const display = harness("App.jsx");
+    const screen = display.render(display.exports.Loading, failed.props);
+    assert.ok(byText(screen, "Try again"));
+    assert.equal(Boolean(byText(screen, "Back to grown-ups")), role === "kid-mode-parent");
+    if (role === "kid-mode-parent") { byText(screen, "Back to grown-ups").props.onClick(); assert.equal(back, 1); }
+    fail = false;
+    await byText(screen, "Try again").props.onClick();
+    assert.equal(nodes(h.render(component, props), (n) => ["Child", "Parent"].includes(n.type?.name)).length, 1);
+    assert.equal(requests.length, 2);
+  }
+});
+
+test("B5b follow-up N1: kid code typing and paste use exactly the server alphabet", () => {
+  const h = harness("App.jsx"), props = { screen: "link", navigate: noop, onSession: noop };
+  const render = () => h.render(h.exports.AuthScreen, props);
+  changeField(render(), "Kid code", "aAeEiIoOuUlLsSzZ0125! b-c d.3 4 6 7 8 9");
+  assert.equal(nodes(render(), (n) => n.type === "input")[0].props.value, "BCD346");
+  for (const character of "BCDFGHJKMNPQRTVWXY346789") {
+    changeField(render(), "Kid code", character.toLowerCase());
+    assert.equal(nodes(render(), (n) => n.type === "input")[0].props.value, character);
+  }
+});
+
+test("B5b follow-up logout-all: Security confirms, cancels and respects busy state before invoking logout", async () => {
+  const h = harness("Parent.jsx");
+  let calls = 0;
+  const props = { me: meFixture(), run: async (fn) => fn(), onSignOutAll: async () => { calls++; }, busy: false };
+  const render = (extra = {}) => h.render(h.exports.Security, { ...props, ...extra });
+  assert.equal(byText(render(), "Confirm sign out everywhere"), undefined);
+  byText(render(), "Sign out everywhere").props.onClick();
+  assert.equal(calls, 0);
+  assert.match(text(render()), /including kid devices; you will need new kid codes/);
+  assert.equal(byText(render({ busy: true }), "Confirm sign out everywhere").props.disabled, true);
+  byText(render(), "Cancel").props.onClick();
+  assert.equal(byText(render(), "Confirm sign out everywhere"), undefined);
+  byText(render(), "Sign out everywhere").props.onClick();
+  await byText(render(), "Confirm sign out everywhere").props.onClick();
+  assert.equal(calls, 1);
+});
+
+test("B5b follow-up logout-all: cookie POST returns to Welcome only on success, locked errors open PIN", async () => {
+  for (const status of [200, 403, 423, 500]) {
+    const h = await appHarness(meFixture()), calls = [];
+    h.fetch = async (url, options) => {
+      calls.push([url, options]);
+      return new Response(JSON.stringify(status === 200 ? { ok: true } : { error: status === 500 ? "Oops" : "Please unlock parent mode" }), { status });
+    };
+    const root = nodes(h.tree(), (n) => n.type?.name === "ParentRoot")[0];
+    if (status === 200) await root.props.onSignOutAll();
+    else await assert.rejects(root.props.onSignOutAll(), { status });
+    const [url, options] = calls[0];
+    assert.equal(new URL(url, h.location).pathname, "/api/auth/logout-all");
+    assert.equal(options.method, "POST");
+    assert.equal(options.credentials, "same-origin");
+    assert.equal(options.body, "{}");
+    const tree = h.tree();
+    assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen").length, status === 200 ? 1 : 0);
+    assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, [403, 423].includes(status) ? 1 : 0);
+    if (status === 200) assert.equal(h.storage.has("mq_selected_child"), false);
+  }
+});
+
+test("B5b follow-up demo: Welcome fetches unauthenticated availability on each entry and honors true and false", async () => {
+  const h = await appHarness({ ...meFixture(), demo: true });
+  let demo = true;
+  const requests = [];
+  h.fetch = async (url) => {
+    requests.push(url);
+    return new Response(JSON.stringify({ error: "Sign in again", demo }), { status: 401 });
+  };
+  h.window.dispatchEvent(new Event("mq:unauthorized"));
+  h.tree();
+  await new Promise(setImmediate);
+  let tree = h.tree();
+  let welcome = nodes(tree, (n) => n.type?.name === "AuthScreen")[0];
+  assert.equal(welcome.props.demo, true);
+  welcome.props.navigate("signin"); h.tree();
+  demo = false;
+  nodes(h.tree(), (n) => n.type?.name === "AuthScreen")[0].props.navigate("welcome"); h.tree();
+  await new Promise(setImmediate);
+  tree = h.tree();
+  welcome = nodes(tree, (n) => n.type?.name === "AuthScreen")[0];
+  assert.equal(welcome.props.demo, false);
+  assert.deepEqual(requests, ["/api/auth/me", "/api/auth/me"]);
+});
+
+test("B5b follow-up demo: a delayed Welcome discovery 401 cannot eject the sign-in form", async () => {
+  const h = await appHarness(meFixture());
+  let finish;
+  h.fetch = () => new Promise((resolve) => { finish = resolve; });
+  h.window.dispatchEvent(new Event("mq:unauthorized"));
+  const welcome = nodes(h.tree(), (n) => n.type?.name === "AuthScreen")[0];
+  welcome.props.navigate("signin"); h.tree();
+  finish(new Response('{"error":"Sign in","demo":true}', { status: 401 }));
+  await new Promise(setImmediate);
+  assert.equal(nodes(h.tree(), (n) => n.type?.name === "AuthScreen")[0].props.screen, "signin");
 });
 
 test("F3: Home offers one flat-price trip and an anonymous countdown sign", async () => {
@@ -727,27 +1318,42 @@ test("F36.3: spoiler-free reveal and reduced motion", () => {
   for (const revealDelay of [0, 2400]) {
     const h = harness("Child.jsx"), state = stateFixture();
     const props = { place: state.catalog.places.seattle, bearName: "Maple", to: "Mia", collectedAt: h.now, revealDelay };
+    const assertUnrevealed = (tree) => {
+      assert.equal(text(tree).includes(props.place.name), false);
+      assert.equal(text(tree).includes(props.place.story), false);
+      assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
+      assert.equal(nodes(tree, (n) => n.type === "h2" || ["story", "pc-story", "pc-place", "postmark"].includes(n.props.className)).length, 0);
+      assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "");
+      for (const face of ["front", "back"]) {
+        assert.equal(nodes(tree, (n) => n.props.className === `flip-face ${face}`)[0].props["aria-hidden"], true);
+      }
+    };
     let tree = h.render(h.exports.FlipPostcard, props); h.flush();
-    assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
-    assert.equal(nodes(tree, (n) => n.props.className === "postmark").length, 0);
-    assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "");
+    assertUnrevealed(tree);
     nodes(tree, (n) => n.props.role === "button")[0].props.onClick();
     tree = h.render(h.exports.FlipPostcard, props);
     assert.match(tree.props.className, /flipped/);
     h.timeouts[0](); // start the flip, still no readable spoiler
     tree = h.render(h.exports.FlipPostcard, props);
-    assert.doesNotMatch(text(tree), /Seattle|hydrangeas|Washington/);
+    assertUnrevealed(tree);
     h.timeouts[1](); // finish the flip
     tree = h.render(h.exports.FlipPostcard, props);
     assert.match(text(tree), /Seattle/);
     assert.match(text(tree), /hydrangeas/);
     assert.equal(nodes(tree, (n) => n.props.className === "postmark").length, 1);
+    assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "Maple at Seattle");
     const reduced = harness("Child.jsx"); reduced.window.matchMedia = () => ({ matches: true });
     tree = reduced.render(reduced.exports.FlipPostcard, props);
     assert.doesNotMatch(tree.props.className, /flipped/);
     assert.match(text(tree), /Seattle/);
     assert.match(text(tree), /hydrangeas/);
+    assert.equal(nodes(tree, (n) => n.type === "img")[0].props.alt, "Maple at Seattle");
   }
+  const h = harness("Child.jsx"), state = stateFixture();
+  state.postcards = [{ id: "return-card", defId: "seattle" }];
+  const tree = h.render(h.exports.ReturnReveal, { state, latest: { postcardIds: ["return-card"] }, onSeen: noop, onDone: noop });
+  assert.equal(tree.props.title, `${state.child.bear.name} is home!`);
+  assert.doesNotMatch(tree.props.title + text(tree), /Seattle|hydrangeas|Washington/);
 });
 
 test("F36.4: paper envelope body and flap", async () => {
@@ -850,13 +1456,34 @@ test("D3: Album, Map and Overview use the same trip-place and card metrics", () 
   const state = stateFixture();
   state.postcards.push({ id: "trip", defId: "seattle", source: "trip" }, { id: "trade", defId: "san_francisco", source: "trade" });
   state.metrics = { postcards: { places: 2, cards: 4, total: 15 } };
-  for (const [file, name, expected] of [["Child.jsx", "Album", /2 of 15 places · 4 cards/], ["Child.jsx", "MapScreen", /2 of 15 places/], ["Parent.jsx", "Overview", /2 of 15 places \(\s*4 cards\)/]]) {
+  for (const [file, name, expected] of [["Child.jsx", "Album", /2 of 15 places · 4 cards/], ["Child.jsx", "MapScreen", /2 of 15 places/], ["Parent.jsx", "Overview", /2 of 15 places \(\s*4 cards\s*\)/]]) {
     const h = harness(file);
     assert.match(text(h.render(h.exports[name], { state })).replace(/\s+/g, " "), expected);
   }
   const old = harness("api.js");
   delete state.metrics;
   assert.deepEqual(JSON.parse(JSON.stringify(old.exports.postcardMetrics(state))), { places: 2, cards: 4, total: 15 });
+});
+
+test("W2b: postcard metrics pluralise cards and catalog places in Album, Map and Overview", () => {
+  const api = harness("api.js");
+  for (const word of ["card", "place"]) {
+    for (const n of [0, 1, 2]) assert.equal(api.exports.plural(n, word), n === 1 ? word : `${word}s`);
+  }
+  for (const [places, cards, total] of [[0, 0, 15], [1, 1, 15], [1, 1, 1], [2, 4, 15]]) {
+    const state = stateFixture();
+    state.metrics = { postcards: { places, cards, total } };
+    const placeWord = total === 1 ? "place" : "places", cardWord = cards === 1 ? "card" : "cards";
+    for (const [file, name, expected] of [
+      ["Child.jsx", "Album", `${places} of ${total} ${placeWord} · ${cards} ${cardWord}`],
+      ["Child.jsx", "MapScreen", `${places} of ${total} ${placeWord}`],
+      ["Parent.jsx", "Overview", `${places} of ${total} ${placeWord} (${cards} ${cardWord})`],
+    ]) {
+      const h = harness(file);
+      const rendered = text(h.render(h.exports[name], { state })).replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")");
+      assert.ok(rendered.includes(expected), `${name}: ${expected}`);
+    }
+  }
 });
 
 test("D4 / D12: handled notifications hide, and both inbox lists get warm empty states", () => {
@@ -944,9 +1571,9 @@ test("D10: server reveal receipts suppress replay on a fresh device; offline ack
   assert.ok(offline.storage.get("mq_seen_adv").includes("seen"));
 });
 
-test("D12: feedback replaces earlier saves, Map has points once, Lock follows kid-view button", () => {
-  const app = harness("App.jsx");
-  let tree = app.render(app.exports.default);
+test("D12: feedback replaces earlier saves, Map has points once, Lock follows kid-view button", async () => {
+  const app = await appHarness(meFixture("child"));
+  let tree = app.tree();
   let root = nodes(tree, (n) => n.type?.name === "ChildRoot")[0];
   root.props.toast("Saved $1"); root.props.toast("Saved $2"); root.props.toast("Saved $3");
   tree = app.render(app.exports.default);
@@ -960,15 +1587,16 @@ test("D12: feedback replaces earlier saves, Map has points once, Lock follows ki
   tree = kid.render(kid.exports.default, { state, toast: noop });
   assert.equal(nodes(tree, (n) => n.props.title?.startsWith("Adventure points")).length, 1);
   assert.doesNotMatch(text(kid.render(kid.exports.MapScreen, { state })), /40\s+pts/);
-  const parent = harness("App.jsx");
-  parent.location.search = "?role=parent";
-  // Enter the parent role through the PIN gate callback.
-  tree = parent.render(parent.exports.default); parent.flush();
+  const parent = await appHarness(meFixture("parent", true));
+  // Enter parent mode through the authenticated PIN sheet.
+  tree = parent.tree();
   const gate = nodes(tree, (n) => n.type?.name === "PinGate")[0];
-  gate.props.onOk();
+  gate.props.onOk({ unlockedUntil: parent.now + 900000 });
   tree = parent.render(parent.exports.default);
   const actions = nodes(tree, (n) => n.props.className === "appbar-actions")[0];
-  assert.deepEqual(nodes(actions, (n) => n.type === "button").map(text), ["Back to kid view", "Lock"]);
+  assert.deepEqual(nodes(actions, (n) => n.type === "button").map(text), ["Kid mode", "Lock"]);
+  assert.equal(actions.props.children.at(-1).props.children[0], "Lock");
+  assert.equal(nodes(actions, (n) => n.type?.name === "SignOut").length, 1);
 });
 
 test("D1 / D12: narrow layout keeps badge in flow, feedback below header and tables contained", async () => {
@@ -976,6 +1604,8 @@ test("D1 / D12: narrow layout keeps badge in flow, feedback below header and tab
   assert.match(css, /\.surprise-badge \{ position: relative;/);
   assert.match(css, /\.toasts \{ position: fixed; bottom:/);
   assert.match(css, /@media \(max-width: 640px\)[\s\S]*\.toasts \{ top: calc\(112px/);
+  assert.match(css, /\.role-parent \.appbar \{ height: calc\(144px/);
+  assert.match(css, /\.role-parent \.toasts \{ top: calc\(152px/);
   assert.match(css, /\.ptable \{ table-layout: fixed; overflow-wrap: anywhere;/);
   const h = harness("Child.jsx"), state = stateFixture();
   const tree = h.render(h.exports.FlipPostcard, { place: state.catalog.places.chicago, surprise: true });
@@ -999,4 +1629,296 @@ test("D9: visiting Security keeps previously opened goal and allowance forms mou
   assert.equal(nodes(tree, (n) => n.type?.name === "Allowance")[0].props.key, allowance.props.key);
   assert.equal(nodes(tree, (n) => n.type?.name === "Goals").length, 1);
   assert.equal(nodes(tree, (n) => n.type === "div" && n.props.hidden === true).length, 2);
+});
+
+
+test("W2.1: optional cross-origin font failure never rejects service-worker install", async () => {
+  const w = await worker();
+  w.fetch = async (request) => {
+    if (request === "/") return new Response('<script src="/assets/app.js"></script><link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="https://fonts.googleapis.com/blocked"><link rel="stylesheet" href="https://fonts.googleapis.com/ok">');
+    if (String(request).includes("blocked")) throw new Error("CSP or network failure");
+    return new Response("asset");
+  };
+  await assert.doesNotReject(w.trigger("install"));
+  for (const asset of ["/", "/assets/app.js", "/assets/app.css", "https://fonts.googleapis.com/ok"]) assert.ok(w.entries.has(new URL(asset, "https://moneyquest.test").href));
+});
+
+test("W2.2: paired kids have no sign-out callback or floating pill", async () => {
+  const h = await appHarness(meFixture("child"));
+  const tree = h.tree();
+  assert.equal(nodes(tree, (n) => n.type?.name === "SignOut").length, 0);
+  assert.equal(nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.onSignOut, undefined);
+  const root = harness("App.jsx");
+  root.fetch = async () => new Response(JSON.stringify(stateFixture()));
+  root.render(root.exports.ChildRoot, { childId: "child-one", toast: noop }); root.flush();
+  await new Promise(setImmediate);
+  const loaded = root.render(root.exports.ChildRoot, { childId: "child-one", toast: noop });
+  assert.equal(nodes(loaded, (n) => n.props.className === "kid-signout" || n.type?.name === "SignOut").length, 0);
+});
+
+test("W2.3/12: unreachable cold start stays on Loading, retries at 10s and recovers either role", async () => {
+  for (const role of ["parent", "child"]) {
+    const h = harness("App.jsx"), calls = [];
+    h.fetch = async (url) => { calls.push(url); throw new TypeError("Failed to fetch"); };
+    h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+    const render = () => { const tree = h.render(h.exports.default); h.flush(); return tree; };
+    let tree = render();
+    assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen").length, 0);
+    const loading = nodes(tree, (n) => n.type?.name === "Loading")[0];
+    assert.ok(loading.props.error);
+    const controls = harness("App.jsx").render(h.exports.Loading, loading.props);
+    assert.ok(byText(controls, "Try again"));
+    await loading.props.onRetry();
+    assert.equal(calls.length, 2);
+    h.fetch = async (url) => { calls.push(url); return new Response(JSON.stringify(meFixture(role))); };
+    assert.equal(h.intervalDelays[0], 10000);
+    await h.timers[0]();
+    tree = render();
+    assert.equal(nodes(tree, (n) => n.type?.name === (role === "parent" ? "ParentRoot" : "ChildRoot")).length, 1);
+    assert.equal(calls.length, 3);
+    await h.timers[0](); assert.equal(calls.length, 3, "stop auth retries on recovery");
+  }
+});
+
+test("W2.3: cached parent has a Back to grown-ups control on cold-load error", async () => {
+  const h = harness("App.jsx");
+  h.storage.set("mq_parent_session", JSON.stringify(meFixture("parent", true)));
+  h.fetch = async () => { throw new Error("Offline"); };
+  h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+  const tree = h.render(h.exports.default); h.flush();
+  const loading = nodes(tree, (n) => n.type?.name === "Loading")[0];
+  assert.equal(typeof loading.props.onGrownUps, "function");
+  assert.ok(byText(h.exports.Loading(loading.props), "Back to grown-ups"));
+  loading.props.onGrownUps();
+  assert.equal(nodes(h.render(h.exports.default), (n) => n.type?.name === "PinGate").length, 1);
+});
+
+test("W2.12: initial 401 reuses its demo flag with just one auth/me request", async () => {
+  const h = harness("App.jsx");
+  let calls = 0;
+  h.fetch = async () => { calls++; return new Response('{"error":"Sign in","demo":true}', { status: 401 }); };
+  h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+  let tree = h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+  tree = h.render(h.exports.default); h.flush();
+  const welcome = nodes(tree, (n) => n.type?.name === "AuthScreen")[0];
+  assert.equal(welcome.props.demo, true);
+  assert.equal(welcome.props.screen, "welcome");
+  assert.equal(calls, 1);
+  await h.timers[0](); assert.equal(calls, 1);
+});
+
+test("W2.4/8: PIN sheet shows attempts, lock deadline in en-US, and password reset without losing the session", async () => {
+  const h = harness("App.jsx");
+  let resets = 0, unauthorized = 0;
+  const props = { onReset: async () => resets++, onOk: noop, onCancel: noop };
+  const render = () => h.render(h.exports.PinGate, props);
+  h.window.addEventListener("mq:unauthorized", () => unauthorized++);
+  changeField(render(), "Parent PIN", "0000");
+  h.fetch = async () => new Response('{"error":"Wrong","attemptsLeft":2}', { status: 401 });
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.match(text(render()), /2\s+tries\s+left/);
+  h.fetch = async () => new Response('{"error":"Wait","attemptsLeft":0,"retryAfterSeconds":900}', { status: 429 });
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.ok(text(render()).replace(/\s+/g, " ").includes(`Locked for 15 minutes — try again at ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(h.now + 900000)}`));
+  assert.equal(byText(render(), "Unlock").props.disabled, true);
+  byText(render(), "Forgot PIN?").props.onClick();
+  changeField(render(), "Password", "wrong password");
+  h.fetch = async () => new Response('{"error":"That password did not match"}', { status: 401 });
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.match(text(render()), /That password did not match/);
+  assert.equal(unauthorized, 0);
+  h.fetch = async (url, options) => {
+    assert.equal(url, "/api/parent/pin/reset");
+    assert.deepEqual(JSON.parse(options.body), { password: "right password" });
+    return new Response('{"ok":true,"unlockedUntil":0}');
+  };
+  changeField(render(), "Password", "right password");
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.equal(resets, 1);
+});
+
+test("W2.6: Devices lists pairing metadata and unlinks only the selected device using DELETE", async () => {
+  const h = harness("Parent.jsx"), calls = [];
+  const props = { childId: "child-two" };
+  h.fetch = async (url, options) => {
+    calls.push([url, options.method]);
+    return new Response(JSON.stringify(options.method === "DELETE" ? { ok: true } : [{ id: "opaque-id", name: "Safari on iPhone", created_at: h.now, last_seen: h.now }]));
+  };
+  const render = () => h.render(h.exports.Devices, props);
+  render(); h.flush(); await new Promise(setImmediate);
+  assert.match(text(render()), /Safari on iPhone.*Paired.*Last seen/);
+  await byText(render(), "Unlink").props.onClick();
+  assert.deepEqual(calls, [["/api/parent/children/child-two/devices?child=child-two", "GET"], ["/api/parent/children/child-two/devices/opaque-id?child=child-two", "DELETE"]]);
+  assert.match(text(render()), /No paired devices yet/);
+});
+
+test("W2.7: Lock, Kid mode and PIN cancel await server lock; failed locks keep parent mode", async () => {
+  for (const action of ["Lock", "Kid mode", "cancel"]) {
+    const me = meFixture("parent", true); me.unlockedUntil = Date.now() + 900000;
+    const h = await appHarness(me), requests = [];
+    h.fetch = async (url) => { requests.push(url); return new Response('{"ok":true,"unlockedUntil":0}'); };
+    let tree = h.tree();
+    if (action === "cancel") {
+      await byText(tree, "Lock").props.onClick();
+      tree = h.tree(); requests.length = 0;
+      await nodes(tree, (n) => n.type?.name === "PinGate")[0].props.onCancel();
+    } else await byText(tree, action).props.onClick();
+    assert.equal(requests.length, 1);
+    assert.equal(new URL(requests[0], h.location).pathname, "/api/parent/lock");
+    assert.equal(nodes(h.tree(), (n) => n.type?.name === "ParentRoot").length, 0);
+    assert.equal(JSON.parse(h.storage.get("mq_parent_session")).unlockedUntil, 0);
+  }
+  const me = meFixture("parent", true); me.unlockedUntil = Date.now() + 900000;
+  const h = await appHarness(me);
+  h.fetch = async () => { throw new Error("Offline"); };
+  await byText(h.tree(), "Lock").props.onClick();
+  assert.equal(nodes(h.tree(), (n) => n.type?.name === "ParentRoot").length, 1);
+});
+
+test("W2.9: demo controls render only when me.demo is strictly true", () => {
+  const state = stateFixture();
+  for (const value of [undefined, false, "true", true]) {
+    const h = harness("Parent.jsx");
+    let tree = h.render(h.exports.default, { state, me: { ...meFixture(), demo: value }, toast: noop });
+    const ctx = nodes(tree, (n) => n.type?.name === "Inbox")[0].props;
+    assert.equal(ctx.demo, value === true);
+    for (const [name, labels] of [["Inbox", ["Add $50"]], ["Allowance", ["Fast-forward", "Add $50"]], ["Guardian", ["Post a duplicate"]], ["Settings", ["Reset demo"]]]) {
+      const component = harness("Parent.jsx");
+      tree = component.render(component.exports[name], { state, demo: ctx.demo, pending: [{ id: "a", title: "Funding", kind: "topup" }] });
+      for (const label of labels) assert.equal(Boolean(byText(tree, label)), value === true, `${name} ${label}`);
+    }
+  }
+});
+
+test("W2c.2: every family has the funding form, with validated fields, ledger copy and demo-only shortcuts", async () => {
+  for (const demo of [false, true]) {
+    const h = harness("Parent.jsx"), state = stateFixture(), requests = [];
+    let succeeds = false;
+    const props = { state, demo, busy: false, run: async (path, body) => { requests.push([path, { ...body }]); return succeeds ? { ok: true } : null; } };
+    const render = () => h.render(h.exports.Allowance, props);
+    let tree = render();
+    assert.ok(text(tree).includes("This is a record of money you have set aside; MoneyQuest never moves real money."));
+    assert.equal(Boolean(byText(tree, "Add $50")), demo);
+    assert.equal(Boolean(byText(tree, "Fast-forward")), demo);
+    const form = () => nodes(render(), (n) => n.type === "form" && n.props["aria-label"] === "Add money")[0];
+    const inputs = nodes(form(), (n) => n.type === "input");
+    assert.equal(inputs[0].props.required, true);
+    assert.equal(inputs[0].props.min, "1");
+    assert.equal(inputs[0].props.max, "1000");
+    assert.equal(inputs[0].props.step, "0.01");
+    assert.equal(inputs[1].props.maxLength, 120);
+    changeField(tree, "Amount ($)", "25.50");
+    changeField(render(), "Note (optional)", "Birthday envelope");
+    await form().props.onSubmit(submit);
+    assert.equal(nodes(form(), (n) => n.type === "input")[0].props.value, "25.50", "failed submission preserves draft");
+    succeeds = true;
+    await form().props.onSubmit(submit);
+    assert.deepEqual(requests, [["parent/funding/add", { amount: "25.50", note: "Birthday envelope" }], ["parent/funding/add", { amount: "25.50", note: "Birthday envelope" }]]);
+    assert.ok(nodes(form(), (n) => n.type === "input").every((n) => n.props.value === ""), "successful submission clears draft");
+    props.busy = true;
+    assert.ok(nodes(form(), (n) => n.type === "input" || n.type === "button").every((n) => n.props.disabled));
+    if (demo) {
+      props.busy = false;
+      await byText(render(), "Add $50").props.onClick();
+      assert.deepEqual(requests.at(-1), ["parent/topup", { amount: 50 }]);
+    }
+  }
+});
+
+test("W2c.3: zero-funding Overview and escalation buttons open Allowance and focus Add money", () => {
+  const state = stateFixture();
+  const overview = harness("Parent.jsx");
+  for (const [balance, amount, visible] of [[0, 1000, true], [100, 1000, false], [0, 0, false]]) {
+    state.accounts.parent.balance = balance;
+    state.allowance.amount = amount;
+    const tree = overview.render(overview.exports.Overview, { state });
+    assert.equal(Boolean(byText(tree, "Add money")), visible);
+    if (visible) assert.ok(text(tree).includes("Add money to the funding record so Maple's allowance can be paid"));
+  }
+  state.accounts.parent.balance = 0;
+  state.allowance.amount = 1000;
+  const h = harness("Parent.jsx");
+  const props = { state, me: meFixture(), toast: noop };
+  const render = () => h.render(h.exports.default, props);
+  byText(render(), "Overview").props.onClick();
+  const overviewProps = nodes(render(), (n) => n.type?.name === "Overview")[0].props;
+  byText(overview.render(overview.exports.Overview, overviewProps), "Add money").props.onClick();
+  const allowanceProps = () => nodes(render(), (n) => n.type?.name === "Allowance")[0].props;
+  assert.equal(allowanceProps().fundingFocus, 1);
+  assert.equal(byText(render(), "Allowance").props["aria-current"], "page");
+  const allowance = harness("Parent.jsx");
+  const form = allowance.render(allowance.exports.Allowance, allowanceProps());
+  let focused = 0;
+  nodes(form, (n) => n.type === "input" && n.props.ref)[0].props.ref.current = { focus: () => focused++ };
+  allowance.flush();
+  assert.equal(focused, 1);
+  const inbox = harness("Parent.jsx");
+  const tree = inbox.render(inbox.exports.Inbox, { ...overviewProps, pending: [{ id: "funding", kind: "topup", title: "Funding needed" }] });
+  byText(tree, "Add money").props.onClick();
+  assert.equal(allowanceProps().fundingFocus, 2);
+  allowance.render(allowance.exports.Allowance, allowanceProps());
+  allowance.flush();
+  assert.equal(focused, 2);
+});
+
+test("W2c.2: funding form uses the selected-child API, refreshes on success and guards duplicate submissions", async () => {
+  const h = harness("api.js"), state = stateFixture(), requests = [];
+  h.exports.setSelectedChild("child-funding");
+  let resolve, changed = 0;
+  h.window.addEventListener("mq:changed", () => changed++);
+  h.fetch = (url, options) => { requests.push([url, JSON.parse(options.body)]); return new Promise((done) => { resolve = done; }); };
+  const formHarness = harness("Parent.jsx");
+  const render = () => {
+    const [run, busy] = h.render(() => h.exports.useAction(h.toast));
+    return formHarness.render(formHarness.exports.Allowance, { state, run, busy });
+  };
+  changeField(render(), "Amount ($)", "10");
+  const form = () => nodes(render(), (n) => n.type === "form" && n.props["aria-label"] === "Add money")[0];
+  const first = form().props.onSubmit(submit);
+  await form().props.onSubmit(submit);
+  assert.equal(requests.length, 1);
+  assert.equal(new URL(requests[0][0], h.location).pathname, "/api/parent/funding/add");
+  assert.equal(new URL(requests[0][0], h.location).searchParams.get("child"), "child-funding");
+  assert.deepEqual(requests[0][1], { amount: "10", note: "" });
+  assert.equal(byText(form(), "Add money").props.disabled, true);
+  resolve(new Response('{"ok":true}'));
+  await first;
+  assert.equal(changed, 1);
+  assert.equal(byText(form(), "Add money").props.disabled, false);
+});
+
+test("W2.10: kid code errors map reason into distinct warm copy", async () => {
+  for (const [reason, message] of [["unknown", "That code doesn't match — check the letters and try again"], ["used_or_expired", "That code was already used or expired. Ask for a new one."]]) {
+    const h = harness("App.jsx");
+    const render = () => h.render(h.exports.AuthScreen, { screen: "link", onSession: noop });
+    changeField(render(), "Kid code", "BC3467");
+    h.fetch = async () => new Response(JSON.stringify({ error: "Generic server error", reason }), { status: 400 });
+    await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+    assert.ok(text(render()).includes(message));
+  }
+});
+
+test("W2.11: phone parent grid, forms and tables shrink within the 390px page", async () => {
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /@media \(max-width: 820px\)\s*\{\s*\.parent \{ grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(css, /\.pform-row \{[^}]*minmax\(min\(150px, 100%\), 1fr\)/);
+  assert.match(css, /\.ptable \{ table-layout: fixed; overflow-wrap: anywhere;/);
+  assert.match(css, /\.pform label, \.approval-body \{ min-width: 0;/);
+});
+
+
+test("W2.7: explicit lock avoids a protected-state refresh and late locked errors do not reopen Kid mode", async () => {
+  const apiClient = harness("api.js");
+  let changed = 0;
+  apiClient.window.addEventListener("mq:changed", () => changed++);
+  await apiClient.exports.api("parent/lock", {});
+  assert.equal(changed, 0);
+  await apiClient.exports.api("parent/pin", { pin: "1234" });
+  assert.equal(changed, 1);
+  const me = meFixture("parent", true); me.unlockedUntil = Date.now() + 900000;
+  const h = await appHarness(me);
+  await byText(h.tree(), "Kid mode").props.onClick();
+  h.tree();
+  h.window.dispatchEvent(new Event("mq:locked"));
+  assert.equal(nodes(h.tree(), (n) => n.type?.name === "PinGate").length, 0);
 });

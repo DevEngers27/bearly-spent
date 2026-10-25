@@ -1,12 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
 import { seed } from "./store.js";
 import * as game from "./domain.js";
 import * as catalog from "./catalog.js";
 import { actions } from "./actions.js";
-import { dayKey, weekKey } from "./time.js";
+import { childView, parentView } from "./index.js";
 
 const now = new Date(2026, 6, 15, 12).getTime();
 const fresh = () => { const db = seed(Date.now()); db.child.points = 300; db.postcards = []; return db; };
@@ -15,12 +13,6 @@ const openIds = (db) => {
   const visited = game.visitedSet(db);
   return Object.keys(catalog.PLACES).filter((id) => catalog.placeStatus(id, db.child, visited, visited, new Date(now)).ok);
 };
-// Extract the actual views without importing the listening server or touching data/.
-const index = readFileSync(new URL("./index.js", import.meta.url), "utf8");
-const viewSource = index.slice(index.indexOf("function placesView("), index.indexOf("// ------------------------------------------------------------------ routes: shared"));
-const { childView, parentView } = vm.runInNewContext(`${viewSource}\n({ childView, parentView })`, {
-  Date, game, dayKey, weekKey, ...catalog, buddyMode: () => "offline", voiceEnabled: () => false, nessieEnabled: () => false,
-});
 
 test("F3: every weighted ticket draws only open places, never hidden, locked or out-of-season places", () => {
   let total;

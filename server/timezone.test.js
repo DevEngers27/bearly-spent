@@ -20,13 +20,7 @@ const budget = { save: 500, needs: 800, fun: 500, give: 200 };
 // October 24 at 16:30 and 17:30 in Los Angeles straddle UTC midnight.
 const afternoon = ["2026-10-24T16:30:00-07:00", "2026-10-24T17:30:00-07:00"].map(Date.parse);
 
-// Exercise the actual pure views without importing the listening entrypoint.
-const indexSource = readFileSync(new URL("./index.js", import.meta.url), "utf8");
-const views = indexSource.slice(indexSource.indexOf("function placesView("), indexSource.indexOf("function parentView("));
-const childView = new Function("game", "dayKey", "weekKey", "PLACES", "HOME", "LESSONS", "COSMETICS", "MILESTONES", "POINTS", "TRIP", "placeStatus", "buddyMode", "voiceEnabled", "nessieEnabled", `${views}\nreturn childView;`)(
-  game, dayKey, weekKey, catalog.PLACES, catalog.HOME, catalog.LESSONS, catalog.COSMETICS, catalog.MILESTONES, catalog.POINTS, catalog.TRIP, catalog.placeStatus,
-  () => "offline", () => false, () => false,
-);
+import { childView } from "./index.js";
 
 test("B5 settings accepts IANA zones and UTC and preserves the chosen family zone", () => {
   const db = fresh();

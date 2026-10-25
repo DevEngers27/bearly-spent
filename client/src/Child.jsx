@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, money, moneyShort, formatTime, postcardMetrics, useAction } from "./api.js";
+import { api, apiResponse, money, moneyShort, plural, formatTime, postcardMetrics, useAction } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import MapView from "./MapView.jsx";
@@ -97,9 +97,9 @@ export default function Child({ state, toast, onGrownUps, offline }) {
           <button className="round-btn" disabled={pending} onClick={() => { open("news"); if (!offline) run("child/notifications/read", {}); }} aria-label={`News${unread ? `, ${unread} new` : ""}`}>
             <Icon name="bell" size={22} />{unread > 0 && <span className="dot" />}
           </button>
-          <button className="round-btn" onClick={onGrownUps} aria-label="Grown-ups">
+          {onGrownUps && <button className="round-btn" onClick={onGrownUps} aria-label="Grown-ups">
             <Icon name="lock" size={22} />
-          </button>
+          </button>}
         </div>
       </header>
 
@@ -128,7 +128,7 @@ export default function Child({ state, toast, onGrownUps, offline }) {
 }
 
 // ------------------------------------------------------------------ sheets
-function Sheet({ title, onClose, children, tall, fullscreen }) {
+export function Sheet({ title, onClose, children, tall, fullscreen }) {
   const ref = useRef(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -668,7 +668,7 @@ function MapScreen({ state, open, focus, clearFocus }) {
         <span><i className="lg open" /> A future adventure</span>
         <span><i className="lg visited" /> Visited</span>
         <span><i className="lg locked" /> Locked</span>
-        <span>{postcardMetrics(state).places} of {postcardMetrics(state).total} places</span>
+        <span>{postcardMetrics(state).places} of {postcardMetrics(state).total} {plural(postcardMetrics(state).total, "place")}</span>
       </div>
     </div>
   );
@@ -778,7 +778,7 @@ function Album({ state, open, goMap, run, busy, newCards = [], openCard }) {
           <div className="passport">
             <div>
               <span className="kicker">Collected</span>
-              <p className="hand big-text">{found} of {total} places · {cards} cards</p>
+              <p className="hand big-text">{found} of {total} {plural(total, "place")} · {cards} {plural(cards, "card")}</p>
             </div>
             <div className="stamp-strip" aria-label="Collected stamps">
               {Object.entries(places).filter(([id]) => counts[id]).map(([id, p]) => <Stamp key={id} stamp={p.stamp} name={p.name} image={p.image} size="sm" />)}
@@ -928,26 +928,23 @@ async function playBlob(blob) {
 // from the browser; if that fails, use the server proxy; then browser speech.
 async function speak(text, mode, allowed = () => true) {
   if (!allowed()) return;
-  const clean = text.replace(/[*_#]/g, "").slice(0, 600);
+  const clean = text.replace(/[*_#]/g, "").slice(0, 500);
   if (mode === "cartesia") {
     try {
-      const t = await fetch("/api/voice/token", { method: "POST" });
-      if (t.ok) {
-        const { token, version, request } = await t.json();
-        if (!allowed()) return;
-        const res = await fetch("https://api.cartesia.ai/tts/bytes", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Cartesia-Version": version, "Content-Type": "application/json" },
-          body: JSON.stringify({ ...request, transcript: clean }),
-        });
-        if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
-      }
-    } catch {}
+      const { token, version, request } = await api("voice/token", {});
+      if (!allowed()) return;
+      const res = await fetch("https://api.cartesia.ai/tts/bytes", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Cartesia-Version": version, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...request, transcript: clean }),
+      });
+      if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
+    } catch (err) { if ([401, 403, 423, 429].includes(err.status)) throw err; }
     if (!allowed()) return;
     try {
-      const res = await fetch("/api/buddy/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: clean }) });
+      const res = await apiResponse("buddy/speak", { text: clean });
       if (res.ok) { const blob = await res.blob(); if (allowed()) return await playBlob(blob); return; }
-    } catch {}
+    } catch (err) { if ([401, 403, 423, 429].includes(err.status)) throw err; }
   }
   if (allowed()) speakBrowser(clean);
 }

@@ -77,7 +77,7 @@ export function FlipPostcard({ id, place, bearName, to, collectedAt, startFlippe
           <img src={place.image} alt={revealed ? `${bearName} at ${place.name}` : ""} draggable="false" />
           <span className="flip-hint">Tap to turn over</span>
         </div>
-        <div className="flip-face back">
+        <div className="flip-face back" aria-hidden={!revealed}>
           {revealed ? <>
             <div className="pc-back-left">
               <p className="pc-greeting">Dear {to},</p>

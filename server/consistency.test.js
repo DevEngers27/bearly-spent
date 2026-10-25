@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import vm from "node:vm";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "moneyquest-consistency-"));
 const previousDataDir = process.env.MQ_DATA_DIR;
 process.env.MQ_DATA_DIR = dataDir;
-const { seed, read, _setForTest } = await import("./store.js");
+const { seed, readChild, mutateChild, createChild } = await import("./store.js");
+const { database, closeDatabase } = await import("./db.js");
 const game = await import("./domain.js");
 const catalog = await import("./catalog.js");
 const { actions } = await import("./actions.js");
@@ -16,13 +16,10 @@ const { runGuardian, injectDuplicatePosting } = await import("./guardian.js");
 const { dayKey, weekKey } = await import("./time.js");
 const { chat } = await import("./buddy.js");
 const DAY = 86400000;
-const indexSource = fs.readFileSync(new URL("./index.js", import.meta.url), "utf8");
-const viewSource = indexSource.slice(indexSource.indexOf("function placesView("), indexSource.indexOf("// ------------------------------------------------------------------ routes: shared"));
-const { childView, parentView } = vm.runInNewContext(`${viewSource}\n({ childView, parentView })`, {
-  game, ...catalog, dayKey, weekKey, buddyMode: () => "offline", voiceEnabled: () => false, nessieEnabled: () => false,
-});
+const { childView, parentView, routeActions } = await import("./index.js");
 
 after(() => {
+  closeDatabase();
   if (previousDataDir === undefined) delete process.env.MQ_DATA_DIR;
   else process.env.MQ_DATA_DIR = previousDataDir;
   fs.rmSync(dataDir, { recursive: true, force: true });
@@ -44,7 +41,7 @@ test("D2: lesson goals respect remaining unique lessons and cancellation stops p
   assert.match(db.notifications.at(-1).text, /cancelled.*pick a new goal together/);
   assert.equal(db.audit.find((a) => a.action === "goal_cancelled").data.goalId, goal.id);
   assert.throws(() => actions.cancelGoal(db, goal.id), game.GameError);
-  assert.match(indexSource, /app.post\("\/api\/parent\/goal\/:id\/cancel".*actions.cancelGoal/);
+  assert.ok(routeActions.some((r) => r.method === "POST" && r.path === "/api/parent/goal/:id/cancel" && r.access === "parent"));
   db.child.lessonsDone = catalog.LESSONS.map((l) => l.id);
   assert.throws(() => actions.goal(db, { title: "Learn", type: "lessons", count: 1, reward: 5 }), /pick 0 or fewer/);
 });
@@ -133,7 +130,7 @@ test("D10: seen receipt is durable, idempotent, exposed to both devices and vali
   assert.throws(() => actions.adventureSeen(db, "away"), game.GameError);
   assert.throws(() => actions.adventureSeen(db, "missing"), game.GameError);
   assert.throws(() => actions.adventureSeen(db, {}), game.GameError);
-  assert.match(indexSource, /app.post\("\/api\/child\/adventure\/:id\/seen".*actions.adventureSeen/);
+  assert.ok(routeActions.some((r) => r.method === "POST" && r.path === "/api/child/adventure/:id/seen" && r.access === "child"));
 });
 
 for (const legacy of [false, true]) test(`D11: ${legacy ? "legacy backfill" : "timestamp"} prevents zone-change repayment in both paths, permits next week`, () => {
@@ -171,24 +168,30 @@ test("Buddy offline plan: affordability replies persist a Home plan without movi
   const oldKey = process.env.ANTHROPIC_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
   try {
+    database().prepare("INSERT INTO families (id, name, created_at) VALUES (?, ?, ?)").run("purchase-family", "Jordan", Date.now());
+    const sibling = createChild("purchase-family", { name: "Leo", age: 8, bearName: "Pip" });
+    const siblingBefore = structuredClone(readChild(sibling.id));
     for (const price of [5, 40]) {
       const db = seed(Date.now());
-      _setForTest(db);
+      const child = createChild("purchase-family", { name: "Mia", age: 9, bearName: "Maple" });
+      mutateChild(child.id, (d) => Object.assign(d, db));
       const before = structuredClone(db.accounts);
-      const result = await chat(`Can I buy a $${price} book?`);
+      const result = await chat(child.id, `Can I buy a $${price} book?`);
       assert.match(result.reply, /spending money|you'd need/);
-      assert.equal(read().buddy.plan.offline, true);
-      assert.equal(read().buddy.plan.goalId, db.savingsGoals[0].id);
-      assert.ok(read().buddy.plan.steps.length);
-      assert.ok(read().audit.some((a) => a.action === "plan_updated"));
-      assert.deepEqual(read().accounts, before);
-      assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "db.json"))).buddy.plan.reason, "you asked about a purchase");
+      assert.equal(readChild(child.id).buddy.plan.offline, true);
+      assert.equal(readChild(child.id).buddy.plan.goalId, db.savingsGoals[0].id);
+      assert.ok(readChild(child.id).buddy.plan.steps.length);
+      assert.ok(readChild(child.id).audit.some((a) => a.action === "plan_updated"));
+      assert.deepEqual(readChild(child.id).accounts, before);
+      const saved = JSON.parse(database().prepare("SELECT doc FROM children WHERE id = ?").get(child.id).doc);
+      assert.equal(saved.buddy.plan.reason, "you asked about a purchase");
+      assert.deepEqual(readChild(sibling.id), siblingBefore);
     }
-    _setForTest(seed(Date.now()));
-    await chat("Can I buy a book?");
-    assert.equal(read().buddy.plan, null);
-    await chat("I'm scared someone wants me to buy a $5 book");
-    assert.equal(read().buddy.plan, null);
+    const child = createChild("purchase-family", { name: "Mia", age: 9, bearName: "Maple" });
+    await chat(child.id, "Can I buy a book?");
+    assert.equal(readChild(child.id).buddy.plan, null);
+    await chat(child.id, "I'm scared someone wants me to buy a $5 book");
+    assert.equal(readChild(child.id).buddy.plan, null);
   } finally {
     if (oldKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = oldKey;
