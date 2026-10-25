@@ -80,7 +80,7 @@ export function snapshot(db) {
     spending_balance: dollars(db.accounts.spending.balance),
     weekly_allowance: dollars(db.allowance.amount),
     allowance_saved_percent: db.allowance.savePct,
-    next_allowance_date: new Date(db.allowance.nextRun).toDateString(),
+    next_allowance_date: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(db.allowance.nextRun)),
     purchase_limit_without_parent: dollars(db.allowance.spendLimit),
     adventure_points: db.child.points,
     savings_goals: goals,
@@ -371,7 +371,7 @@ export function offlineReply(db, text) {
     return `You have ${db.child.points} adventure points. Points are game points, not money, so trips never touch your savings. Earn more by doing missions and lessons, then send ${bear} somewhere on the Map!`;
   }
   if (has(text, /\b(allowance|payday|get paid)\b/)) {
-    return `Your allowance is ${dollars(db.allowance.amount)} a week, and ${db.allowance.savePct}% goes straight into savings. The next one comes on ${new Date(db.allowance.nextRun).toDateString()}.`;
+    return `Your allowance is ${dollars(db.allowance.amount)} a week, and ${db.allowance.savePct}% goes straight into savings. The next one comes on ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(db.allowance.nextRun))}.`;
   }
   if (has(text, /\b(how much|balance|money do i have|saved)\b/)) {
     return `You have ${dollars(db.accounts.savings.balance)} in savings and ${dollars(db.accounts.spending.balance)} to spend.`;
@@ -399,6 +399,17 @@ export function offlinePlan(db, reason) {
   };
 }
 
+// Save a Home plan for affordability replies, including connection fallbacks.
+function offlineChatReply(text) {
+  if (!isSafetyConcern(text) && /\b(buy(?:ing)?|get|purchase|afford|spend|cost)\b/i.test(text) && parsePrice(text)) {
+    mutate((d) => {
+      d.buddy.plan = offlinePlan(d, "you asked about a purchase");
+      audit(d, "buddy", "plan_updated", `Offline planner made a plan: ${d.buddy.plan.summary}`);
+    });
+  }
+  return offlineReply(read(), text);
+}
+
 // ------------------------------------------------------------------ public API
 export async function chat(userText) {
   const { text, found } = redact(String(userText || "").slice(0, 500));
@@ -424,10 +435,10 @@ export async function chat(userText) {
       ({ reply, toolsUsed } = await _internals.runClaude(history));
     } catch (e) {
       console.error("[buddy] Claude error:", e.message);
-      reply = offlineReply(read(), text) + " (I'm having trouble connecting, so this is a quick answer.)";
+      reply = offlineChatReply(text) + " (I'm having trouble connecting, so this is a quick answer.)";
     }
   } else {
-    reply = offlineReply(db, text);
+    reply = offlineChatReply(text);
   }
   if (found.length) reply = `Quick tip: let's keep things like your ${found.join(" and ")} private, okay?\n\n${reply}`;
   if (live) reply = await screenReply(reply);

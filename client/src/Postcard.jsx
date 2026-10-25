@@ -1,12 +1,13 @@
 // Postcards from the bear's travels: album thumbnails, postage stamps, and a
 // flip card that shows the illustration on the front and the story on the back.
 import { useEffect, useState } from "react";
+import { formatDate } from "./api.js";
 import { Icon } from "./Icons.jsx";
 
 export const RARITY_LABEL = { common: "Common", rare: "Rare", secret: "Secret", seasonal: "Seasonal" };
 
 export const storyFor = (place, bearName) => (place.story || "").replaceAll("Maple", bearName);
-const fmtDate = (ts) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const fmtDate = formatDate;
 
 /** A postage stamp cut from the place's own postcard illustration. */
 export function Stamp({ stamp, name, image, size = "md" }) {
@@ -63,12 +64,12 @@ export function FlipPostcard({ id, place, bearName, to, collectedAt, startFlippe
   }, [revealDelay]);
   return (
     <div className={`flip ${flipped ? "flipped" : ""} ${surprise ? "surprise" : ""}`}>
+      {surprise && <span className="surprise-badge"><Icon name="sparkle" size={16} /> Surprise discovery!</span>}
       <div className="flip-inner" role="button" tabIndex="0" onClick={() => setFlipped((f) => !f)}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setFlipped((f) => !f))}
         aria-label={flipped ? "Show picture" : "Turn postcard over to read the story"} aria-pressed={flipped}>
         <div className="flip-face front">
           <img src={place.image} alt={`${bearName} at ${place.name}`} draggable="false" />
-          {surprise && <span className="surprise-badge"><Icon name="sparkle" size={16} /> Surprise discovery!</span>}
           <span className="flip-hint">Tap to turn over</span>
         </div>
         <div className="flip-face back">

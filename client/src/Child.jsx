@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { money, moneyShort, useAction } from "./api.js";
+import { api, money, moneyShort, formatTime, postcardMetrics, useAction } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import MapView from "./MapView.jsx";
@@ -56,7 +56,14 @@ export default function Child({ state, toast, onGrownUps, offline }) {
     open("postcard", { id });
   };
   const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard };
-  const latest = [...state.adventures].reverse().find((a) => a.status === "returned" && !seen.includes(a.id));
+  // Replay locally acknowledged receipts on reconnect (including older devices).
+  useEffect(() => {
+    if (offline) return;
+    for (const a of state.adventures) if (a.status === "returned" && !a.revealedAt && seen.includes(a.id)) {
+      api(`child/adventure/${a.id}/seen`, {}).catch(() => {});
+    }
+  }, [offline, state.adventures, seen]);
+  const latest = [...state.adventures].reverse().find((a) => a.status === "returned" && !a.revealedAt && !seen.includes(a.id));
   const reveal = Boolean(latest);
   const revealId = latest?.id;
   useEffect(() => { if (revealId) { setSheet(null); talk.close(); } }, [revealId]);
@@ -169,7 +176,7 @@ function SheetRouter({ sheet, ...ctx }) {
             {state.notifications.map((n) => (
               <li key={n.id} className={`k-${n.kind}`}>
                 <span>{n.text}</span>
-                <time>{new Date(n.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
+                <time>{formatTime(n.ts)}</time>
               </li>
             ))}
           </ul>
@@ -198,7 +205,9 @@ function nextUp(state, now) {
   if (goal) {
     const left = goal.count - goal.progress;
     const what = { lessons: "money lesson", tasks: "grown-up task", save_actions: "save" }[goal.type];
-    items.push({ id: "goal", icon: "target", text: `${left} more ${what}${left > 1 ? "s" : ""} to earn ${money(goal.reward)}`, cta: "Let's go", tab: goal.type === "save_actions" ? "save" : "missions" });
+    const remainingLessons = state.catalog.lessons.filter((l) => !state.child.lessonsDone.includes(l.id)).length;
+    const blocked = goal.type === "lessons" && left > remainingLessons;
+    items.push(blocked ? { id: "goal", icon: "target", text: "Ask your grown-up about this goal" } : { id: "goal", icon: "target", text: `${left} more ${what}${left > 1 ? "s" : ""} to earn ${money(goal.reward)}`, cta: "Let's go", tab: goal.type === "save_actions" ? "save" : "missions" });
   }
   const waiting = state.parentGoals.find((g) => g.status === "awaiting_approval");
   if (waiting) items.push({ id: "wait", icon: "hourglass", text: `Your grown-up is checking "${waiting.title}"` });
@@ -220,6 +229,7 @@ function Home({ state, setTab, open, run, busy, talk }) {
   const stage = [...state.catalog.milestones].reverse().find((m) => state.child.milestonesUnlocked.includes(m.at));
   const nextMilestone = state.catalog.milestones.find((m) => !state.child.milestonesUnlocked.includes(m.at));
   const todo = nextUp(state, now);
+  const nextItem = nextMilestone && state.catalog.cosmetics.find((c) => c.milestone === nextMilestone.at);
 
   return (
     <div className="home">
@@ -275,7 +285,7 @@ function Home({ state, setTab, open, run, busy, talk }) {
             <i key={m.at} className={state.child.milestonesUnlocked.includes(m.at) ? "on" : ""} style={{ left: `${(m.at / goal.target) * 100}%` }} title={`${m.label} at ${moneyShort(m.at)}`} />
           ))}
         </div>
-        {nextMilestone && <p className="fine">Next: {nextMilestone.label} bear at {moneyShort(nextMilestone.at)} · {nextMilestone.reward}</p>}
+        {nextMilestone && <p className="fine">Next: {nextItem?.label || nextMilestone.label} at {moneyShort(nextMilestone.at)}</p>}
         <div className="btn-row">
           <button className="btn honey" onClick={() => open("money", { start: "save" })}>Save money</button>
           <button className="btn sage" onClick={() => open("money", { start: "spend" })}>Spent money</button>
@@ -371,7 +381,7 @@ function MoneySheet({ state, run, close, start, busy }) {
         <label htmlFor="money-amount">How much?</label>
         <div className="money-input"><span>$</span><input id="money-amount" type="number" min="0" step="0.25" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required={mode !== "log"} /></div>
         {mode === "save" && (
-          <div className="chips">{[1, 2, 5].map((v) => <button type="button" key={v} className="chip" onClick={() => setAmount(String(v))}>${v}</button>)}</div>
+          <div className="chips">{[1, 2, 5].map((v) => <button type="button" key={v} className="chip" onClick={() => setAmount(String(v))}>{moneyShort(v * 100)}</button>)}</div>
         )}
         {mode !== "save" && (
           <label>{mode === "spend" ? "What did you buy?" : mode === "ask" ? "Why do you need it?" : "Note"}
@@ -390,8 +400,8 @@ function MoneySheet({ state, run, close, start, busy }) {
       <h3 className="hand">Recent</h3>
       <ul className="ledger">
         {state.transactions.slice(0, 8).map((t) => (
-          <li key={t.id} className={t.status !== "posted" ? "reversed" : ""}>
-            <span>{t.memo}</span>
+          <li key={t.id} className={t.status !== "posted" ? "reversed" : ""} aria-label={t.status === "reversed" ? `${t.memo}, ${money(t.amount)}, reversed` : undefined}>
+            <span>{t.memo}{t.status === "reversed" && <small className="reversed-tag">reversed</small>}</span>
             <b className={t.to === "merchant" ? "minus" : t.from === "spending" ? "" : "plus"}>{t.to === "merchant" ? "−" : t.from === "spending" ? "→ " : "+"}{money(t.amount)}</b>
           </li>
         ))}
@@ -441,7 +451,7 @@ function DressSheet({ state, run, close, busy }) {
                 ? <span className="swatch-art scene" style={{ background: SCENE_SWATCH[c.value] }} aria-hidden="true" />
                 : <img className="swatch-art" src={`/bear/items/${c.value}.png`} alt="" loading="lazy" />}
               <span>{c.label}</span>
-              <small>{!locked ? (on ? "Wearing" : c.cost === 0 ? "Free" : "Yours") : c.cost != null ? <><Icon name="sparkle" size={12} /> {c.cost}</> : `Save ${moneyShort(c.milestone)}`}</small>
+              <small>{!locked ? (on ? "Wearing" : c.cost === 0 ? "Free" : "Yours") : c.cost != null ? <><Icon name="sparkle" size={12} /> {c.cost}</> : `Save ${moneyShort(c.milestone)} to unlock`}</small>
             </button>
           );
         })}
@@ -576,10 +586,10 @@ function BudgetSheet({ run, close, busy }) {
           <label key={k} className="slider-row">
             <span className="slider-label"><Icon name={emo} size={22} /> {label}</span>
             <input type="range" min="0" max="20" step="1" value={a[k]} onChange={(e) => setA({ ...a, [k]: Number(e.target.value) })} />
-            <b>${a[k]}</b>
+            <b>{moneyShort(a[k] * 100)}</b>
           </label>
         ))}
-        <p className={`fine ${total === 20 ? "ok" : "warn"}`}>Total ${total}: {total === 20 ? "perfect!" : total > 20 ? `$${total - 20} too much` : `$${20 - total} left to plan`}</p>
+        <p className={`fine ${total === 20 ? "ok" : "warn"}`}>Total {moneyShort(total * 100)}: {total === 20 ? "perfect!" : total > 20 ? `${moneyShort((total - 20) * 100)} too much` : `${moneyShort((20 - total) * 100)} left to plan`}</p>
         <button className="btn honey wide" type="submit" disabled={busy || total !== 20}>Finish my budget</button>
       </form>
     </Sheet>
@@ -627,7 +637,6 @@ function MapScreen({ state, open, focus, clearFocus }) {
     <div className="page">
       <div className="row">
         <h1 className="page-title">{state.child.bear.name}'s travels</h1>
-        <span className="stat-stamp"><Icon name="sparkle" size={16} />{state.child.points} pts</span>
       </div>
       <p className="lede">Every postcard holds a little story. Tap a pin to explore.</p>
       {away && (
@@ -650,7 +659,7 @@ function MapScreen({ state, open, focus, clearFocus }) {
         <span><i className="lg open" /> A future adventure</span>
         <span><i className="lg visited" /> Visited</span>
         <span><i className="lg locked" /> Locked</span>
-        <span>{Object.keys(places).filter((id) => owned.has(id)).length} of {Object.keys(places).length} places</span>
+        <span>{postcardMetrics(state).places} of {postcardMetrics(state).total} places</span>
       </div>
     </div>
   );
@@ -748,8 +757,7 @@ function Album({ state, open, goMap, run, busy, newCards = [], openCard }) {
     return m;
   }, [state.postcards]);
   const places = state.catalog.places;
-  const total = Object.keys(places).length;
-  const found = Object.keys(counts).length;
+  const { places: found, cards, total } = postcardMetrics(state);
   return (
     <div className="page">
       <h1 className="page-title">Travel album</h1>
@@ -762,7 +770,7 @@ function Album({ state, open, goMap, run, busy, newCards = [], openCard }) {
           <div className="passport">
             <div>
               <span className="kicker">Collected</span>
-              <p className="hand big-text">{found} of {total}</p>
+              <p className="hand big-text">{found} of {total} places · {cards} cards</p>
             </div>
             <div className="stamp-strip" aria-label="Collected stamps">
               {Object.entries(places).filter(([id]) => counts[id]).map(([id, p]) => <Stamp key={id} stamp={p.stamp} name={p.name} image={p.image} size="sm" />)}
