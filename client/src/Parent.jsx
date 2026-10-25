@@ -20,7 +20,7 @@ const SECTIONS = [
   ["security", "Security"],
 ];
 
-const KIND_LABEL = { goal_purchase: "Goal purchase", child_funds: "Child funds", reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", friend_request: "Friend request", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
+const KIND_LABEL = { goal_purchase: "Goal purchase", child_funds: "Child funds", reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", friend_request: "Friend request", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review", wallet_pending: "Apple Cash" };
 const BROWSER_TIMEZONE = Intl.DateTimeFormat("en-US").resolvedOptions().timeZone || "UTC";
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
@@ -41,6 +41,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
     run("parent/settings", { timezone: BROWSER_TIMEZONE });
   }, [state.settings.timezone, run]);
   const pending = state.approvals.filter((a) => a.status === "pending" || (a.kind === "goal_purchase" && a.status === "approved" && !a.paidTxnId));
+  const pendingCount = pending.length + (state.walletPending?.length || 0);
   const ctx = { state, run, busy, demo: me?.demo === true, onAddMoney, mobile };
   const main = useRef(null);
   useEffect(() => {
@@ -61,7 +62,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
           {SECTIONS.map(([id, label]) => (
             <button key={id} className={sec === id ? "on" : ""} onClick={() => selectSection(id)} aria-current={sec === id ? "page" : undefined}>
               {label}
-              {id === "inbox" && pending.length > 0 && <span className="badge">{pending.length}</span>}
+              {id === "inbox" && pendingCount > 0 && <span className="badge">{pendingCount}</span>}
             </button>
           ))}
         </nav>
@@ -92,8 +93,8 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
         {sec === "security" && <Security me={me} refreshMe={refreshMe} onSignOut={onSignOut} onSignOutAll={onSignOutAll} {...ctx} />}
       </main>
       {mobile && <nav className="p-tabs" aria-label="Parent tabs">
-        {PARENT_TABS.map(([id, label, icon]) => <button key={id} className={tab === id ? "on" : ""} aria-current={tab === id ? "page" : undefined} aria-label={id === "inbox" && pending.length ? `Inbox, ${pending.length} pending` : label} onClick={() => selectTab(id)}>
-          <span className="p-tab-icon"><Icon name={icon} size={24} art={false} />{id === "inbox" && pending.length > 0 && <span className="badge">{pending.length}</span>}</span>
+        {PARENT_TABS.map(([id, label, icon]) => <button key={id} className={tab === id ? "on" : ""} aria-current={tab === id ? "page" : undefined} aria-label={id === "inbox" && pendingCount ? `Inbox, ${pendingCount} pending` : label} onClick={() => selectTab(id)}>
+          <span className="p-tab-icon"><Icon name={icon} size={24} art={false} />{id === "inbox" && pendingCount > 0 && <span className="badge">{pendingCount}</span>}</span>
           <span>{label}</span>
         </button>)}
       </nav>}
@@ -114,12 +115,23 @@ function Integrations({ state }) {
 
 function Inbox({ state, run, demo, pending, busy, onAddMoney, mobile }) {
   const notifications = state.notifications.filter((n) => !n.read);
+  const receipts = state.walletPending || [];
+  const pendingCount = pending.length + receipts.length;
   const decided = state.approvals.filter((a) => a.status !== "pending").slice(0, 8);
   return (
     <div className="p-stack">
-      <h1>Approvals{mobile && pending.length > 0 && <span className="badge">{pending.length}</span>}</h1>
-      {pending.length === 0 && <p className="empty">Nothing waiting — nice!</p>}
+      <h1>Approvals{mobile && pendingCount > 0 && <span className="badge">{pendingCount}</span>}</h1>
+      {pendingCount === 0 && <p className="empty">Nothing waiting — nice!</p>}
       <ul className="approval-list">
+        {receipts.map((receipt) => <li key={receipt.id} className="approval k-wallet_pending">
+          <span className="kind-tag">{KIND_LABEL.wallet_pending}</span>
+          <div className="approval-body"><strong>{state.child.name}'s Apple Cash spent {money(receipt.amount)} at {receipt.merchant}</strong><p>Waiting for funding · {formatDateTime(receipt.ts)}</p><p>Add money, then record it.</p></div>
+          <div className="approval-actions">
+            <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>
+            <button disabled={busy} className="pbtn" onClick={() => run(`parent/wallet/pending/${receipt.id}/record`, {}, "Apple Cash purchase recorded")}>Record now</button>
+            <button disabled={busy} className="pbtn" onClick={() => run(`parent/wallet/pending/${receipt.id}/dismiss`, {}, "Receipt dismissed")}>Dismiss</button>
+          </div>
+        </li>)}
         {pending.map((a) => (
           <li key={a.id} className={`approval k-${a.kind}`}>
             <span className="kind-tag">{KIND_LABEL[a.kind] || a.kind}</span>
@@ -183,8 +195,7 @@ function Overview({ state, onAddMoney, busy }) {
       <div className="p-figures">
         <Figure label={`${state.child.name}'s savings`} value={money(state.accounts.savings.balance)} sub={goal ? `${Math.round((state.accounts.savings.balance / goal.target) * 100)}% of ${goal.title}` : "Set a savings goal"} />
         <Figure label="Spending money" value={money(state.accounts.spending.balance)} />
-        <Figure label="Apple Cash" value={money(state.accounts.wallet?.balance ?? 0)} sub="Tracked balance" />
-        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Money set aside" />
+        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Covers allowance and Apple Cash" />
         <Figure label="Adventure points" value={state.child.points} sub="Game points, not money" />
       </div>
       {state.accounts.parent.balance === 0 && state.allowance.amount > 0 && <section className="p-card">
@@ -369,7 +380,7 @@ function Activity({ state }) {
           {state.transactions.map((t) => (
             <tr key={t.id} className={t.status !== "posted" ? "struck" : t.flagged ? "flag" : ""}>
               <td data-label="When"><span className="p-cell-value">{formatDateTime(t.ts)}</span></td>
-              <td data-label="What"><span className="p-cell-value">{t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</span></td>
+              <td data-label="What"><span className="p-cell-value">{t.kind === "wallet_in" ? "Sent via Apple Cash (before 0.7)" : t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small> · {t.note}</small>}</span></td>
               <td data-label="From → to"><span className="p-cell-value">{label[t.from]} → {label[t.to]}</span></td>
               <td data-label="Amount" className="num"><span className="p-cell-value">{money(t.amount)}</span></td>
               <td data-label="Status"><span className="p-cell-value">{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}{t.uncovered ? " · uncovered" : ""}</span></td>
@@ -591,29 +602,20 @@ function Children({ state, me, refreshMe, run, busy }) {
   </div>;
 }
 
-function WalletLedger({ state, run, busy }) {
-  const [form, setForm] = useState({ amount: "", note: "" });
+function WalletLedger({ state }) {
+  const rows = [
+    ...(state.walletPending || []).map((r) => ({ ...r, memo: r.merchant, status: "waiting for funding" })),
+    ...(state.walletTransactions || []).filter((t) => t.kind === "wallet_spend"),
+  ];
   return <section className="p-card p-stack">
-    <h2>{state.child.name}'s Apple Cash · {money(state.accounts.wallet?.balance ?? 0)}</h2>
-    <p className="p-muted">Tracked from your records and Wallet automations. Check the actual balance in Wallet.</p>
-    <form className="pform" onSubmit={async (event) => {
-      event.preventDefault();
-      if (await run("parent/wallet/send", form, "Apple Cash transfer recorded — this does not change the funding record")) setForm({ amount: "", note: "" });
-    }}>
-      <h3>Send via Apple Cash</h3>
-      <p>Send in Wallet first, then record it here. This form records the transfer; it does not send money.</p>
-      <p>The money comes from your own pocket. Recording it does not change the funding record.</p>
-      <div className="pform-row">
-        <label>Amount sent ($)<input type="number" inputMode="decimal" min="0.01" max="10000" step="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
-        <label>Note<input maxLength={120} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-      </div>
-      <button className="pbtn primary" disabled={busy}>Record sent money</button>
-    </form>
+    <h2>Apple Cash activity</h2>
+    <p>{state.child.name}'s funding account: <strong>{money(state.accounts.parent.balance)}</strong></p>
+    <p className="p-muted">Apple Cash money comes from your grown-up's funding. Check actual purchases in Wallet.</p>
+    <p>Apple Cash spent this week: <strong>{money(state.walletSpent?.week ?? 0)}</strong> · This month: <strong>{money(state.walletSpent?.month ?? 0)}</strong></p>
     {state.walletLastPing && <p>Last connection test: {formatDateTime(state.walletLastPing)}</p>}
-    <h3>Wallet ledger</h3>
     <table className="ptable" role="table"><thead><tr><th>When</th><th>What</th><th>Amount</th><th>Status</th></tr></thead><tbody>
-      {!(state.walletTransactions?.length) && <tr><td colSpan="4">No Apple Cash activity yet.</td></tr>}
-      {state.walletTransactions?.map((t) => <tr key={t.id}><td data-label="When"><span className="p-cell-value">{formatDateTime(t.ts)}</span></td><td data-label="What"><span className="p-cell-value">{t.memo}{t.note && <small> · {t.note}</small>}</span></td><td data-label="Amount"><span className="p-cell-value">{t.kind === "wallet_in" ? "+" : "−"}{money(t.amount)}</span></td><td data-label="Status"><span className="p-cell-value">{t.uncovered ? "Uncovered — check outside transfers" : t.status}</span></td></tr>)}
+      {!rows.length && <tr><td colSpan="4">No Apple Cash activity yet.</td></tr>}
+      {rows.map((t) => <tr key={t.id}><td data-label="When"><span className="p-cell-value">{formatDateTime(t.ts)}</span></td><td data-label="What"><span className="p-cell-value">{t.memo}<small className="wallet-tag">Apple Cash</small></span></td><td data-label="Amount"><span className="p-cell-value">−{money(t.amount)}</span></td><td data-label="Status"><span className="p-cell-value">{t.status}{t.overLimit ? " · above purchase limit" : ""}{t.unusual ? " · unusual spend" : ""}{t.flagged ? " · flagged" : ""}{t.uncovered ? " · uncovered (before 0.7)" : ""}</span></td></tr>)}
     </tbody></table>
   </section>;
 }

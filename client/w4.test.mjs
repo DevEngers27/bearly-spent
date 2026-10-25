@@ -235,10 +235,10 @@ test("W4.5: disabled lesson goals explain the remaining limit under the count fi
   assert.doesNotMatch(text(render()), /Only .* remaining. Choose|All money lessons are complete/);
 });
 
-test("W4.6: Apple Cash uses a decimal keyboard and Add money notes have the API's 120-character cap", () => {
+test("W4.6/H1: retired Apple Cash send has no amount input; Add money notes keep the API cap", () => {
   const h = harness(), state = parentView(seed(Date.now()));
   const wallet = h.render(h.exports.WalletLedger, { state });
-  assert.equal(field(wallet, "Amount sent ($)").props.inputMode, "decimal");
+  assert.equal(nodes(wallet, (n) => n.type === "input").length, 0);
   const allowance = harness();
   const tree = allowance.render(allowance.exports.Allowance, { state });
   assert.equal(field(tree, "Note (optional)").props.maxLength, 120);

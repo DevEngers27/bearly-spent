@@ -47,10 +47,9 @@ export function seed(now = Date.now()) {
     },
     // Simulated bank. Balances are in cents to avoid float drift.
     accounts: {
-      parent: { id: "acct_parent", label: "Parent funding account", balance: 25000 },
+      parent: { id: "acct_parent", label: "Funding account", balance: 25000 },
       savings: { id: "acct_savings", label: "Mia's savings", balance: 2000 },
       spending: { id: "acct_spending", label: "Mia's spending", balance: 1000 },
-      wallet: { id: "acct_wallet", label: "Apple Cash", balance: 0 },
     },
     savingsGoals: [
       { id: "goal_bike", title: "New bicycle", icon: "bike", status: "active", activeFlag: true, target: 10000, createdAt: now - 10 * DAY },
@@ -107,6 +106,7 @@ export function seed(now = Date.now()) {
       },
     ],
     trades: [],
+    walletPending: [],
     tracking: [],
     buddy: {
       plan: null,
@@ -125,7 +125,21 @@ export function migrate(d) {
     const times = (d.audit || []).map((entry) => entry.ts).filter(Number.isFinite);
     d.createdAt = times.length ? Math.min(...times) : Date.now();
   }
-  if (d.accounts && !d.accounts.wallet) d.accounts.wallet = { id: uid("acct"), label: "Apple Cash", balance: 0 };
+  if (d.accounts?.parent) {
+    d.accounts.parent.label = "Funding account";
+    if (d.accounts.wallet) {
+      const balance = d.accounts.wallet.balance;
+      if (balance > 0) {
+        d.accounts.parent.balance += balance;
+        audit(d, "system", "wallet_migrated", `Moved $${(balance / 100).toFixed(2)} of tracked Apple Cash into the funding account`, { amount: balance });
+      } else if (balance < 0) {
+        audit(d, "system", "wallet_migrated", `Dropped negative tracked Apple Cash balance of -$${(-balance / 100).toFixed(2)}; funding unchanged`, { amount: balance });
+      }
+      delete d.accounts.wallet;
+    }
+  }
+  d.walletPending ||= [];
+  for (const t of d.transactions || []) if (t.kind === "wallet_in") t.memo = "Sent via Apple Cash (before 0.7)";
   const HATS = { beanie: "knit_beanie", ranger: "ranger_hat", flowers: "flower_crown" };
   const fix = (b) => {
     if (!b || !("color" in b || "accessory" in b)) return;
@@ -154,7 +168,7 @@ export function migrate(d) {
 }
 
 function retain(d) {
-  for (const [key, cap] of [["tracking", 500], ["audit", 2000], ["transactions", 5000]]) {
+  for (const [key, cap] of [["tracking", 500], ["audit", 2000], ["transactions", 5000], ["walletPending", 20]]) {
     if (d[key].length > cap) d[key].splice(0, d[key].length - cap);
   }
   if (d.buddy.chat.length > 200) d.buddy.chat.splice(0, d.buddy.chat.length - 200);
@@ -188,10 +202,10 @@ export function readChild(childId) {
   const row = database().prepare("SELECT doc FROM children WHERE id = ?").get(childId);
   if (!row) throw new GameError("Child not found", 404);
   const stored = JSON.parse(row.doc);
-  const needsSince = !Number.isFinite(stored.createdAt);
+  const needsMigration = !Number.isFinite(stored.createdAt) || !!stored.accounts?.wallet || stored.accounts?.parent?.label !== "Funding account" || !stored.walletPending;
   const d = migrate(stored);
-  // Persist migration timestamps so repeated reads/restarts keep the same date.
-  if (needsSince) database().prepare("UPDATE children SET doc = ? WHERE id = ?").run(JSON.stringify(d), childId);
+  // Persist account migration and timestamps once, including across restarts.
+  if (needsMigration) database().prepare("UPDATE children SET doc = ? WHERE id = ?").run(JSON.stringify(d), childId);
   return remember(childId, d);
 }
 
@@ -220,7 +234,7 @@ export function createChild(familyId, input) {
   for (const [key, account] of Object.entries(d.accounts)) {
     account.id = uid("acct");
     account.balance = 0;
-    if (key !== "parent" && key !== "wallet") account.label = `${name}'s ${key}`;
+    if (key !== "parent") account.label = `${name}'s ${key}`;
   }
   for (const key of ["transactions", "postcards", "adventures", "friends", "approvals", "notifications"]) d[key] = [];
   d.allowance.amount = 0;

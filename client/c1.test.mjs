@@ -74,7 +74,7 @@ const noop = () => {};
 const submit = { preventDefault() {} };
 function stateFixture() {
   const db = seed(Date.now());
-  return { ...db, goals: db.savingsGoals, balances: { savings: 2000, spending: 1000 }, chat: [], plan: null,
+  return { ...db, goals: db.savingsGoals, balances: { savings: 2000, spending: 1000, parent: 25000 }, chat: [], plan: null,
     catalog: { places: Object.fromEntries(Object.entries(catalog.PLACES).map(([id, p]) => [id, { ...p, open: true, image: `/postcards/${id}.png` }])), home: catalog.HOME, lessons: catalog.LESSONS, points: catalog.POINTS, milestones: catalog.MILESTONES, cosmetics: catalog.COSMETICS, greetings: game.GREETINGS },
     integrations: { voice: "browser", buddy: "offline" }, pendingRequests: [] };
 }
@@ -1923,16 +1923,16 @@ test("W2.7: explicit lock avoids a protected-state refresh and late locked error
   assert.equal(nodes(h.tree(), (n) => n.type?.name === "PinGate").length, 0);
 });
 
-test("F2: child Home shows Apple Cash balance and last transaction, and Recent tags wallet entries", () => {
+test("H1: child Home shows today's Apple Cash total and last transaction, and Recent tags wallet entries", () => {
   const state = stateFixture();
-  state.balances.wallet = -225;
+  state.walletSpent = { today: 425 };
   state.walletLastTransaction = { id: "wallet", memo: "Corner shop", amount: 425, ts: Date.now(), kind: "wallet_spend", status: "posted", to: "merchant" };
   state.transactions.unshift(state.walletLastTransaction);
   const h = harness("Child.jsx");
   let opened;
   const tree = h.render(h.exports.Home, { state, open: (...args) => { opened = args; } });
   const pill = nodes(tree, (n) => n.props.className === "wallet-pill")[0];
-  assert.match(text(pill), /Apple Cash.*-\$2.25.*Corner shop.*\$4.25/);
+  assert.match(text(pill), /Apple Cash.*\$4.25.*today.*Corner shop.*\$4.25/);
   pill.props.onClick();
   assert.equal(JSON.stringify(opened), JSON.stringify(["money", { start: "spend", wallet: true }]));
   const sheet = harness("Child.jsx");
@@ -1946,7 +1946,7 @@ test("F2: Paid with Apple Cash routes manual spending to the wallet and keeps or
     const render = () => h.render(h.exports.MoneySheet, props);
     nodes(render(), (n) => n.type === "input" && n.props.id === "money-amount")[0].props.onChange({ target: { value: "4.25" } });
     changeField(render(), "What did you buy?", "Corner shop");
-    if (appleCash) nodes(render(), (n) => n.type === "input" && n.props.type === "checkbox")[0].props.onChange({ target: { checked: true } });
+    byText(render(), appleCash ? "Apple Cash" : "Spending money").props.onClick();
     assert.equal(nodes(render(), (n) => n.type === "input" && n.props.id === "money-amount")[0].props.step, appleCash ? "0.01" : "0.25");
     await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
     assert.equal(calls[0][0], appleCash ? "child/wallet/spend" : "child/spend");
@@ -1955,25 +1955,17 @@ test("F2: Paid with Apple Cash routes manual spending to the wallet and keeps or
   }
 });
 
-test("F2: parent wallet ledger records sent money and distinguishes uncovered historical spending", async () => {
-  const h = harness("Parent.jsx"), calls = [];
-  const state = stateFixture();
-  state.accounts.wallet.balance = -425;
+test("H1: parent Apple Cash activity shows funding and historical purchase flags without a send form", () => {
+  const h = harness("Parent.jsx"), state = stateFixture();
+  state.accounts.parent.balance = 54500;
+  state.walletSpent = { week: 425, month: 425 };
   state.walletTransactions = [{ id: "wallet", ts: Date.now(), kind: "wallet_spend", amount: 425, memo: "Corner shop", uncovered: true }];
-  const props = { state, run: async (...args) => { calls.push(args); return {}; } };
-  const render = () => h.render(h.exports.WalletLedger, props);
-  changeField(render(), "Amount sent ($)", "10");
-  changeField(render(), "Note", "Lunch money");
-  assert.match(text(render()), /Mia.*Apple Cash.*-\$4.25.*does not send money.*Uncovered/);
-  assert.match(text(render()), /own pocket.*does not change the funding record/);
-  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
-  assert.equal(calls[0][0], "parent/wallet/send");
-  assert.equal(calls[0][2], "Apple Cash transfer recorded — this does not change the funding record");
-  assert.equal(JSON.stringify(calls[0][1]), JSON.stringify({ amount: "10", note: "Lunch money" }));
-  assert.equal(nodes(render(), (n) => n.type === "input")[0].props.value, "");
+  const tree = h.render(h.exports.WalletLedger, { state });
+  assert.match(text(tree), /Apple Cash activity.*funding account:.*\$545.00.*week:.*\$4.25.*uncovered/);
+  assert.equal(nodes(tree, (n) => n.type === "form").length, 0);
   const activity = harness("Parent.jsx");
-  state.transactions = state.walletTransactions.map((t) => ({ ...t, from: "wallet", to: "merchant", status: "posted" }));
-  assert.match(text(activity.render(activity.exports.Activity, { state })), /Apple Cash.*Store.*uncovered/);
+  state.transactions = state.walletTransactions.map((t) => ({ ...t, from: "parent", to: "merchant", status: "posted" }));
+  assert.match(text(activity.render(activity.exports.Activity, { state })), /Apple Cash.*Funding.*Store.*uncovered/);
 });
 
 test("F2: Shortcut setup gates token creation on a PIN, scopes rotation and tests Bearer without parent cookies", async () => {
@@ -2159,7 +2151,7 @@ test("W3.6: money inputs offer decimal keyboards while lesson counts stay numeri
     ["Parent.jsx", "Goals", {}, 1],
     ["Parent.jsx", "SavingsGoal", {}, 1],
     ["Parent.jsx", "Allowance", {}, 3],
-    ["Parent.jsx", "WalletLedger", {}, 1],
+    ["Parent.jsx", "WalletLedger", {}, 0],
   ]) {
     const h = harness(file), tree = h.render(h.exports[component], { state, run: noop, ...props });
     const decimal = nodes(tree, (n) => n.type === "input" && n.props.inputMode === "decimal");

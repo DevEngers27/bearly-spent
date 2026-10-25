@@ -79,6 +79,8 @@ export function snapshot(db) {
     age: db.child.age,
     savings_balance: dollars(db.accounts.savings.balance),
     spending_balance: dollars(db.accounts.spending.balance),
+    apple_cash_money: dollars(db.accounts.parent.balance),
+    apple_cash_note: "Apple Cash money comes from your grown-up's funding",
     weekly_allowance: dollars(db.allowance.amount),
     allowance_saved_percent: db.allowance.savePct,
     next_allowance_date: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(db.allowance.nextRun)),
@@ -87,7 +89,7 @@ export function snapshot(db) {
     savings_goals: goals,
     parent_goals: db.parentGoals.filter((g) => g.status === "active").map((g) => ({ title: g.title, progress: `${g.progress}/${g.count}`, reward: dollars(g.reward) })),
     recent_transactions: db.transactions.filter((t) => t.status === "posted" && (t.to !== "parent")).slice(-8).map((t) => ({
-      date: new Date(t.ts).toDateString(), what: t.memo, amount: dollars(t.amount), direction: t.to === "merchant" ? "spent" : `into ${t.to}`,
+      date: new Date(t.ts).toDateString(), what: t.memo, ...(t.kind === "wallet_spend" ? { paid_with: "Apple Cash" } : {}), amount: dollars(t.amount), direction: t.to === "merchant" ? "spent" : `into ${t.to}`,
     })),
     current_plan: db.buddy.plan?.summary || null,
   });
