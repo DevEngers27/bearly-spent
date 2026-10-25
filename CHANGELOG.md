@@ -11,6 +11,19 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.5] — 2026-10-25
+
+### Fixed
+- Dress up: tapping a locked item now lights its card (solid border, honey
+  background, caption "Buy this?") while the "Spend N points…" box is open,
+  so a child can see which item the box is about. "Not now" dims it again
+  and tapping the lit card a second time cancels. The owner's report:
+  locked clothes did not light up when selected.
+
+### Review trail
+- Fixed directly on `fix/pending-swatch`, Gemini review, tried at phone
+  width in the built app. 371 server tests and 222 client tests.
+
 ## [0.8.4] — 2026-10-25
 
 ### Added
