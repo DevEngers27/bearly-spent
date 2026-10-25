@@ -24,6 +24,10 @@ export function takeLimit(policy, key, now = Date.now()) {
   return { remaining: max - window.count, until: window.until };
 }
 
+export function resetLimit(policy, key) {
+  windows.delete(`${policy}:${key}`);
+}
+
 export async function withChat(childId, fn, now = Date.now()) {
   if (chats.has(childId)) throw new GameError("Buddy is still thinking. One moment!", 429);
   takeLimit("chat", childId, now);

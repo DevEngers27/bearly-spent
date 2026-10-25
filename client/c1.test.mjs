@@ -11,7 +11,7 @@ import * as catalog from "../server/catalog.js";
 import { childView } from "../server/index.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
-  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
+  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog, Devices", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
   const result = await build({
     stdin: { contents: await readFile(new URL(`src/${name}`, import.meta.url), "utf8") + (extra ? `\nexport { ${extra} };` : ""), resolveDir: new URL("src/", import.meta.url).pathname, loader: "jsx" },
     bundle: true, write: false, format: "cjs", external: ["react"], jsxFactory: "h", jsxFragment: "Fragment", define: { "import.meta.env.PROD": "false" },
@@ -20,12 +20,12 @@ const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Pa
 })));
 
 function harness(name, { controller = null } = {}) {
-  const slots = [], pending = [], timers = [], timeouts = [], notices = [], streams = [];
+  const slots = [], pending = [], timers = [], intervalDelays = [], timeouts = [], notices = [], streams = [];
   const storage = new Map(), session = new Map();
   const window = new EventTarget();
   window.scrollTo = () => {};
   let cursor = 0;
-  const env = { now: Date.now(), fetch: async () => new Response("{}"), slots, pending, notices, storage, session, window, timers, timeouts, streams };
+  const env = { now: Date.now(), fetch: async () => new Response("{}"), slots, pending, notices, storage, session, window, timers, intervalDelays, timeouts, streams };
   const changed = (a, b) => !a || !b || a.length !== b.length || a.some((v, i) => !Object.is(v, b[i]));
   const hooks = {
     useState(initial) {
@@ -55,7 +55,7 @@ function harness(name, { controller = null } = {}) {
     EventSource: class { constructor(url) { this.url = url; streams.push(this); } close() { this.closed = true; } },
     SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } },
     Date: class extends Date { static now() { return env.now; } },
-    setInterval: (fn) => { timers.push(fn); return timers.length; }, clearInterval() {}, setTimeout: (fn) => { timeouts.push(fn); return timeouts.length; }, clearTimeout: (id) => { timeouts[id - 1] = null; },
+    setInterval: (fn, ms) => { timers.push(fn); intervalDelays.push(ms); return timers.length; }, clearInterval() {}, setTimeout: (fn) => { timeouts.push(fn); return timeouts.length; }, clearTimeout: (id) => { timeouts[id - 1] = null; },
   });
   env.exports = module.exports;
   env.render = (fn, props) => { cursor = 0; return fn(props); };
@@ -260,13 +260,13 @@ test("S6 / B5b: parent kid mode requires PIN on return; a child session has no p
   assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, 1);
   nodes(tree, (n) => n.type?.name === "PinGate")[0].props.onOk({ unlockedUntil: h.now + 900000 });
   tree = h.tree();
-  byText(tree, "Kid mode").props.onClick();
+  await byText(tree, "Kid mode").props.onClick();
   tree = h.tree();
   nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.onGrownUps();
   tree = h.tree();
   assert.equal(nodes(tree, (n) => n.type?.name === "PinGate").length, 1);
   nodes(tree, (n) => n.type?.name === "PinGate")[0].props.onOk({ unlockedUntil: h.now + 900000 });
-  byText(h.tree(), "Lock").props.onClick();
+  await byText(h.tree(), "Lock").props.onClick();
   assert.equal(nodes(h.tree(), (n) => n.type?.name === "PinGate").length, 1);
   const kid = await appHarness(meFixture("child"));
   tree = kid.tree();
@@ -304,6 +304,7 @@ async function worker() {
   const cache = {
     match: async (request) => entries.get(key(request))?.clone(),
     put: async (request, response) => { entries.set(key(request), response.clone()); await response.arrayBuffer(); },
+    add: async (request) => { const response = await w.fetch(request); if (!response.ok) throw new Error("Asset unavailable"); await cache.put(request, response); },
     addAll: async (requests) => { for (const request of requests) { const response = await w.fetch(request); assert.equal(response.ok, true); await cache.put(request, response); } },
   };
   named.set("mq-v3", cache); named.set("another-app", cache);
@@ -387,7 +388,7 @@ test("C13 / M16: all child and parent POST controls receive the shared busy stat
   ];
   for (const [file, component, extra, buttons] of checks) {
     const h = harness(file);
-    const render = () => h.render(h.exports[component], { state, busy: true, run: noop, ...extra });
+    const render = () => h.render(h.exports[component], { state, busy: true, demo: true, run: noop, ...extra });
     let tree = render();
     if (component === "PinGate") {
       h.fetch = () => new Promise(() => {});
@@ -585,6 +586,7 @@ test("B5b: a parent without a PIN returns directly with a Security nudge; switch
 
 test("B5b: lock events open a PIN sheet for parents and 429 becomes a toast", async () => {
   const h = await appHarness(meFixture());
+  h.tree();
   h.window.dispatchEvent(new Event("mq:locked"));
   assert.equal(nodes(h.tree(), (n) => n.type?.name === "PinGate").length, 1);
   const event = new Event("mq:rate-limit"); event.message = "Please wait a little";
@@ -619,10 +621,10 @@ test("B5b: child-only offline reload requires a matching cached child; 401 never
 });
 
 test("B5b: sign-out posts cookie logout and returns to Welcome with no cached identity", async () => {
-  const h = await appHarness(meFixture("child")), calls = [];
+  const h = await appHarness(meFixture()), calls = [];
   h.storage.set("mq_last_state", JSON.stringify(stateFixture()));
   h.fetch = async (url, options) => { calls.push([url, options]); return new Response("{}"); };
-  await nodes(h.tree(), (n) => n.type?.name === "ChildRoot")[0].props.onSignOut();
+  await nodes(h.tree(), (n) => n.type?.name === "ParentRoot")[0].props.onSignOut();
   const tree = h.tree();
   assert.equal(new URL(calls[0][0], h.location).pathname, "/api/auth/logout");
   assert.equal(calls[0][1].credentials, "same-origin");
@@ -760,12 +762,11 @@ test("B5b: client cookie requests work against the real account dispatcher throu
   await otherParent.api("auth/logout-all", {});
   await assert.rejects(otherParent.api("auth/me"), { status: 401 });
   await assert.rejects(parent.api("auth/me"), { status: 401 });
-  assert.equal((await kid.api("state")).child.name, "Leo");
-  await kid.api("auth/logout", {});
+  await assert.rejects(kid.api("state"), { status: 401 });
   await assert.rejects(kid.api("auth/me"), { status: 401 });
 });
 
-test("B5b: Welcome handles demo discovery on both public success and unauthenticated error responses", async () => {
+test("B5b: Welcome uses unauthenticated demo discovery; malformed success remains retryable", async () => {
   for (const status of [200, 401]) {
     const h = harness("App.jsx");
     h.fetch = async () => new Response(JSON.stringify({ demo: true, ...(status === 401 ? { error: "Sign in" } : {}) }), { status });
@@ -773,9 +774,14 @@ test("B5b: Welcome handles demo discovery on both public success and unauthentic
     await new Promise(setImmediate);
     const tree = h.render(h.exports.default); h.flush();
     const welcome = nodes(tree, (n) => n.type?.name === "AuthScreen")[0];
-    assert.equal(welcome.props.screen, "welcome");
-    assert.equal(welcome.props.demo, true);
-    assert.equal(welcome.props.error, null);
+    if (status === 401) {
+      assert.equal(welcome.props.screen, "welcome");
+      assert.equal(welcome.props.demo, true);
+      assert.equal(welcome.props.error, null);
+    } else {
+      assert.equal(welcome, undefined);
+      assert.ok(nodes(tree, (n) => n.type?.name === "Loading")[0].props.error);
+    }
   }
 });
 
@@ -950,7 +956,7 @@ test("B5b follow-up logout-all: Security confirms, cancels and respects busy sta
   assert.equal(byText(render(), "Confirm sign out everywhere"), undefined);
   byText(render(), "Sign out everywhere").props.onClick();
   assert.equal(calls, 0);
-  assert.match(text(render()), /Paired kid devices stay signed in/);
+  assert.match(text(render()), /including kid devices; you will need new kid codes/);
   assert.equal(byText(render({ busy: true }), "Confirm sign out everywhere").props.disabled, true);
   byText(render(), "Cancel").props.onClick();
   assert.equal(byText(render(), "Confirm sign out everywhere"), undefined);
@@ -1587,4 +1593,199 @@ test("D9: visiting Security keeps previously opened goal and allowance forms mou
   assert.equal(nodes(tree, (n) => n.type?.name === "Allowance")[0].props.key, allowance.props.key);
   assert.equal(nodes(tree, (n) => n.type?.name === "Goals").length, 1);
   assert.equal(nodes(tree, (n) => n.type === "div" && n.props.hidden === true).length, 2);
+});
+
+
+test("W2.1: optional cross-origin font failure never rejects service-worker install", async () => {
+  const w = await worker();
+  w.fetch = async (request) => {
+    if (request === "/") return new Response('<script src="/assets/app.js"></script><link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="https://fonts.googleapis.com/blocked"><link rel="stylesheet" href="https://fonts.googleapis.com/ok">');
+    if (String(request).includes("blocked")) throw new Error("CSP or network failure");
+    return new Response("asset");
+  };
+  await assert.doesNotReject(w.trigger("install"));
+  for (const asset of ["/", "/assets/app.js", "/assets/app.css", "https://fonts.googleapis.com/ok"]) assert.ok(w.entries.has(new URL(asset, "https://moneyquest.test").href));
+});
+
+test("W2.2: paired kids have no sign-out callback or floating pill", async () => {
+  const h = await appHarness(meFixture("child"));
+  const tree = h.tree();
+  assert.equal(nodes(tree, (n) => n.type?.name === "SignOut").length, 0);
+  assert.equal(nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.onSignOut, undefined);
+  const root = harness("App.jsx");
+  root.fetch = async () => new Response(JSON.stringify(stateFixture()));
+  root.render(root.exports.ChildRoot, { childId: "child-one", toast: noop }); root.flush();
+  await new Promise(setImmediate);
+  const loaded = root.render(root.exports.ChildRoot, { childId: "child-one", toast: noop });
+  assert.equal(nodes(loaded, (n) => n.props.className === "kid-signout" || n.type?.name === "SignOut").length, 0);
+});
+
+test("W2.3/12: unreachable cold start stays on Loading, retries at 10s and recovers either role", async () => {
+  for (const role of ["parent", "child"]) {
+    const h = harness("App.jsx"), calls = [];
+    h.fetch = async (url) => { calls.push(url); throw new TypeError("Failed to fetch"); };
+    h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+    const render = () => { const tree = h.render(h.exports.default); h.flush(); return tree; };
+    let tree = render();
+    assert.equal(nodes(tree, (n) => n.type?.name === "AuthScreen").length, 0);
+    const loading = nodes(tree, (n) => n.type?.name === "Loading")[0];
+    assert.ok(loading.props.error);
+    const controls = harness("App.jsx").render(h.exports.Loading, loading.props);
+    assert.ok(byText(controls, "Try again"));
+    await loading.props.onRetry();
+    assert.equal(calls.length, 2);
+    h.fetch = async (url) => { calls.push(url); return new Response(JSON.stringify(meFixture(role))); };
+    assert.equal(h.intervalDelays[0], 10000);
+    await h.timers[0]();
+    tree = render();
+    assert.equal(nodes(tree, (n) => n.type?.name === (role === "parent" ? "ParentRoot" : "ChildRoot")).length, 1);
+    assert.equal(calls.length, 3);
+    await h.timers[0](); assert.equal(calls.length, 3, "stop auth retries on recovery");
+  }
+});
+
+test("W2.3: cached parent has a Back to grown-ups control on cold-load error", async () => {
+  const h = harness("App.jsx");
+  h.storage.set("mq_parent_session", JSON.stringify(meFixture("parent", true)));
+  h.fetch = async () => { throw new Error("Offline"); };
+  h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+  const tree = h.render(h.exports.default); h.flush();
+  const loading = nodes(tree, (n) => n.type?.name === "Loading")[0];
+  assert.equal(typeof loading.props.onGrownUps, "function");
+  assert.ok(byText(h.exports.Loading(loading.props), "Back to grown-ups"));
+  loading.props.onGrownUps();
+  assert.equal(nodes(h.render(h.exports.default), (n) => n.type?.name === "PinGate").length, 1);
+});
+
+test("W2.12: initial 401 reuses its demo flag with just one auth/me request", async () => {
+  const h = harness("App.jsx");
+  let calls = 0;
+  h.fetch = async () => { calls++; return new Response('{"error":"Sign in","demo":true}', { status: 401 }); };
+  h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+  let tree = h.render(h.exports.default); h.flush(); await new Promise(setImmediate);
+  tree = h.render(h.exports.default); h.flush();
+  const welcome = nodes(tree, (n) => n.type?.name === "AuthScreen")[0];
+  assert.equal(welcome.props.demo, true);
+  assert.equal(welcome.props.screen, "welcome");
+  assert.equal(calls, 1);
+  await h.timers[0](); assert.equal(calls, 1);
+});
+
+test("W2.4/8: PIN sheet shows attempts, lock deadline in en-US, and password reset without losing the session", async () => {
+  const h = harness("App.jsx");
+  let resets = 0, unauthorized = 0;
+  const props = { onReset: async () => resets++, onOk: noop, onCancel: noop };
+  const render = () => h.render(h.exports.PinGate, props);
+  h.window.addEventListener("mq:unauthorized", () => unauthorized++);
+  changeField(render(), "Parent PIN", "0000");
+  h.fetch = async () => new Response('{"error":"Wrong","attemptsLeft":2}', { status: 401 });
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.match(text(render()), /2\s+tries\s+left/);
+  h.fetch = async () => new Response('{"error":"Wait","attemptsLeft":0,"retryAfterSeconds":900}', { status: 429 });
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.ok(text(render()).replace(/\s+/g, " ").includes(`Locked for 15 minutes — try again at ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(h.now + 900000)}`));
+  assert.equal(byText(render(), "Unlock").props.disabled, true);
+  byText(render(), "Forgot PIN?").props.onClick();
+  changeField(render(), "Password", "wrong password");
+  h.fetch = async () => new Response('{"error":"That password did not match"}', { status: 401 });
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.match(text(render()), /That password did not match/);
+  assert.equal(unauthorized, 0);
+  h.fetch = async (url, options) => {
+    assert.equal(url, "/api/parent/pin/reset");
+    assert.deepEqual(JSON.parse(options.body), { password: "right password" });
+    return new Response('{"ok":true,"unlockedUntil":0}');
+  };
+  changeField(render(), "Password", "right password");
+  await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+  assert.equal(resets, 1);
+});
+
+test("W2.6: Devices lists pairing metadata and unlinks only the selected device using DELETE", async () => {
+  const h = harness("Parent.jsx"), calls = [];
+  const props = { childId: "child-two" };
+  h.fetch = async (url, options) => {
+    calls.push([url, options.method]);
+    return new Response(JSON.stringify(options.method === "DELETE" ? { ok: true } : [{ id: "opaque-id", name: "Safari on iPhone", created_at: h.now, last_seen: h.now }]));
+  };
+  const render = () => h.render(h.exports.Devices, props);
+  render(); h.flush(); await new Promise(setImmediate);
+  assert.match(text(render()), /Safari on iPhone.*Paired.*Last seen/);
+  await byText(render(), "Unlink").props.onClick();
+  assert.deepEqual(calls, [["/api/parent/children/child-two/devices?child=child-two", "GET"], ["/api/parent/children/child-two/devices/opaque-id?child=child-two", "DELETE"]]);
+  assert.match(text(render()), /No paired devices yet/);
+});
+
+test("W2.7: Lock, Kid mode and PIN cancel await server lock; failed locks keep parent mode", async () => {
+  for (const action of ["Lock", "Kid mode", "cancel"]) {
+    const me = meFixture("parent", true); me.unlockedUntil = Date.now() + 900000;
+    const h = await appHarness(me), requests = [];
+    h.fetch = async (url) => { requests.push(url); return new Response('{"ok":true,"unlockedUntil":0}'); };
+    let tree = h.tree();
+    if (action === "cancel") {
+      await byText(tree, "Lock").props.onClick();
+      tree = h.tree(); requests.length = 0;
+      await nodes(tree, (n) => n.type?.name === "PinGate")[0].props.onCancel();
+    } else await byText(tree, action).props.onClick();
+    assert.equal(requests.length, 1);
+    assert.equal(new URL(requests[0], h.location).pathname, "/api/parent/lock");
+    assert.equal(nodes(h.tree(), (n) => n.type?.name === "ParentRoot").length, 0);
+    assert.equal(JSON.parse(h.storage.get("mq_parent_session")).unlockedUntil, 0);
+  }
+  const me = meFixture("parent", true); me.unlockedUntil = Date.now() + 900000;
+  const h = await appHarness(me);
+  h.fetch = async () => { throw new Error("Offline"); };
+  await byText(h.tree(), "Lock").props.onClick();
+  assert.equal(nodes(h.tree(), (n) => n.type?.name === "ParentRoot").length, 1);
+});
+
+test("W2.9: demo controls render only when me.demo is strictly true", () => {
+  const state = stateFixture();
+  for (const value of [undefined, false, "true", true]) {
+    const h = harness("Parent.jsx");
+    let tree = h.render(h.exports.default, { state, me: { ...meFixture(), demo: value }, toast: noop });
+    const ctx = nodes(tree, (n) => n.type?.name === "Inbox")[0].props;
+    assert.equal(ctx.demo, value === true);
+    for (const [name, labels] of [["Inbox", ["Add $50"]], ["Allowance", ["Fast-forward", "Add $50"]], ["Guardian", ["Post a duplicate"]], ["Settings", ["Reset demo"]]]) {
+      const component = harness("Parent.jsx");
+      tree = component.render(component.exports[name], { state, demo: ctx.demo, pending: [{ id: "a", title: "Funding", kind: "topup" }] });
+      for (const label of labels) assert.equal(Boolean(byText(tree, label)), value === true, `${name} ${label}`);
+    }
+  }
+});
+
+test("W2.10: kid code errors map reason into distinct warm copy", async () => {
+  for (const [reason, message] of [["unknown", "That code doesn't match — check the letters and try again"], ["used_or_expired", "That code was already used or expired. Ask for a new one."]]) {
+    const h = harness("App.jsx");
+    const render = () => h.render(h.exports.AuthScreen, { screen: "link", onSession: noop });
+    changeField(render(), "Kid code", "BC3467");
+    h.fetch = async () => new Response(JSON.stringify({ error: "Generic server error", reason }), { status: 400 });
+    await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
+    assert.ok(text(render()).includes(message));
+  }
+});
+
+test("W2.11: phone parent grid, forms and tables shrink within the 390px page", async () => {
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /@media \(max-width: 820px\)\s*\{\s*\.parent \{ grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(css, /\.pform-row \{[^}]*minmax\(min\(150px, 100%\), 1fr\)/);
+  assert.match(css, /\.ptable \{ table-layout: fixed; overflow-wrap: anywhere;/);
+  assert.match(css, /\.pform label, \.approval-body \{ min-width: 0;/);
+});
+
+
+test("W2.7: explicit lock avoids a protected-state refresh and late locked errors do not reopen Kid mode", async () => {
+  const apiClient = harness("api.js");
+  let changed = 0;
+  apiClient.window.addEventListener("mq:changed", () => changed++);
+  await apiClient.exports.api("parent/lock", {});
+  assert.equal(changed, 0);
+  await apiClient.exports.api("parent/pin", { pin: "1234" });
+  assert.equal(changed, 1);
+  const me = meFixture("parent", true); me.unlockedUntil = Date.now() + 900000;
+  const h = await appHarness(me);
+  await byText(h.tree(), "Kid mode").props.onClick();
+  h.tree();
+  h.window.dispatchEvent(new Event("mq:locked"));
+  assert.equal(nodes(h.tree(), (n) => n.type?.name === "PinGate").length, 0);
 });

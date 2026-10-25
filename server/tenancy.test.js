@@ -118,7 +118,8 @@ test("parent child selection keeps funding accounts, settings and mutations sepa
   assert.equal(listChildren(a.familyId).length, 2);
   assert.notEqual(readChild(id).accounts.parent.id, readChild(a.id).accounts.parent.id);
   process.env.MQ_DEMO = "1";
-  assert.equal((await a.browser.call("POST", `/api/parent/topup?child=${id}`, { amount: 50 })).status, 200);
+  assert.equal((await a.browser.call("POST", `/api/parent/topup?child=${id}`, { amount: 50 })).status, 404);
+  mutateChild(id, (d) => { d.accounts.parent.balance = 5000; });
   assert.equal(readChild(id).accounts.parent.balance, 5000);
   assert.equal(readChild(a.id).accounts.parent.balance, 0);
   assert.equal((await a.browser.call("GET", `/api/auth/me?child=${id}`)).body.activeChild.id, id);
@@ -127,7 +128,7 @@ test("parent child selection keeps funding accounts, settings and mutations sepa
   for (const path of ["/api/buddy/chat", "/api/buddy/speak", "/api/voice/token"]) {
     assert.equal((await a.browser.call("POST", `${path}?child=${id}`, { text: "Hello" })).status, 400);
   }
-  assert.ok(readChild(id).audit.some((a) => a.action === "demo_topup" && /Demo control/.test(a.detail)));
+  assert.ok(!readChild(id).audit.some((a) => a.action === "demo_topup"));
 });
 
 test("SSE sends family versions only, restricts paired children and unsubscribes on close", async () => {
@@ -481,4 +482,11 @@ test("merged trips, reveal receipts and goal cancellation obey account roles and
   const legacy = await child.call("POST", "/api/child/adventure", { destId: "chicago" });
   assert.equal(legacy.status, 200);
   assert.equal(Object.hasOwn(legacy.body, "destId"), false);
+});
+
+
+test("W2.1: CSP allows worker fetches to both Google Fonts hosts", async () => {
+  const result = await device().call("GET", "/api/auth/me");
+  const connect = result.headers["content-security-policy"].split(";").find((part) => part.trim().startsWith("connect-src"));
+  for (const host of ["https://fonts.googleapis.com", "https://fonts.gstatic.com"]) assert.ok(connect.includes(host));
 });

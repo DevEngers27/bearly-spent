@@ -36,7 +36,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
     run("parent/settings", { timezone: BROWSER_TIMEZONE });
   }, [state.settings.timezone, run]);
   const pending = state.approvals.filter((a) => a.status === "pending");
-  const ctx = { state, run, busy };
+  const ctx = { state, run, busy, demo: me?.demo === true };
   return (
     <div className="parent">
       <aside className="p-nav">
@@ -81,7 +81,7 @@ function Integrations({ state }) {
   );
 }
 
-function Inbox({ state, run, pending, busy }) {
+function Inbox({ state, run, demo, pending, busy }) {
   const notifications = state.notifications.filter((n) => !n.read);
   const decided = state.approvals.filter((a) => a.status !== "pending").slice(0, 8);
   return (
@@ -100,7 +100,7 @@ function Inbox({ state, run, pending, busy }) {
             <div className="approval-actions">
               {a.kind === "topup" || a.kind === "review" ? (
                 <>
-                  {a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={() => run("parent/topup", { amount: 50 }, "Added $50 to funding")}>Add $50</button>}
+                  {demo && a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={() => run("parent/topup", { amount: 50 }, "Added $50 to funding")}>Add $50</button>}
                   <button disabled={busy} className="pbtn" onClick={() => run(`parent/approval/${a.id}`, { approve: true }, "Marked as handled")}>Mark handled</button>
                 </>
               ) : (
@@ -258,7 +258,7 @@ function SavingsGoal({ state, run, busy }) {
   );
 }
 
-function Allowance({ state, run, busy }) {
+function Allowance({ state, run, demo, busy }) {
   const a = state.allowance;
   const [f, setF] = useState({ amount: a.amount / 100, savePct: a.savePct, spendLimit: a.spendLimit / 100, rewardDestination: a.rewardDestination });
   return (
@@ -276,7 +276,7 @@ function Allowance({ state, run, busy }) {
         </div>
         <button disabled={busy} className="pbtn primary">Save rules</button>
       </form>
-      <section className="p-card">
+      {demo && <section className="p-card">
         <h2>Funding account</h2>
         <p>{money(state.accounts.parent.balance)} available (simulated)</p>
         <div className="row">
@@ -284,7 +284,7 @@ function Allowance({ state, run, busy }) {
           <button disabled={busy} className="pbtn" onClick={() => run("parent/allowance/run-now", {}, "Fast-forwarded to payday")}>Fast-forward to payday</button>
         </div>
         <p className="p-muted">Fast-forward is a demo control: it moves the schedule to now so you can watch the Guardian pay.</p>
-      </section>
+      </section>}
     </div>
   );
 }
@@ -313,7 +313,7 @@ function Activity({ state }) {
   );
 }
 
-function Guardian({ state, run, busy }) {
+function Guardian({ state, run, demo, busy }) {
   const [all, setAll] = useState(false);
   const rows = state.audit.filter((a) => all || a.actor === "guardian" || a.actor === "buddy");
   return (
@@ -327,11 +327,11 @@ function Guardian({ state, run, busy }) {
         <div><b>G4</b> Holds purchases over your limit and flags unusual spending</div>
         <div><b>G5</b> Warns you before funding runs short</div>
       </div>
-      <section className="p-card demo">
+      {demo && <section className="p-card demo">
         <h2>Try it: simulate a bank glitch</h2>
         <p className="p-muted">Makes the simulated bank post the last reward or allowance twice, the way a replayed webhook would. Watch the Guardian catch it on its next check, within a couple of seconds.</p>
         <button disabled={busy} className="pbtn" onClick={() => run("parent/inject-fault", {}, "Bank glitch injected. Watch the log.")}>Post a duplicate</button>
-      </section>
+      </section>}
       <div className="row">
         <h2>Decision log</h2>
         <label className="toggle"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Show all activity</label>
@@ -382,7 +382,7 @@ function BuddyLog({ state, run, busy }) {
   );
 }
 
-function Settings({ state, run, busy }) {
+function Settings({ state, run, demo, busy }) {
   const s = state.settings;
   const timezones = [...new Set(["UTC", BROWSER_TIMEZONE, ...TIMEZONES, ...(s.timezone ? [s.timezone] : [])])].sort();
   const toggle = (k) => run("parent/settings", { [k]: !s[k] }, "Saved");
@@ -409,11 +409,11 @@ function Settings({ state, run, busy }) {
           {state.friends.map((f) => <tr key={f.id}><td>{f.name}</td><td>{f.code}</td><td>{f.status.replace("_", " ")}</td></tr>)}
         </tbody>
       </table>
-      <section className="p-card">
+      {demo && <section className="p-card">
         <h2>Demo data</h2>
         <p className="p-muted">Restore the starting demo family. This erases all progress.</p>
         <button disabled={busy} className="pbtn danger" onClick={() => confirm("Reset all demo data?") && run("parent/reset", {}, "Demo reset")}>Reset demo</button>
-      </section>
+      </section>}
     </div>
   );
 }
@@ -449,6 +449,7 @@ function Children({ me, refreshMe, run, busy }) {
       const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
       return <section className="p-card" key={summary.id}>
         <div className="row"><div><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></div><button className="pbtn" disabled={busy} onClick={() => generate(summary.id)}>Generate kid code</button></div>
+        <Devices childId={summary.id} busy={busy} />
         {link && <div className="p-stack">
           {seconds > 0 ? <>
             <label className="pform">Kid code<input className="kid-code" readOnly value={link.code} onFocus={(event) => event.target.select()} /></label>
@@ -465,6 +466,39 @@ function Children({ me, refreshMe, run, busy }) {
       <label>Bear's name<input required maxLength={24} {...field("bearName")} /></label>
       <button className="pbtn primary" disabled={busy}>Add child</button>
     </form>
+  </div>;
+}
+
+function Devices({ childId, busy }) {
+  const [devices, setDevices] = useState([]);
+  const [error, setError] = useState("");
+  const [run, pending] = useAction((message) => setError(message));
+  const url = `parent/children/${encodeURIComponent(childId)}/devices?child=${encodeURIComponent(childId)}`;
+  const refresh = async () => {
+    try { setDevices(await api(url)); setError(""); } catch (err) { setError(err.message); }
+  };
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try { const next = await api(url); if (active) { setDevices(next); setError(""); } }
+      catch (err) { if (active) setError(err.message); }
+    };
+    load();
+    const timer = setInterval(load, 10000);
+    return () => { active = false; clearInterval(timer); };
+  }, [url]);
+  const unlink = (id) => run(async () => {
+    await api(`parent/children/${encodeURIComponent(childId)}/devices/${encodeURIComponent(id)}?child=${encodeURIComponent(childId)}`, undefined, { method: "DELETE" });
+    setDevices((current) => current.filter((device) => device.id !== id));
+    return { ok: true };
+  });
+  return <div className="p-stack">
+    <h3>Devices</h3>
+    {error ? <p role="alert">{error} <button className="pbtn" disabled={busy || pending} onClick={refresh}>Try again</button></p> : devices.length === 0 && <p className="p-muted">No paired devices yet.</p>}
+    {devices.map((device) => <div className="p-device" key={device.id}>
+      <div><strong>{device.name}</strong><p className="p-muted">Paired {formatDateTime(device.created_at)} · Last seen {formatDateTime(device.last_seen)}</p></div>
+      <button className="pbtn danger" disabled={busy || pending} onClick={() => unlink(device.id)}>Unlink</button>
+    </div>)}
   </div>;
 }
 
@@ -493,7 +527,7 @@ function Security({ me, refreshMe, onSignOut, onSignOutAll, run, busy }) {
       <button className="pbtn" disabled={busy} onClick={() => run(onSignOut)}>Sign out</button>
       <button className="pbtn" disabled={busy} onClick={() => setConfirmSignOut(true)}>Sign out everywhere</button>
       {confirmSignOut && <div className="p-stack">
-        <p>Sign out of all your parent sessions, including this device? Paired kid devices stay signed in.</p>
+        <p>Sign out of all family sessions, including kid devices; you will need new kid codes. This device will sign out too.</p>
         <div className="row"><button className="pbtn" disabled={busy} onClick={() => setConfirmSignOut(false)}>Cancel</button><button className="pbtn primary" disabled={busy} onClick={() => run(onSignOutAll)}>Confirm sign out everywhere</button></div>
       </div>}
     </section>

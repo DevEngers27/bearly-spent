@@ -15,14 +15,15 @@ export function clearSessionCache() {
   identityVersion++;
   selectedChild = null;
   try {
-    for (const key of ["mq_last_state", "mq_child_session", "mq_selected_child", "mq_parent_mode"]) localStorage.removeItem(key);
+    for (const key of ["mq_last_state", "mq_child_session", "mq_parent_session", "mq_selected_child", "mq_parent_mode"]) localStorage.removeItem(key);
   } catch {}
 }
 
 export function rememberSession(me) {
   try {
     if (me.role === "child") localStorage.setItem("mq_child_session", JSON.stringify(me));
-    else localStorage.removeItem("mq_child_session");
+    else localStorage.setItem("mq_parent_session", JSON.stringify(me));
+    localStorage.removeItem(me.role === "child" ? "mq_parent_session" : "mq_child_session");
   } catch {}
 }
 
@@ -30,6 +31,14 @@ export function cachedChildSession() {
   try {
     const me = JSON.parse(localStorage.getItem("mq_child_session"));
     return me?.role === "child" && me.activeChild?.id && cachedChildState(me.activeChild.id) ? me : null;
+  } catch { return null; }
+}
+
+// Cached summaries only restore navigation; protected parent state always needs the API.
+export function cachedParentSession() {
+  try {
+    const me = JSON.parse(localStorage.getItem("mq_parent_session"));
+    return me?.role === "parent" && me.activeChild?.id ? me : null;
   } catch { return null; }
 }
 
@@ -41,18 +50,18 @@ export function apiUrl(path, includeChild = true) {
 }
 
 // Shared by JSON and audio requests so every authenticated route handles expiry.
-export async function apiResponse(path, body, { includeChild = true, handleUnauthorized = true } = {}) {
+export async function apiResponse(path, body, { includeChild = true, handleUnauthorized = true, method } = {}) {
   const version = identityVersion;
   const url = apiUrl(path, includeChild);
   const route = path.split("?")[0];
   const parentRoute = route.startsWith("parent/") || route === "auth/logout-all";
   const res = await fetch(url, {
-    method: body === undefined ? "GET" : "POST",
+    method: method || (body === undefined ? "GET" : "POST"),
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.status === 401 && handleUnauthorized && !["parent/unlock", "auth/login"].includes(route)) {
+  if (res.status === 401 && handleUnauthorized && !["parent/unlock", "parent/pin/reset", "auth/login"].includes(route)) {
     clearSessionCache();
     window.dispatchEvent(new Event("mq:unauthorized"));
   }
@@ -67,6 +76,7 @@ export async function apiResponse(path, body, { includeChild = true, handleUnaut
     const err = new Error(data.error || (res.status >= 500 ? "Something went wrong on the server. Try again." : `Request failed (${res.status})`));
     err.status = res.status;
     err.demo = data.demo === true;
+    for (const key of ["attemptsLeft", "retryAfterSeconds", "reason"]) if (data[key] !== undefined) err[key] = data[key];
     if (res.status === 429) {
       const event = new Event("mq:rate-limit");
       event.message = err.message;
@@ -90,7 +100,9 @@ export async function api(path, body, options) {
       navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage({ type: "mq:cache-art", images })).catch(() => {});
     }
   }
-  if (body !== undefined) window.dispatchEvent(new Event("mq:changed"));
+  // Lock changes authentication, not game state. Refreshing a departing parent
+  // view here would immediately request protected state with the new lock.
+  if (path.split("?")[0] !== "parent/lock" && (body !== undefined || options?.method === "DELETE")) window.dispatchEvent(new Event("mq:changed"));
   return data;
 }
 

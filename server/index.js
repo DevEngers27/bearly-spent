@@ -165,6 +165,10 @@ register("GET", "/api/auth/me", "session", (req, ctx) => auth.me(ctx));
 register("POST", "/api/demo/login", "public", (req, ctx, res, now) => signedIn(req, res, auth.demoLogin(options(req, now)), now));
 register("POST", "/api/parent/pin", "parent", (req, ctx, res, now) => auth.setPin(ctx, req.body, now));
 register("POST", "/api/parent/unlock", "lockedParent", (req, ctx, res, now) => auth.unlock(ctx, req.body, now));
+register("POST", "/api/parent/lock", "lockedParent", (req, ctx) => auth.lock(ctx));
+register("POST", "/api/parent/pin/reset", "lockedParent", (req, ctx, res, now) => auth.resetPin(ctx, req.body, options(req, now)));
+register("GET", "/api/parent/children/:id/devices", "parent", (req, ctx, res, now) => auth.childDevices(ctx, req.params.id, now));
+register("DELETE", "/api/parent/children/:id/devices/:sessionId", "parent", (req, ctx) => auth.unlinkDevice(ctx, req.params.id, req.params.sessionId));
 register("POST", "/api/parent/children", "parent", (req, ctx) => createChild(ctx.family.id, req.body));
 register("POST", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.createLink(ctx, req.params.id, now));
 register("GET", "/api/state", "child", (req, ctx) => ({ childId: ctx.childId, ...childView(readChild(ctx.childId)) }));
@@ -258,22 +262,22 @@ export function demoRunNow(db, now = Date.now()) {
   game.requestAllowanceRun(db, now);
   game.audit(db, "parent", "demo_allowance_run", "Demo control: fast-forward allowance");
 }
-function demoControl() {
-  if (process.env.MQ_DEMO !== "1") throw new GameError("Demo control unavailable", 404);
+function demoControl(context) {
+  if (process.env.MQ_DEMO !== "1" || context.family.id !== DEMO_FAMILY_ID) throw new GameError("Demo control unavailable", 404);
 }
 register("POST", "/api/parent/allowance/run-now", "parent", (req, ctx, res, now) => {
-  demoControl();
+  demoControl(ctx);
   return runChildAction(ctx.childId, (db) => demoRunNow(db, now), "demo_fast_forward", now);
 });
 register("POST", "/api/parent/topup", "parent", (req, ctx, res, now) => {
-  demoControl();
+  demoControl(ctx);
   return runChildAction(ctx.childId, (db) => {
     actions.topup(db, req.body);
     game.audit(db, "parent", "demo_topup", "Demo control: simulated funding deposit");
   }, "demo_topup", now);
 });
 register("POST", "/api/parent/inject-fault", "parent", (req, ctx) => {
-  demoControl();
+  demoControl(ctx);
   return mutateChild(ctx.childId, (db) => {
     const duplicate = injectDuplicatePosting(db);
     if (!duplicate) throw new GameError("Nothing to duplicate yet — run an allowance first");
@@ -282,8 +286,7 @@ register("POST", "/api/parent/inject-fault", "parent", (req, ctx) => {
   });
 });
 register("POST", "/api/parent/reset", "parent", (req, ctx) => {
-  demoControl();
-  if (ctx.family.id !== DEMO_FAMILY_ID) throw new GameError("Demo control unavailable", 404);
+  demoControl(ctx);
   cancelReplan(ctx.childId);
   resetChild(ctx.childId);
   mutateChild(ctx.childId, (db) => {
@@ -297,7 +300,7 @@ export const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "Permissions-Policy": "camera=(), microphone=(self)",
-  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.cartesia.ai",
+  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.cartesia.ai https://fonts.googleapis.com https://fonts.gstatic.com",
 };
 
 async function execute(entry, req, res, now) {
@@ -319,7 +322,7 @@ export async function dispatch(method, pathname, req, res, now = Date.now()) {
     for (const entry of routeActions) {
       if (entry.method !== method) continue;
       const names = [];
-      const pattern = entry.path.replace(/:([a-z]+)/g, (_, name) => { names.push(name); return "([^/]+)"; });
+      const pattern = entry.path.replace(/:([a-zA-Z]+)/g, (_, name) => { names.push(name); return "([^/]+)"; });
       const match = new RegExp(`^${pattern}$`).exec(pathname);
       if (!match) continue;
       req.params = {};
@@ -332,6 +335,8 @@ export async function dispatch(method, pathname, req, res, now = Date.now()) {
   } catch (e) {
     if (e instanceof GameError) {
       const body = { error: e.message };
+      for (const key of ["attemptsLeft", "retryAfterSeconds", "reason"]) if (e[key] !== undefined) body[key] = e[key];
+      if (e.retryAfterSeconds !== undefined) res.set("Retry-After", String(e.retryAfterSeconds));
       if (method === "GET" && pathname === "/api/auth/me" && e.status === 401) body.demo = process.env.MQ_DEMO === "1";
       return res.status(e.status).json(body);
     }

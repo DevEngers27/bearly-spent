@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, cachedChildSession, clearSessionCache, OFFLINE_MESSAGE, rememberSession, setSelectedChild, useAction, useLiveState } from "./api.js";
+import { api, cachedChildSession, cachedParentSession, formatTime, clearSessionCache, OFFLINE_MESSAGE, rememberSession, setSelectedChild, useAction, useLiveState } from "./api.js";
 import Child, { Sheet } from "./Child.jsx";
 import Parent from "./Parent.jsx";
 import { SketchDefs } from "./Bear.jsx";
@@ -18,12 +18,15 @@ export default function App() {
   const [parentOffline, setParentOffline] = useState(false);
   const authVersion = useRef(0);
   const resettingChild = useRef(false);
+  const retryAuth = useRef(() => {});
+  const welcomeDiscovery = useRef(false);
   const toast = useCallback((text, tone = "ok") => {
     const id = Math.random();
     setToasts([{ id, text, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3800);
   }, []);
   const acceptSession = useCallback((next, restoring = false) => {
+    authVersion.current++;
     let selected, savedMode;
     try {
       selected = localStorage.getItem("mq_selected_child");
@@ -47,12 +50,13 @@ export default function App() {
     authVersion.current++;
     clearSessionCache();
     setMe(null);
+    setError(null);
     setPinOpen(false);
     setView("welcome");
   }, []);
   useEffect(() => {
-    const unauthorized = () => welcome();
-    const locked = () => { setView("kid"); setPinOpen(true); };
+    const unauthorized = () => { welcomeDiscovery.current = false; welcome(); };
+    const locked = () => { if (view === "parent") { setView("kid"); setPinOpen(true); } };
     const limited = (event) => toast(event.message, "error");
     const resetChild = async () => {
       if (!me || resettingChild.current) return;
@@ -88,32 +92,48 @@ export default function App() {
       window.removeEventListener("mq:child-reset", resetChild);
       navigator.serviceWorker?.removeEventListener("controllerchange", onUpdate);
     };
-  }, [me, welcome, toast]);
+  }, [me, view, welcome, toast]);
   useEffect(() => {
-    let active = true;
+    let active = true, inflight = false, done = false;
     const version = authVersion.current;
-    api("auth/me").then((next) => {
-      if (!active || version !== authVersion.current) return;
-      setDemo(next.demo === true);
-      if (!next.role) { welcome(); return; }
-      acceptSession(next, true);
-    }).catch((err) => {
-      if (!active) return;
-      setDemo(err.demo === true);
-      if (err.status === 401) { setView("welcome"); return; }
-      if (version !== authVersion.current) return;
-      const cached = !err.status && cachedChildSession();
-      if (cached) {
-        setSelectedChild(cached.activeChild.id);
-        setMe(cached);
-        setView("kid");
-      } else { setError(err); setView("welcome"); }
-    });
-    return () => { active = false; };
+    const restore = async () => {
+      if (!active || inflight || done || version !== authVersion.current) return;
+      inflight = true;
+      try {
+        const next = await api("auth/me", undefined, { handleUnauthorized: false });
+        if (!active || version !== authVersion.current) return;
+        if (!["parent", "child"].includes(next.role)) throw new Error("Could not load your session. Try again.");
+        done = true;
+        setDemo(next.demo === true);
+        welcomeDiscovery.current = true;
+        acceptSession(next, true);
+      } catch (err) {
+        if (!active || version !== authVersion.current) return;
+        if (err.status === 401) {
+          done = true;
+          setDemo(err.demo === true);
+          welcomeDiscovery.current = true;
+          welcome();
+          return;
+        }
+        const cached = !err.status && cachedChildSession();
+        if (cached) {
+          setSelectedChild(cached.activeChild.id);
+          setMe(cached);
+          setView("kid");
+        } else { setError(err); setView("loading"); }
+      } finally { inflight = false; }
+    };
+    retryAuth.current = restore;
+    restore();
+    const retry = setInterval(restore, 10000);
+    window.addEventListener("online", restore);
+    return () => { active = false; clearInterval(retry); window.removeEventListener("online", restore); };
   }, [acceptSession, welcome]);
   const onWelcome = view === "welcome";
   useEffect(() => {
-    if (!onWelcome) return;
+    if (!onWelcome) { welcomeDiscovery.current = false; return; }
+    if (welcomeDiscovery.current) return;
     let active = true;
     api("auth/me", undefined, { handleUnauthorized: false }).then((next) => {
       if (active) setDemo(next.demo === true);
@@ -133,16 +153,40 @@ export default function App() {
   }, [view, pinOpen, me?.role]);
   const signOut = async () => {
     await api("auth/logout", {});
+    welcomeDiscovery.current = false;
     welcome();
   };
   const signOutAll = async () => {
     await api("auth/logout-all", {});
+    welcomeDiscovery.current = false;
     welcome();
   };
+  const [runLock, lockBusy] = useAction(toast);
+  const leaveParent = (openPin = false) => runLock(async () => {
+    if (me.family.pinSet) {
+      await api("parent/lock", {});
+      const locked = { ...me, unlockedUntil: 0 };
+      setMe(locked);
+      rememberSession(locked);
+    }
+    setView("kid");
+    setPinOpen(openPin);
+    return { ok: true };
+  });
   const enterParent = () => {
     if (me?.role !== "parent") return;
-    if (me.family.pinSet) { setView("kid"); setPinOpen(true); }
-    else { setView("parent"); toast("Set a PIN in Security for quick grown-up switches."); }
+    if (me.family.pinSet) {
+      if (view === "parent") return leaveParent(true);
+      setView("kid"); setPinOpen(true);
+    } else { setView("parent"); toast("Set a PIN in Security for quick grown-up switches."); }
+  };
+  const backToGrownUps = () => {
+    const cached = cachedParentSession();
+    if (!cached) return;
+    setSelectedChild(cached.activeChild.id);
+    setMe(cached);
+    setPinOpen(cached.family.pinSet);
+    setView(cached.family.pinSet ? "kid" : "parent");
   };
   const selectChild = (id) => {
     const activeChild = me.children.find((c) => c.id === id);
@@ -169,17 +213,17 @@ export default function App() {
           <label className="child-switcher">Child<select value={me.activeChild.id} onChange={(e) => selectChild(e.target.value)}>{me.children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}</select></label>
           {parentOffline && <span className="offline-pill" role="status">Offline</span>}
           <div className="appbar-actions">
-            <button className="pbtn" onClick={() => setView("kid")}>Kid mode</button>
+            <button className="pbtn" disabled={lockBusy} onClick={() => leaveParent()}>Kid mode</button>
             <SignOut onSignOut={signOut} toast={toast} />
-            {me.family.pinSet && <button className="pbtn" onClick={enterParent}>Lock</button>}
+            {me.family.pinSet && <button className="pbtn" disabled={lockBusy} onClick={enterParent}>Lock</button>}
           </div>
         </header>
       )}
-      {view === "loading" && <Loading />}
+      {view === "loading" && <Loading error={error} onRetry={() => retryAuth.current()} onGrownUps={cachedParentSession() ? backToGrownUps : undefined} />}
       {!me && view !== "loading" && <AuthScreen key={view} screen={view} navigate={setView} demo={demo} onSession={acceptSession} error={error} />}
-      {me && view === "kid" && <ChildRoot key={me.activeChild.id} childId={me.activeChild.id} toast={toast} onGrownUps={me.role === "parent" ? enterParent : undefined} onSignOut={me.role === "child" ? signOut : undefined} />}
+      {me && view === "kid" && <ChildRoot key={me.activeChild.id} childId={me.activeChild.id} toast={toast} onGrownUps={me.role === "parent" ? enterParent : undefined} />}
       {me?.role === "parent" && view === "parent" && <ParentRoot key={me.activeChild.id} childId={me.activeChild.id} me={me} refreshMe={refreshMe} onSignOut={signOut} onSignOutAll={signOutAll} toast={toast} onConnection={setParentOffline} />}
-      {me?.role === "parent" && pinOpen && <PinGate onOk={(result) => { setMe({ ...me, unlockedUntil: result.unlockedUntil }); setPinOpen(false); setView("parent"); }} onCancel={() => { setPinOpen(false); setView("kid"); }} />}
+      {me?.role === "parent" && pinOpen && <PinGate onOk={(result) => { setMe({ ...me, unlockedUntil: result.unlockedUntil }); setPinOpen(false); setView("parent"); }} onReset={async () => { await refreshMe(); setPinOpen(false); setView("parent"); }} onCancel={() => leaveParent()} />}
       <div className="toasts" aria-live="polite">
         {updated && <div className="toast ok update-toast"><button onClick={() => location.reload()}>Updated! Tap to reload</button><button aria-label="Dismiss update" onClick={() => setUpdated(false)}>×</button></div>}
         {toasts.map((t) => <div key={t.id} className={`toast ${t.tone}`}>{t.tone === "ok" && <Icon name="sparkle" size={18} />}{t.text}</div>)}
@@ -201,14 +245,14 @@ function SignOut({ onSignOut, toast }) {
   return <button className="pbtn" disabled={busy} onClick={() => run(onSignOut)}>Sign out</button>;
 }
 
-function ChildRoot({ childId, toast, onGrownUps, onSignOut }) {
+function ChildRoot({ childId, toast, onGrownUps }) {
   const { state, error, offline, refresh } = useLiveState("child", childId);
   const hasState = Boolean(state);
   useEffect(() => {
     if (offline && hasState) toast(OFFLINE_MESSAGE);
   }, [offline, hasState, toast]);
   if (!state) return <Loading error={error} onRetry={refresh} onGrownUps={onGrownUps} />;
-  return <><Child state={state} toast={toast} offline={offline} onGrownUps={onGrownUps} />{onSignOut && <div className="kid-signout"><SignOut onSignOut={onSignOut} toast={toast} /></div>}</>;
+  return <Child state={state} toast={toast} offline={offline} onGrownUps={onGrownUps} />;
 }
 
 function ParentRoot({ childId, me, refreshMe, onSignOut, onSignOutAll, toast, onConnection }) {
@@ -225,7 +269,13 @@ function AuthScreen({ screen, navigate, demo, onSession, error }) {
   const field = (key) => ({ value: fields[key], onChange: (e) => setFields({ ...fields, [key]: e.target.value }) });
   const login = async (path, body) => {
     setErr("");
-    const result = await run(path, body);
+    const result = await run(async () => {
+      try { return await api(path, body); }
+      catch (error) {
+        if (path === "auth/link" && error.reason) error.message = error.reason === "unknown" ? "That code doesn't match — check the letters and try again" : "That code was already used or expired. Ask for a new one.";
+        throw error;
+      }
+    });
     if (result) onSession(result);
   };
   const submit = (event) => {
@@ -274,23 +324,48 @@ function AuthScreen({ screen, navigate, demo, onSession, error }) {
   );
 }
 
-function PinGate({ onOk, onCancel }) {
+function PinGate({ onOk, onReset, onCancel }) {
   const [pin, setPin] = useState("");
+  const [password, setPassword] = useState("");
+  const [forgot, setForgot] = useState(false);
   const [err, setErr] = useState("");
+  const [attemptsLeft, setAttemptsLeft] = useState(null);
+  const [lockedUntil, setLockedUntil] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const [run, busy] = useAction((message) => setErr(message));
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const locked = lockedUntil > now;
   const submit = async (e) => {
     e.preventDefault();
     setErr("");
-    const result = await run("parent/unlock", { pin });
-    if (result) onOk(result);
+    const result = await run(async () => {
+      try { return await api(forgot ? "parent/pin/reset" : "parent/unlock", forgot ? { password } : { pin }); }
+      catch (error) {
+        if (!forgot) {
+          if (error.attemptsLeft !== undefined) setAttemptsLeft(error.attemptsLeft);
+          if (error.retryAfterSeconds) setLockedUntil(Date.now() + error.retryAfterSeconds * 1000);
+        }
+        throw error;
+      }
+    });
+    if (result) {
+      setAttemptsLeft(null); setLockedUntil(0);
+      if (forgot) await run(onReset);
+      else onOk(result);
+    }
   };
   return (
     <Sheet title="Grown-ups only" onClose={onCancel}>
       <form onSubmit={submit} className="pform">
-        <p>Enter your PIN to manage allowance, goals and approvals.</p>
-        <label>Parent PIN<input type="password" inputMode="numeric" autoComplete="off" autoFocus required pattern="[0-9]{4,8}" minLength={4} maxLength={8} value={pin} onChange={(e) => setPin(e.target.value)} /></label>
-        {err && <p className="neg" role="alert">{err}</p>}
-        <div className="row"><button type="button" className="pbtn" onClick={onCancel}>Back to kid view</button><button className="pbtn primary" disabled={busy}>Unlock</button></div>
+        <p>{forgot ? "Use your password to clear the PIN. You can set a new one in Security." : "Enter your PIN to manage allowance, goals and approvals."}</p>
+        {forgot ? <label>Password<input type="password" autoComplete="current-password" required maxLength={1024} value={password} onChange={(e) => setPassword(e.target.value)} /></label> : <label>Parent PIN<input type="password" inputMode="numeric" autoComplete="off" autoFocus required pattern="[0-9]{4,8}" minLength={4} maxLength={8} value={pin} onChange={(e) => setPin(e.target.value)} /></label>}
+        {!forgot && attemptsLeft > 0 && <p role="status">{attemptsLeft} {attemptsLeft === 1 ? "try" : "tries"} left</p>}
+        {!forgot && locked ? <p className="neg" role="alert">Locked for 15 minutes — try again at {formatTime(lockedUntil)}</p> : err && <p className="neg" role="alert">{err}</p>}
+        <button className="link" type="button" disabled={busy} onClick={() => { setForgot(!forgot); setErr(""); }}>{forgot ? "Use PIN instead" : "Forgot PIN? Use your password"}</button>
+        <div className="row"><button type="button" className="pbtn" disabled={busy} onClick={onCancel}>Back to kid view</button><button className="pbtn primary" disabled={busy || (!forgot && locked)}>{forgot ? "Reset PIN" : "Unlock"}</button></div>
       </form>
     </Sheet>
   );

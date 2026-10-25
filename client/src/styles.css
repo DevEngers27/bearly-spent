@@ -542,7 +542,7 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .pform { display: grid; gap: 12px; }
 .pform label { display: grid; gap: 4px; font-size: 14px; font-weight: 800; color: var(--ink-soft); }
 .pform input, .pform select, .pin-page input { border: 2px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 16px; background: #FFFDF7; min-width: 0; }
-.pform-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
+.pform-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 12px; align-items: end; }
 .pform button { justify-self: start; }
 .ptable { width: 100%; border-collapse: collapse; background: var(--paper-card); border: 2px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 15px; }
 .ptable { table-layout: fixed; overflow-wrap: anywhere; }
@@ -594,7 +594,7 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .pin-card small, .pin-card p { color: var(--ink-soft); }
 .pin-card .err { color: var(--bad); font-weight: 800; }
 @media (max-width: 820px) {
-  .parent { grid-template-columns: 1fr; }
+  .parent { grid-template-columns: minmax(0, 1fr); }
   .p-nav { border-right: 0; border-bottom: 2px dashed var(--line); padding: 12px 16px; gap: 10px; }
   .p-nav nav { display: flex; overflow-x: auto; gap: 4px; }
   .p-nav nav button { white-space: nowrap; }
@@ -651,7 +651,6 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .code-keys .pbtn:last-child { grid-column: span 2; font-size: 16px; }
 .child-switcher { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; }
 .child-switcher select { max-width: 180px; }
-.kid-signout { position: fixed; bottom: calc(80px + env(safe-area-inset-bottom)); right: 8px; z-index: 15; }
 .appbar { flex-wrap: wrap; }
 @media (max-width: 420px) {
   .auth-card { padding: 22px 18px; }
@@ -739,8 +738,11 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
   .role-parent .child-switcher select { max-width: min(180px, 100%); min-width: 0; }
   .role-parent .toasts { top: calc(152px + env(safe-area-inset-top)); }
   .appbar-actions .pbtn { font-size: 13px; padding: 5px 9px; }
-  .p-main, .p-nav, .p-card, .p-two > *, .approval-body { min-width: 0; }
+  .p-main, .p-nav, .p-card, .p-two > *, .pform, .pform label, .approval-body { min-width: 0; }
   .ptable td, .ptable th { padding: 7px 5px; }
   .ptable .pbtn { max-width: 100%; padding: 4px; font-size: 12px; }
   .p-feed li { overflow-wrap: anywhere; }
 }
+
+.p-device { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.p-device > div { flex: 1 1 180px; min-width: 0; }

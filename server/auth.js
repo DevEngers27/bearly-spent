@@ -6,7 +6,7 @@ import { database, transaction } from "./db.js";
 import { createChild, childRecord, listChildren, seed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
 import { GameError } from "./domain.js";
 import { object, str } from "./validate.js";
-import { takeLimit, MINUTE } from "./limits.js";
+import { takeLimit, resetLimit, MINUTE } from "./limits.js";
 
 const DAY = 86400000;
 const N = 2 ** 15;
@@ -144,7 +144,7 @@ export function me(context) {
   const { family, session, role, childId } = context;
   const children = listChildren(family.id).filter((c) => role === "parent" || c.id === childId);
   return {
-    demo: process.env.MQ_DEMO === "1",
+    demo: process.env.MQ_DEMO === "1" && family.id === DEMO_FAMILY_ID,
     family: { id: family.id, name: family.name, timezone: family.timezone, pinSet: Boolean(family.parentPin) },
     role, children, activeChild: children.find((c) => c.id === childId) || null,
     unlockedUntil: session.unlocked_until,
@@ -156,7 +156,7 @@ export function logout(session) {
 }
 
 export function logoutAll(session) {
-  database().prepare("DELETE FROM sessions WHERE user_id = ?").run(session.user_id);
+  database().prepare("DELETE FROM sessions WHERE family_id = ?").run(session.family_id);
 }
 
 export function createLink(context, childId, now = Date.now()) {
@@ -164,7 +164,8 @@ export function createLink(context, childId, now = Date.now()) {
   if (!row || row.family_id !== context.family.id) throw new GameError("Child not found", 404);
   takeLimit("kidLink", childId, now);
   return transaction((db) => {
-    db.prepare("DELETE FROM kid_links WHERE expires_at <= ? OR used_at IS NOT NULL").run(now);
+    // Keep spent/expired codes as tombstones so a mistyped code has distinct copy.
+    db.prepare("UPDATE kid_links SET expires_at = ? WHERE child_id = ? AND used_at IS NULL AND expires_at > ?").run(now, childId, now);
     const alphabet = "BCDFGHJKMNPQRTVWXY346789";
     for (let i = 0; i < 10; i++) {
       const code = Array.from({ length: 6 }, () => alphabet[crypto.randomInt(alphabet.length)]).join("");
@@ -182,7 +183,8 @@ export function redeemLink(body, { ua, ip = "unknown", now = Date.now() } = {}) 
   const code = str(object(body).code, { max: 6 }).toUpperCase();
   return transaction((db) => {
     const link = db.prepare("SELECT * FROM kid_links WHERE code = ?").get(code);
-    if (!link || link.used_at !== null || now >= link.expires_at) throw new GameError("That code expired or was used. Ask for a new one.");
+    if (!link) throw Object.assign(new GameError("That code doesn't match — check the letters and try again"), { reason: "unknown" });
+    if (link.used_at !== null || now >= link.expires_at) throw Object.assign(new GameError("That code was already used or expired. Ask for a new one."), { reason: "used_or_expired" });
     db.prepare("UPDATE kid_links SET used_at = ? WHERE code = ?").run(now, code);
     return createSession({ familyId: link.family_id, childId: link.child_id, role: "child", ua, now });
   });
@@ -199,17 +201,72 @@ export function setPin(context, body, now = Date.now()) {
   return { ok: true, unlockedUntil: now + 15 * MINUTE };
 }
 
+export function lock(context) {
+  database().prepare("UPDATE sessions SET unlocked_until = 0 WHERE token_hash = ?").run(context.session.token_hash);
+  return { ok: true, unlockedUntil: 0 };
+}
+
+export function resetPin(context, body, { ip = "unknown", now = Date.now() } = {}) {
+  takeLimit("loginIp", ip, now);
+  const user = database().prepare("SELECT * FROM users WHERE id = ? AND family_id = ?").get(context.session.user_id, context.family.id);
+  takeLimit("loginEmail", user.email, now);
+  if (!verifyPassword(passwordText(object(body).password), user.pass_hash)) throw new GameError("That password didn't match", 401);
+  transaction((db) => {
+    db.prepare("UPDATE families SET parent_pin = NULL WHERE id = ?").run(context.family.id);
+    const sessions = db.prepare("SELECT token_hash FROM sessions WHERE family_id = ? AND role = 'parent'").all(context.family.id);
+    for (const session of sessions) resetLimit("unlock", session.token_hash);
+    db.prepare("UPDATE sessions SET unlocked_until = 0, pin_locked_until = 0 WHERE family_id = ? AND role = 'parent'").run(context.family.id);
+  });
+  return { ok: true, unlockedUntil: 0 };
+}
+
 export function unlock(context, body, now = Date.now()) {
   const session = context.session;
-  if (session.pin_locked_until > now) throw new GameError("Let's take a little break. Try again soon!", 429);
-  const quota = takeLimit("unlock", session.token_hash, now);
+  const locked = (until) => Object.assign(new GameError("Let's take a little break. Try again soon!", 429), { retryAfterSeconds: Math.ceil((until - now) / 1000), attemptsLeft: 0 });
+  if (session.pin_locked_until > now) throw locked(session.pin_locked_until);
+  if (session.pin_locked_until) {
+    resetLimit("unlock", session.token_hash);
+    database().prepare("UPDATE sessions SET pin_locked_until = 0 WHERE token_hash = ?").run(session.token_hash);
+  }
   const pin = object(body).pin;
   if (!context.family.parentPin || typeof pin !== "string" || !/^\d{4,8}$/.test(pin) || !verifyPassword(pin, context.family.parentPin)) {
-    if (!quota.remaining) database().prepare("UPDATE sessions SET pin_locked_until = ? WHERE token_hash = ?").run(now + 15 * MINUTE, session.token_hash);
-    throw new GameError("That PIN didn't match", 401);
+    const quota = takeLimit("unlock", session.token_hash, now);
+    if (!quota.remaining) {
+      const until = now + 15 * MINUTE;
+      database().prepare("UPDATE sessions SET pin_locked_until = ?, unlocked_until = 0 WHERE token_hash = ?").run(until, session.token_hash);
+      throw locked(until);
+    }
+    throw Object.assign(new GameError("That PIN didn't match", 401), { attemptsLeft: quota.remaining });
   }
-  database().prepare("UPDATE sessions SET unlocked_until = ? WHERE token_hash = ?").run(now + 15 * MINUTE, session.token_hash);
+  resetLimit("unlock", session.token_hash);
+  database().prepare("UPDATE sessions SET unlocked_until = ?, pin_locked_until = 0 WHERE token_hash = ?").run(now + 15 * MINUTE, session.token_hash);
   return { ok: true, unlockedUntil: now + 15 * MINUTE };
+}
+
+// Device IDs are separate digests, never the stored credential hashes.
+const deviceId = (hash) => tokenHash(`device:${hash}`);
+function childForDevices(context, childId) {
+  const row = childRecord(childId);
+  if (!row || row.family_id !== context.family.id) throw new GameError("Child not found", 404);
+}
+function deviceName(ua = "") {
+  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /(?:Chrome|CriOS)\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const system = /iPad/.test(ua) ? "iPad" : /iPhone/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android" : /Macintosh|Mac OS/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "device";
+  return `${browser} on ${system}`;
+}
+export function childDevices(context, childId, now = Date.now()) {
+  childForDevices(context, childId);
+  return database().prepare("SELECT * FROM sessions WHERE family_id = ? AND child_id = ? AND role = 'child' AND expires_at > ? ORDER BY created_at")
+    .all(context.family.id, childId, now).map((s) => ({ id: deviceId(s.token_hash), created_at: s.created_at, last_seen: s.last_seen, name: deviceName(s.ua) }));
+}
+export function unlinkDevice(context, childId, sessionId) {
+  childForDevices(context, childId);
+  sessionId = str(sessionId, { max: 64 });
+  const session = database().prepare("SELECT token_hash FROM sessions WHERE family_id = ? AND child_id = ? AND role = 'child'")
+    .all(context.family.id, childId).find((s) => deviceId(s.token_hash) === sessionId);
+  if (!session) throw new GameError("Device not found", 404);
+  database().prepare("DELETE FROM sessions WHERE token_hash = ?").run(session.token_hash);
+  return { ok: true };
 }
 
 export function initializeAccounts() {

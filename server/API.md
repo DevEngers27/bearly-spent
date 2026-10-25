@@ -23,7 +23,7 @@ Request bodies must be JSON objects, at most **32 KB**. Strings are trimmed unle
 Every API response has `Cache-Control: no-store` (SSE adds `no-transform`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `Permissions-Policy: camera=(), microphone=(self)`. The static app and API receive this CSP:
 
 ```text
-default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.cartesia.ai
+default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.cartesia.ai https://fonts.googleapis.com https://fonts.gstatic.com
 ```
 
 ## Accounts, pairing and PIN
@@ -45,20 +45,24 @@ default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https
 
 A paired child receives only its own summary in `children`; a parent receives all family children. Times are Unix milliseconds. `unlockedUntil` is session-specific; compare it to current time only when `pinSet` is true. PIN hashes are never returned.
 
-`demo` is always a boolean: true exactly when `MQ_DEMO=1`, false otherwise, regardless of which family is signed in. Without a valid session, `GET /api/auth/me` returns HTTP 401 with `{ "error": "short message", "demo": false }` (or `demo: true` when enabled). This lets the Welcome screen discover demo availability before login; no family or session details are included in that response.
+`demo` is always a boolean: true exactly when `MQ_DEMO=1` and the signed-in family is the demo family. Real families always receive false. Without a valid session, `GET /api/auth/me` returns HTTP 401 with `{ "error": "short message", "demo": false }` (or `demo: true` when enabled). This lets the Welcome screen discover demo availability before login; no family or session details are included in that response.
 
 | Method and route | Auth | Request | Response and limits |
 | --- | --- | --- | --- |
 | `POST /api/auth/register` | Public | `{email, password, parentName, childName, childAge, bearName, timezone?}`; age 7–12, timezone valid IANA name (default UTC) | `Me` + parent cookie. Creates family, parent user and first child atomically. 5 attempts/hour/IP. |
 | `POST /api/auth/login` | Public | `{email, password}` | `Me` + parent cookie. 10 attempts/15 minutes/IP and 5/15 minutes/normalized email. Invalid credentials return 401. |
 | `POST /api/auth/logout` | Session | No fields | `{ok:true}` + cleared cookie. Revokes the current cookie/bearer session. |
-| `POST /api/auth/logout-all` | Parent | No fields | `{ok:true}` + cleared cookie. Revokes every session of the current parent user, including the current cookie/bearer session. Requires PIN unlock when a PIN is set. Paired child sessions, other parents' sessions and other families are untouched. |
+| `POST /api/auth/logout-all` | Parent | No fields | `{ok:true}` + cleared cookie. Revokes every session of the family, including all parents, paired kid devices and the current cookie/bearer session. Requires PIN unlock when a PIN is set. Other families are untouched. Kid devices need new codes to pair again. |
 | `GET /api/auth/me` | Session (401 discovery available without a session) | `?child=` optional | `Me`, including `demo`; remains accessible while PIN-locked. Missing/invalid/expired session: 401 `{error,demo}`. |
 | `POST /api/parent/children` | Parent | `{name, age, bearName}`; age 7–12 | New `ChildSummary`. Separate funding account and game document. |
-| `POST /api/parent/children/:id/link` | Parent | No fields | `{code, expiresAt}`. Six uppercase characters without vowels/ambiguous characters; expires in 15 minutes, single use. 5 generation attempts/15 minutes/child; excess returns 429 with `Let's take a little break. Try again soon!`. Each new code purges expired and used pairing rows across the database. |
-| `POST /api/auth/link` | Public | `{code}` (case-insensitive) | `Me` + child cookie, bound to that child. Invalid/used/expired codes return 400. Extra guessing protection: 10 attempts/15 minutes/IP. |
+| `POST /api/parent/children/:id/link` | Parent | No fields | `{code, expiresAt}`. Six uppercase characters without vowels/ambiguous characters; expires in 15 minutes, single use. 5 generation attempts/15 minutes/child; excess returns 429 with `Let's take a little break. Try again soon!`. Each new code cancels older unused codes for that child. Known used/expired/cancelled codes remain as tombstones for specific error copy; other children's codes are untouched. |
+| `POST /api/auth/link` | Public | `{code}` (case-insensitive) | `Me` + child cookie, bound to that child. Unknown codes return 400 `{error,reason:"unknown"}`; known used/expired/cancelled codes return 400 `{error,reason:"used_or_expired"}`. Extra guessing protection: 10 attempts/15 minutes/IP. |
 | `POST /api/parent/pin` | Parent | `{pin}` as a string of 4–8 digits | `{ok:true, unlockedUntil}`. Sets/replaces a scrypt hash; unlocks this session for 15 minutes and clears other parent-session unlocks. No default PIN. |
-| `POST /api/parent/unlock` | Locked parent | `{pin}` | `{ok:true, unlockedUntil}` for 15 minutes. 5 attempts/15 minutes/session; the fifth wrong PIN returns 401 and persists a further 15-minute lockout; subsequent attempts return 429. |
+| `POST /api/parent/unlock` | Locked parent | `{pin}` | `{ok:true, unlockedUntil}` for 15 minutes. Only failed attempts count (5/15 minutes/session); success resets the counter. Failures 1–4 return 401 `{error,attemptsLeft}`. The fifth failure locks for 15 minutes from that failure and returns 429 `{error,attemptsLeft:0,retryAfterSeconds:900}`. Attempts during the lock return 429 with remaining `retryAfterSeconds` and a matching `Retry-After` header. A correct PIN cannot bypass the lock. |
+| `POST /api/parent/lock` | Locked parent | No fields | `{ok:true,unlockedUntil:0}`; clears this session's server unlock immediately, even if already locked. |
+| `POST /api/parent/pin/reset` | Locked parent | `{password}` | Verifies the current parent's password and clears the family PIN plus all parent unlock/lockout deadlines. `{ok:true,unlockedUntil:0}`; wrong password: 401. Shares login limits (10/15 minutes/IP, 5/15 minutes/normalized email). |
+| `GET /api/parent/children/:id/devices` | Parent | No fields | Array of active paired child devices: `{id,created_at,last_seen,name}`. Times in Unix milliseconds; `name` is a short user-agent description. IDs are separate opaque digests, not session tokens or stored credential hashes. |
+| `DELETE /api/parent/children/:id/devices/:sessionId` | Parent | No fields | `{ok:true}`; revokes only that child's device within this family. Unknown child/device: 404. Requires PIN unlock when set. |
 
 New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Each child currently has its own funding account; shared family funding is a follow-up. The simulated `DIRECTORY` friend codes remain available through `/api/child/friend`; these are practice friends, not real multiplayer. `friendView` is unchanged and never contains money.
 
@@ -163,11 +167,11 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | --- | --- | --- | --- |
 | `POST /api/demo/login` | Public, demo enabled | No fields | `Me` + demo parent cookie. A configured family PIN still gates parent routes. |
 | `POST /api/parent/reset` | Parent, demo enabled, demo family only | No fields | `{ok:true}`; resets only the selected demo child, cancels its replans, adds a starting plan and `demo_reset` audit. |
-| `POST /api/parent/inject-fault` | Parent, demo enabled | No fields | `{injected:transactionId}`; duplicate in selected child's ledger, corrected by next Guardian tick; `demo_fault` audit. |
-| `POST /api/parent/allowance/run-now` | Parent, demo enabled | No fields | `{ok:true}`; fast-forward selected child's allowance while preserving overdue periods; rejects an already-paid current day; `demo_allowance_run` audit. |
-| `POST /api/parent/topup` | Parent, demo enabled | `{amount}` | `{ok:true}`; $0.01–$1,000 to selected child's simulated parent funding account; `demo_topup` audit. |
+| `POST /api/parent/inject-fault` | Parent, demo enabled, demo family only | No fields | `{injected:transactionId}`; duplicate in selected child's ledger, corrected by next Guardian tick; `demo_fault` audit. |
+| `POST /api/parent/allowance/run-now` | Parent, demo enabled, demo family only | No fields | `{ok:true}`; fast-forward selected child's allowance while preserving overdue periods; rejects an already-paid current day; `demo_allowance_run` audit. |
+| `POST /api/parent/topup` | Parent, demo enabled, demo family only | `{amount}` | `{ok:true}`; $0.01–$1,000 to selected child's simulated parent funding account; `demo_topup` audit. |
 
-While demo mode is enabled, topup/fault/run-now work for any authenticated parent's own selected child; reset is restricted to the demo family. These controls are not real bank deposits. `npm run reset` explicitly enables demo mode for that command and resets only the demo child in SQLite; it does not delete any family's database.
+All four demo controls require demo mode and the demo family; real families receive 404 even when demo mode is enabled. These controls are not real bank deposits. `npm run reset` explicitly enables demo mode for that command and resets only the demo child in SQLite; it does not delete any family's database.
 
 On first startup an existing `MQ_DATA_DIR/db.json` is imported as the demo child/family before optional demo-account creation, then renamed `db.json.imported`. The legacy plaintext PIN is discarded. Malformed legacy files stop initialization and are left untouched. Import does not overwrite an already-existing demo family. When demo mode is disabled, imported progress remains stored and demo login is unavailable; enable demo mode to access that legacy demo family.
 
