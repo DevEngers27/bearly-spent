@@ -199,25 +199,25 @@ test("H7.4 suggestions use live goal target and spending and send ordinary chat 
   const render = () => h.render(h.exports.TalkBar, { state, talk: { close: noop, send: async (text) => { sent.push(text); return true; } } });
   let tree = render();
   await byText(tree, "When can I save $42.50 for Space book?").props.onClick();
-  await byText(tree, "Can I buy a $18 toy?").props.onClick();
+  await byText(tree, "Can I buy a toy for $18?").props.onClick();
   await byText(tree, "What should I do with my allowance?").props.onClick();
-  assert.deepEqual(sent, ["When can I save $42.50 for Space book?", "Can I buy a $18 toy?", "What should I do with my allowance?"]);
+  assert.deepEqual(sent, ["When can I save $42.50 for Space book?", "Can I buy a toy for $18?", "What should I do with my allowance?"]);
   state.goals[0].title = "Skates"; state.goals[0].target = 6000; state.balances.spending = 500;
-  tree = render(); assert.match(normalized(tree), /save \$60 for Skates/); assert.match(normalized(tree), /buy a \$4 toy/); assert.doesNotMatch(normalized(tree), /Space book/);
+  tree = render(); assert.match(normalized(tree), /save \$60 for Skates/); assert.match(normalized(tree), /buy a toy for \$4\?/); assert.doesNotMatch(normalized(tree), /Space book/);
 });
 
 test("H7.4 fallback Ask-again button resends the original question in bubble and transcript", async () => {
   const h = harness("Child.jsx"), state = stateFixture(), calls = [];
   state.child.bear.name = "Bo"; state.integrations.voice = "browser";
   const render = () => h.render(h.exports.useMapleTalk, { state, run: async (...args) => { calls.push(args); return { reply: "You have $10 to spend.", fallback: calls.length === 1 }; } });
-  render(); h.flush(); await render().send("Can I buy a $8 toy?");
-  assert.equal(render().retryQuestion, "Can I buy a $8 toy?");
+  render(); h.flush(); await render().send("Can I buy a toy for $8?");
+  assert.equal(render().retryQuestion, "Can I buy a toy for $8?");
   const bubble = harness("Child.jsx");
   const tree = bubble.render(bubble.exports.SpeechBubble, { text: render().bubble, bearName: state.child.bear.name, retry: () => render().send(render().retryQuestion) });
   await byText(tree, "Ask Bo again").props.onClick();
   assert.equal(calls.length, 2); assert.equal(calls[1][0], "buddy/chat"); assert.equal(calls[1][1].text, calls[0][1].text);
   assert.equal(render().retryQuestion, null);
-  state.chat = [{ id: "u", role: "user", text: "Can I buy a $8 toy?" }, { id: "a", role: "assistant", text: "You have $10 to spend.", fallback: true }];
+  state.chat = [{ id: "u", role: "user", text: "Can I buy a toy for $8?" }, { id: "a", role: "assistant", text: "You have $10 to spend.", fallback: true }];
   const transcript = harness("Child.jsx"), retries = [];
   const props = { state, run: async (...args) => retries.push(args) };
   await byText(transcript.render(transcript.exports.Buddy, props), "Ask Bo again").props.onClick();

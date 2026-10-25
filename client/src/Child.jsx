@@ -1400,7 +1400,7 @@ function TalkBar({ state, talk, busy, open }) {
   };
   const goal = currentSavingsGoal(state);
   const price = Math.max(100, Math.round(state.balances.spending * 0.8 / 100) * 100);
-  const suggestions = [`Can I buy a ${moneyShort(price)} toy?`, ...(goal ? [`When can I save ${moneyShort(goal.target)} for ${goal.title}?`] : []), "What should I do with my allowance?"];
+  const suggestions = [`Can I buy a toy for ${moneyShort(price)}?`, ...(goal ? [`When can I save ${moneyShort(goal.target)} for ${goal.title}?`] : []), "What should I do with my allowance?"];
   return (
     <section className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
       <div className="talk-links">
