@@ -11,6 +11,25 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.6] — 2026-10-25
+
+### Fixed
+- Talking to the bear no longer throws the page around on a phone. The
+  talk bar used to be a panel pinned above the tab bar that grabbed the
+  cursor the moment it opened; on an iPhone the keyboard popped at once and
+  Safari scrolled the whole page to the bottom, tab bar and all. The bar
+  now sits in the page right under the bear scene, phones get no automatic
+  cursor (tap the box when you want to type), the bar scrolls itself into
+  view gently, and tapping a suggestion sends it without opening the
+  keyboard. Laptops still get the cursor straight away. Taps inside the bar
+  no longer close the bear's speech bubble.
+
+### Review trail
+- Fixed directly on `fix/talk-bar-inline`, Gemini review, checked in the
+  built app at phone and desktop widths; iPhone keyboard behaviour listed
+  in `client/CHECKLIST.md` for a hands-on check. 371 server tests and 227
+  client tests.
+
 ## [0.8.5] — 2026-10-25
 
 ### Fixed
