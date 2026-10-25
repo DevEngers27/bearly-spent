@@ -224,7 +224,7 @@ test("H4.6 anonymous request receipt persists for a session regardless of code v
     change(nodes(render(), (n) => n.type === "input")[0], valid ? "BCDF3467" : "ZZZZZZZZ");
     await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
     const receipt = normalized(nodes(render(), (n) => n.props.role === "status")[0]);
-    assert.equal(receipt, "Request sent. Both friends and their grown-ups need to say yes.");
+    assert.equal(receipt, "Waiting for your grown-up to say yes");
     const returned = harness("Child.jsx", { session: h.session });
     assert.match(normalized(returned.render(returned.exports.Friends, { state })), /Request sent\./);
   }
@@ -280,9 +280,9 @@ test("H4.9 suggestions follow the current goal; friend card shows latest receive
   state.currentGoalId = "book";
   const talk = { muted: true, close: noop, toggleMute: noop };
   const render = () => h.render(h.exports.TalkBar, { state, talk });
-  assert.match(text(render()), /When can I reach my Space book goal/); assert.doesNotMatch(text(render()), /bike/i);
+  assert.match(text(render()), /When can I save \$10 for Space book/); assert.doesNotMatch(text(render()), /bike/i);
   state.goals[1].status = "archived";
-  assert.doesNotMatch(text(render()), /When can I reach/);
+  assert.doesNotMatch(text(render()), /When can I save/);
   state.friends = [{ id: "ben", name: "Ben", status: "approved", bear: { name: "Pip" }, postcards: [], greetings: [{ from: "Ben", text: "Old hello" }, { from: "Ben", text: "Great job saving!" }, { from: "me", text: "My reply" }] }];
   const friends = harness("Child.jsx");
   const tree = friends.render(friends.exports.Friends, { state });

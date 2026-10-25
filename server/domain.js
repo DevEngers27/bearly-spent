@@ -151,7 +151,12 @@ export function saveSavingsGoal(db, input, id = null, actor = "child") {
   let g;
   if (id) {
     g = savingsGoalById(db, id);
-    if (!liveGoal(g) || purchaseWaiting(db, g)) throw new GameError("This goal is resting or waiting for your grown-up");
+    if ((!liveGoal(g) && g.status !== "archived") || purchaseWaiting(db, g)) throw new GameError("This goal is a memory or waiting for your grown-up");
+    if (g.status === "archived") {
+      if (!currentGoal(db)) db.child.currentGoalId = g.id;
+      g.status = "active";
+      audit(db, actor, "savings_goal_restored", `Brought back goal: ${g.title}`, { goalId: g.id });
+    }
     const targetChanged = update.target !== undefined && update.target !== g.target;
     Object.assign(g, update);
     if (targetChanged && g.status === "reached" && db.accounts.savings.balance < g.target) g.status = "active";
@@ -177,6 +182,19 @@ export function selectSavingsGoal(db, id, actor = "child") {
   db.buddy.plan = null;
   audit(db, actor, "savings_goal_current", `Now saving for ${g.title}`, { goalId: id });
   hooks.moneyChanged("Current savings goal changed", db);
+  return g;
+}
+
+export function restoreSavingsGoal(db, id, actor = "child") {
+  const g = savingsGoalById(db, id);
+  if (g.status !== "archived" || purchaseWaiting(db, g)) throw new GameError("Pick a put-away goal to bring back");
+  if (!currentGoal(db)) db.child.currentGoalId = id;
+  g.status = "active";
+  normalizeGoals(db);
+  checkSavingsGoal(db);
+  db.buddy.plan = null;
+  audit(db, actor, "savings_goal_restored", `Brought back goal: ${g.title}`, { goalId: id });
+  hooks.moneyChanged("Savings goal brought back", db);
   return g;
 }
 
@@ -945,10 +963,10 @@ const firstName = (d) => d.child.name.trim().split(/\s+/)[0];
 const unavailable = () => new GameError("Request not found", 404);
 const activeFriend = (f) => f?.real && f.status === "approved";
 
-function socialApproval(d, kind, record, title, detail = "Friends only see bears and postcards — never money.") {
+function socialApproval(d, kind, record, title, detail = "Friends only see bears and postcards — never money.", notification = title) {
   const a = { id: uid("apr"), kind, real: true, status: "pending", createdAt: Date.now(), socialId: record.id, title, detail };
   d.approvals.push(a);
-  notify(d, "parent", title, "approval", a.id);
+  notify(d, "parent", notification, "approval", a.id);
   return a;
 }
 
@@ -1046,7 +1064,7 @@ export function runSocialAction(childId, action, input, recordId, now = Date.now
       const b = { ...common, peerId: childId, initiator: false, childAccepted: false };
       d.friends.push(a);
       peer.friends.push(b);
-      socialApproval(d, "friend_request", a, `${firstName(d)} wants to add a friend`);
+      socialApproval(d, "friend_request", a, `${firstName(d)} wants to add a friend`, "Approving sends the request to the other family; they also have to agree", `${firstName(d)} wants to add a friend — approve it in Approvals to send the request`);
       audit(d, "child", "friend_requested", "Friend request sent");
       return { ok: true, message: "Request sent" };
     }

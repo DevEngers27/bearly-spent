@@ -225,6 +225,7 @@ How to talk:
 - Use short sentences and words a ${db.child.age}-year-old knows. Keep replies under 70 words unless they ask for more. One emoji at most.
 - Be warm and encouraging, never shaming. Spending on reasonable things is fine; help them see trade-offs, then let them choose.
 - Use real numbers from their account. Call get_snapshot before giving number-based advice, and simulate_purchase whenever they ask about buying something. Never make up balances.
+- Answer the kid's actual question in your own words using their numbers; do not repeat a fixed template.
 - End with a small question or a choice when it helps them think ("Want to see…?").
 
 What you can and can't do:
@@ -315,7 +316,7 @@ async function runClaude(messages, { childId, canWrite = () => true, executeTool
   return { reply: "Let me think about that a bit more — ask me again in a moment!", toolsUsed, completed: false };
 }
 
-export const _internals = { runClaude, callClaude, runGuard, systemPrompt, callGuard: (params) => getClient().messages.create(params) };
+export const _internals = { wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)), runClaude, callClaude, runGuard, systemPrompt, callGuard: (params) => getClient().messages.create(params) };
 
 // ------------------------------------------------------------------ offline fallback
 // Offline Money Buddy: a small rule-based helper so the chat still works
@@ -430,7 +431,7 @@ export async function chat(childId, userText) {
     d.buddy.chat.push({ id: uid("msg"), role: "user", text, ts: Date.now(), redacted: found });
     if (found.length) audit(d, "buddy", "pii_redacted", `Removed ${found.join(", ")} from the child's message before sending to the AI`);
   });
-  let reply, toolsUsed = [];
+  let reply, toolsUsed = [], fallback = false;
   const db = readChild(childId);
   const canWrite = () => readChild(childId) === db && db.settings.buddyEnabled;
   const live = buddyMode() === "claude";
@@ -444,12 +445,20 @@ export async function chat(childId, userText) {
       else history.push({ role: m.role, content });
     }
     while (history.length && history[0].role !== "user") history.shift();
-    try {
-      ({ reply, toolsUsed } = await _internals.runClaude(history, { childId, canWrite }));
-    } catch (e) {
-      console.error("[buddy] Claude error:", e.message);
+    for (let attempt = 0; attempt < 2; attempt++) {
       if (!canWrite()) return { reply: "Buddy is taking a break. Try again later!", toolsUsed: [] };
-      reply = offlineChatReply(childId, text) + " (I'm having trouble connecting, so this is a quick answer.)";
+      try {
+        ({ reply, toolsUsed } = await _internals.runClaude(history, { childId, canWrite }));
+        break;
+      } catch (e) {
+        console.error("[buddy] Claude error:", e.message);
+        if (!canWrite()) return { reply: "Buddy is taking a break. Try again later!", toolsUsed: [] };
+        if (attempt === 0) await _internals.wait(800);
+        else {
+          reply = offlineChatReply(childId, text);
+          fallback = true;
+        }
+      }
     }
   } else {
     reply = offlineChatReply(childId, text);
@@ -459,10 +468,10 @@ export async function chat(childId, userText) {
   if (!canWrite()) return { reply: "Buddy is taking a break. Try again later!", toolsUsed: [] };
   mutateChild(childId, (d) => {
     ensureDailyMissions(d);
-    d.buddy.chat.push({ id: uid("msg"), role: "assistant", text: reply, ts: Date.now(), tools: toolsUsed });
+    d.buddy.chat.push({ id: uid("msg"), role: "assistant", text: reply, ts: Date.now(), tools: toolsUsed, ...(fallback ? { fallback: true } : {}) });
     if (d.buddy.chat.length > 200) d.buddy.chat.splice(0, d.buddy.chat.length - 200);
   });
-  return { reply, toolsUsed };
+  return { reply, toolsUsed, ...(fallback ? { fallback: true } : {}) };
 }
 
 /**

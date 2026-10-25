@@ -147,6 +147,7 @@ export const actions = {
     return game.saveSavingsGoal(db, update, goalId && id(goalId), actor);
   }),
   goalCurrent: (db, goalId, actor) => game.selectSavingsGoal(db, id(goalId), actor),
+  goalRestore: (db, goalId, actor) => game.restoreSavingsGoal(db, id(goalId), actor),
   goalArchive: (db, goalId, actor) => game.retireSavingsGoal(db, id(goalId), actor),
   goalDelete: (db, goalId) => game.retireSavingsGoal(db, id(goalId), "parent", true),
   goalPurchase: (db, goalId) => game.requestGoalPurchase(db, id(goalId)),

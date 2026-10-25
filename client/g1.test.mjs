@@ -75,7 +75,7 @@ test("G1 Goals sheet lists history, creates/edits/switches/archives and preserve
   assert.equal(button(render(), "Save for this").props.disabled, undefined);
   await button(render(), "Save for this").props.onClick();
   assert.equal(calls.at(-1)[0], "child/goals/goal_bike/current");
-  change(render(), "Saving for", "Skates"); change(render(), "Target ($)", "60.25"); change(render(), "Picture", "gift");
+  change(render(), "Saving for", "Skates"); change(render(), "Target ($)", "60.25"); button(render(), "Gift").props.onClick();
   let form = () => nodes(render(), (n) => n.type === "form")[0];
   await form().props.onSubmit(submit);
   assert.equal(calls.at(-1)[0], "child/goals");

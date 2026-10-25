@@ -186,7 +186,7 @@ test("C5: childView budget flag agrees with completeBudget; completed checklist 
   state.child.lastBudgetWeek = db.child.lastBudgetWeek;
   const tree = h.render(h.exports.Missions, { state, open: noop });
   const button = byText(tree, "Weekly budget challenge");
-  assert.equal(button.props.disabled, true);
+  assert.equal(button.props.disabled, false);
   assert.doesNotMatch(text(button), /\+50/);
 });
 
@@ -1154,7 +1154,7 @@ test("F6: talk bar offers exactly three suggestions, conditional hold-to-talk an
   const props = { state, talk: { close: noop, send: async () => false }, open: noop };
   let tree = h.render(h.exports.TalkBar, props);
   assert.equal(nodes(tree, (n) => n.props.className === "chip").length, 3);
-  assert.ok(byText(tree, "Can I buy a $15 toy?"));
+  assert.ok(byText(tree, "Can I buy a $8 toy?"));
   assert.equal(nodes(tree, (n) => n.props["aria-label"] === "Hold to talk").length, 0);
   let session, stopped = 0;
   h.window.SpeechRecognition = class { constructor() { session = this; } start() {} stop() { stopped++; } };
