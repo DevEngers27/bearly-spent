@@ -291,7 +291,9 @@ test("handling a guardian topup approval moves no money and clears the pending r
   assert.equal(approval.status, "approved");
   assert.equal(approval.handled, true);
   assert.ok(approval.decidedAt);
-  assert.equal(db.notifications.length, notifications);
+  assert.equal(db.notifications.length, notifications + 1);
+  assert.equal(db.notifications.find((n) => n.ref === approval.id).read, true);
+  assert.match(db.notifications.at(-1).text, /Funding request handled/);
   assert.equal(db.audit.at(-1).action, "handled");
   assert.match(db.audit.at(-1).detail, /^Handled:/);
   runGuardian(db);

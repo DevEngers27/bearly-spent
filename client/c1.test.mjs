@@ -11,7 +11,7 @@ import * as catalog from "../server/catalog.js";
 import { dayKey, weekKey } from "../server/time.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
-  const extra = { "Child.jsx": "Home, Sheet, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, Allowance, Inbox, Guardian, Settings", "App.jsx": "PinGate, Loading" }[name];
+  const extra = { "Child.jsx": "Home, Sheet, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings", "App.jsx": "PinGate, Loading" }[name];
   const result = await build({
     stdin: { contents: await readFile(new URL(`src/${name}`, import.meta.url), "utf8") + (extra ? `\nexport { ${extra} };` : ""), resolveDir: new URL("src/", import.meta.url).pathname, loader: "jsx" },
     bundle: true, write: false, format: "cjs", external: ["react"], jsxFactory: "h", jsxFragment: "Fragment", define: { "import.meta.env.PROD": "false" },
@@ -19,7 +19,7 @@ const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Pa
   return [name, result.outputFiles[0].text];
 })));
 
-function harness(name) {
+function harness(name, { controller = null } = {}) {
   const slots = [], pending = [], timers = [], timeouts = [], notices = [];
   const storage = new Map(), session = new Map();
   const window = new EventTarget();
@@ -44,7 +44,7 @@ function harness(name) {
   const storageApi = (map) => ({ getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v), removeItem: (k) => map.delete(k) });
   env.document = { activeElement: null, visibilityState: "visible", body: { classList: { add() {}, remove() {} } }, addEventListener() {}, removeEventListener() {}, querySelector: () => null };
   env.location = new URL("https://moneyquest.test/");
-  env.navigator = { serviceWorker: new EventTarget() };
+  env.navigator = { serviceWorker: Object.assign(new EventTarget(), { controller }) };
   const module = { exports: {} };
   vm.runInNewContext(sources[name], {
     module, exports: module.exports, require: () => hooks,
@@ -209,7 +209,7 @@ test("Lesson replay copy and failed final submission retry use the original answ
 
 test("C7 / C16: empty goals render friendly cards and an unknown stored tab opens Home", () => {
   const state = stateFixture(); state.goals = [];
-  for (const [file, name] of [["Child.jsx", "Home"], ["Child.jsx", "Buddy"], ["Parent.jsx", "Overview"], ["Parent.jsx", "Goals"]]) {
+  for (const [file, name] of [["Child.jsx", "Home"], ["Child.jsx", "Buddy"], ["Parent.jsx", "Overview"], ["Parent.jsx", "SavingsGoal"]]) {
     const h = harness(file);
     assert.match(text(h.render(h.exports[name], { state })), /Set a savings goal/);
   }
@@ -228,7 +228,12 @@ test("C4: parent form keys change only with their server-backed editable values"
   };
   const goal = getSection("Goals & tasks");
   state.goals[0] = { ...state.goals[0], title: "Skates", target: 6000 };
-  assert.notEqual(getSection("Goals & tasks").props.key, goal.props.key);
+  assert.equal(getSection("Goals & tasks").props.key, goal.props.key, "reward draft must not remount with savings changes");
+  const goals = harness("Parent.jsx");
+  const savings = () => nodes(goals.render(goals.exports.Goals, { state }), (n) => n.type?.name === "SavingsGoal")[0];
+  const savingsKey = savings().props.key;
+  state.goals[0] = { ...state.goals[0], target: 8000 };
+  assert.notEqual(savings().props.key, savingsKey, "only the savings form remounts");
   const allowance = getSection("Allowance");
   state.allowance.nextRun++;
   assert.equal(getSection("Allowance").props.key, allowance.props.key);
@@ -361,7 +366,8 @@ test("C13 / M16: all child and parent POST controls receive the shared busy stat
     ["Child.jsx", "Friends", {}, ["Propose swap", game.GREETINGS[0], "Send"]],
     ["Child.jsx", "TalkBar", { talk: { close: noop, send: noop } }, ["Send", "Can I buy"]],
     ["Parent.jsx", "Inbox", { pending: [{ id: "a", kind: "reward", title: "Reward", amount: 500 }, { id: "b", kind: "topup", title: "Funding" }] }, ["Approve", "Decline", "Mark handled", "Add $50"]],
-    ["Parent.jsx", "Goals", {}, ["Create goal", "Assign task", "Update"]],
+    ["Parent.jsx", "Goals", {}, ["Create goal", "Assign task"]],
+    ["Parent.jsx", "SavingsGoal", {}, ["Update"]],
     ["Parent.jsx", "Allowance", {}, ["Save rules", "Add $50", "Fast-forward"]],
     ["Parent.jsx", "Guardian", {}, ["Post a duplicate"]],
     ["Parent.jsx", "Settings", {}, ["Reset demo"]],
@@ -411,7 +417,7 @@ test("C16: return reveal replaces an open sheet and dismissing never reopens it"
 });
 
 test("C6 / C16 / C3: App locks on unauthorized; controllerchange offers explicit reload", () => {
-  const h = harness("App.jsx");
+  const h = harness("App.jsx", { controller: {} });
   let tree = h.render(h.exports.default); h.flush();
   h.window.dispatchEvent(new Event("mq:unauthorized"));
   tree = h.render(h.exports.default); h.flush();
@@ -797,4 +803,200 @@ test("F36.8: visible map clues", () => {
     if (!open) assert.match(text(tree), /Save money 3 times/);
     assert.doesNotMatch(text(tree), /Send|Earn/);
   }
+});
+
+test("D1: first install never shows update, existing controller offers reload and dismiss", () => {
+  const first = harness("App.jsx");
+  let tree = first.render(first.exports.default); first.flush();
+  first.navigator.serviceWorker.controller = {};
+  for (let i = 0; i < 2; i++) {
+    first.navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
+    tree = first.render(first.exports.default); first.flush();
+    assert.equal(byText(tree, "Updated!"), undefined);
+  }
+  const upgrade = harness("App.jsx", { controller: {} });
+  upgrade.render(upgrade.exports.default); upgrade.flush();
+  upgrade.navigator.serviceWorker.dispatchEvent(new Event("controllerchange"));
+  tree = upgrade.render(upgrade.exports.default);
+  assert.ok(byText(tree, "Updated! Tap to reload"));
+  nodes(tree, (n) => n.props["aria-label"] === "Dismiss update")[0].props.onClick();
+  assert.equal(byText(upgrade.render(upgrade.exports.default), "Updated!"), undefined);
+});
+
+test("D2: impossible lesson goals ask a grown-up and zero remaining never suggests a lesson", () => {
+  const h = harness("Child.jsx"), state = stateFixture();
+  state.child.lessonsDone = catalog.LESSONS.map((l) => l.id);
+  state.parentGoals = [{ id: "old", title: "Old impossible goal", status: "active", type: "lessons", count: 5, progress: 3, reward: 500 }];
+  const tree = h.render(h.exports.Home, { state });
+  assert.match(text(tree), /Ask your grown-up about this goal/);
+  assert.doesNotMatch(text(tree), /more money lessons|Try the .* lesson/);
+  const parent = harness("Parent.jsx");
+  state.child.lessonsDone = catalog.LESSONS.slice(0, 3).map((l) => l.id);
+  let goals = parent.render(parent.exports.Goals, { state });
+  assert.match(text(goals), /2\s+lessons remaining/);
+  const count = nodes(goals, (n) => n.type === "input" && n.props.type === "number")[0];
+  assert.equal(count.props.max, 2);
+  let request;
+  goals = parent.render(parent.exports.Goals, { state, run: (...args) => { request = args; } });
+  byText(goals, "Cancel").props.onClick();
+  assert.equal(request[0], "parent/goal/old/cancel");
+  state.parentGoals[0].status = "cancelled";
+  goals = parent.render(parent.exports.Goals, { state });
+  assert.equal(nodes(goals, (n) => n.type === "tr" && n.props.className === "struck").length, 1);
+  assert.equal(byText(goals, "Cancel"), undefined);
+});
+
+test("D3: Album, Map and Overview use the same trip-place and card metrics", () => {
+  const state = stateFixture();
+  state.postcards.push({ id: "trip", defId: "seattle", source: "trip" }, { id: "trade", defId: "san_francisco", source: "trade" });
+  state.metrics = { postcards: { places: 2, cards: 4, total: 15 } };
+  for (const [file, name, expected] of [["Child.jsx", "Album", /2 of 15 places · 4 cards/], ["Child.jsx", "MapScreen", /2 of 15 places/], ["Parent.jsx", "Overview", /2 of 15 places \(\s*4 cards\)/]]) {
+    const h = harness(file);
+    assert.match(text(h.render(h.exports[name], { state })).replace(/\s+/g, " "), expected);
+  }
+  const old = harness("api.js");
+  delete state.metrics;
+  assert.deepEqual(JSON.parse(JSON.stringify(old.exports.postcardMetrics(state))), { places: 2, cards: 4, total: 15 });
+});
+
+test("D4 / D12: handled notifications hide, and both inbox lists get warm empty states", () => {
+  const h = harness("Parent.jsx"), state = stateFixture();
+  state.notifications = [{ id: "handled", read: true, text: "Old approval reminder", ts: Date.now() }];
+  const tree = h.render(h.exports.Inbox, { state, pending: [] });
+  assert.doesNotMatch(text(tree), /Old approval reminder/);
+  assert.equal(nodes(tree, (n) => n.type === "p" && text(n) === "Nothing waiting — nice!").length, 2);
+});
+
+test("D6: date, time, money and postcard postmarks consistently use en-US", async () => {
+  const h = harness("api.js"), ts = Date.parse("2026-10-24T12:34:00Z");
+  assert.equal(h.exports.money(123456), "$1,234.56");
+  assert.equal(h.exports.moneyShort(123400), "$1,234");
+  assert.equal(h.exports.formatDate(ts), new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(ts)));
+  assert.equal(h.exports.formatTime(ts), new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(ts)));
+  const child = harness("Child.jsx"), state = stateFixture();
+  const card = child.render(child.exports.FlipPostcard, { place: state.catalog.places.chicago, bearName: "Maple", to: "Mia", collectedAt: ts });
+  const postmark = nodes(card, (n) => n.props.className === "postmark")[0];
+  assert.equal(postmark.props["aria-label"], `Collected ${h.exports.formatDate(ts)}`);
+  for (const name of ["Child.jsx", "Parent.jsx", "Postcard.jsx"]) {
+    const source = await readFile(new URL(`src/${name}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /toLocale(?:Date|Time)?String\(/, name);
+  }
+});
+
+test("D7: reversed ledgers carry visible and accessible status copy", () => {
+  const state = stateFixture();
+  state.transactions = [{ id: "dup", status: "reversed", amount: 500, memo: "Allowance", ts: Date.now(), from: "parent", to: "savings" }];
+  const kid = harness("Child.jsx");
+  const ledger = kid.render(kid.exports.MoneySheet, { state });
+  const reversed = nodes(ledger, (n) => n.type === "li" && n.props.className === "reversed")[0];
+  assert.match(reversed.props["aria-label"], /Allowance, \$5.00, reversed/);
+  assert.match(text(reversed), /reversed/);
+  const parent = harness("Parent.jsx");
+  assert.match(text(parent.render(parent.exports.Activity, { state })), /duplicate reversed by Guardian/);
+});
+
+test("D8: upcoming milestone names the item and Dress-up explains saving to unlock", () => {
+  const state = stateFixture();
+  state.child.milestonesUnlocked.push(2500);
+  const home = harness("Child.jsx");
+  const tree = home.render(home.exports.Home, { state });
+  assert.match(text(tree).replace(/\s+/g, " "), /Next: Flower crown at \$50/);
+  assert.doesNotMatch(text(tree), /Flower crown unlocked/);
+  const dress = harness("Child.jsx");
+  assert.match(text(dress.render(dress.exports.DressSheet, { state })), /Save \$50 to unlock/);
+});
+
+test("D9: savings changes preserve reward drafts; unrelated security changes preserve allowance drafts", () => {
+  const state = stateFixture(), goals = harness("Parent.jsx");
+  let tree = goals.render(goals.exports.Goals, { state });
+  const savingsKey = nodes(tree, (n) => n.type?.name === "SavingsGoal")[0].props.key;
+  nodes(tree, (n) => n.type === "input")[0].props.onChange({ target: { value: "A draft worth keeping" } });
+  state.goals[0] = { ...state.goals[0], target: 7000 };
+  tree = goals.render(goals.exports.Goals, { state });
+  assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, "A draft worth keeping");
+  assert.notEqual(nodes(tree, (n) => n.type?.name === "SavingsGoal")[0].props.key, savingsKey);
+  const allowance = harness("Parent.jsx");
+  tree = allowance.render(allowance.exports.Allowance, { state });
+  nodes(tree, (n) => n.type === "input")[0].props.onChange({ target: { value: "17" } });
+  state.settings.buddyEnabled = false;
+  state.settings.timezone = "America/Los_Angeles";
+  tree = allowance.render(allowance.exports.Allowance, { state });
+  assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, "17");
+});
+
+test("D10: server reveal receipts suppress replay on a fresh device; offline acknowledgements sync", async () => {
+  const state = stateFixture();
+  state.adventures = [{ id: "seen", status: "returned", revealedAt: Date.now(), postcardIds: [] }];
+  const fresh = harness("Child.jsx");
+  assert.equal(nodes(fresh.render(fresh.exports.default, { state, toast: noop }), (n) => n.type?.name === "ReturnReveal").length, 0);
+  const offline = harness("Child.jsx"), calls = [];
+  delete state.adventures[0].revealedAt;
+  offline.fetch = async (url) => { calls.push(url); return new Response("{}"); };
+  const render = (isOffline) => offline.render(offline.exports.default, { state, toast: noop, offline: isOffline });
+  let tree = render(true); offline.flush();
+  nodes(tree, (n) => n.type?.name === "ReturnReveal")[0].props.onSeen();
+  tree = render(true); offline.flush();
+  assert.equal(calls.length, 0);
+  assert.equal(nodes(tree, (n) => n.type?.name === "ReturnReveal").length, 0);
+  render(false); offline.flush();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(calls, ["/api/child/adventure/seen/seen"]);
+  assert.ok(offline.storage.get("mq_seen_adv").includes("seen"));
+});
+
+test("D12: feedback replaces earlier saves, Map has points once, Lock follows kid-view button", () => {
+  const app = harness("App.jsx");
+  let tree = app.render(app.exports.default);
+  let root = nodes(tree, (n) => n.type?.name === "ChildRoot")[0];
+  root.props.toast("Saved $1"); root.props.toast("Saved $2"); root.props.toast("Saved $3");
+  tree = app.render(app.exports.default);
+  const toasts = nodes(tree, (n) => n.props.className === "toast ok");
+  assert.equal(toasts.length, 1);
+  assert.match(text(toasts[0]), /Saved \$3/);
+  app.timeouts[0]();
+  assert.match(text(app.render(app.exports.default)), /Saved \$3/);
+  const kid = harness("Child.jsx"), state = stateFixture();
+  kid.storage.set("mq_tab", "map");
+  tree = kid.render(kid.exports.default, { state, toast: noop });
+  assert.equal(nodes(tree, (n) => n.props.title?.startsWith("Adventure points")).length, 1);
+  assert.doesNotMatch(text(kid.render(kid.exports.MapScreen, { state })), /40\s+pts/);
+  const parent = harness("App.jsx");
+  parent.location.search = "?role=parent";
+  // Enter the parent role through the PIN gate callback.
+  tree = parent.render(parent.exports.default); parent.flush();
+  const gate = nodes(tree, (n) => n.type?.name === "PinGate")[0];
+  gate.props.onOk();
+  tree = parent.render(parent.exports.default);
+  const actions = nodes(tree, (n) => n.props.className === "appbar-actions")[0];
+  assert.deepEqual(nodes(actions, (n) => n.type === "button").map(text), ["Back to kid view", "Lock"]);
+});
+
+test("D1 / D12: narrow layout keeps badge in flow, feedback below header and tables contained", async () => {
+  const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.surprise-badge \{ position: relative;/);
+  assert.match(css, /\.toasts \{ position: fixed; bottom:/);
+  assert.match(css, /@media \(max-width: 640px\)[\s\S]*\.toasts \{ top: calc\(112px/);
+  assert.match(css, /\.ptable \{ table-layout: fixed; overflow-wrap: anywhere;/);
+  const h = harness("Child.jsx"), state = stateFixture();
+  const tree = h.render(h.exports.FlipPostcard, { place: state.catalog.places.chicago, surprise: true });
+  assert.equal(tree.props.children[0].props.className, "surprise-badge");
+  assert.equal(nodes(tree.props.children[1], (n) => n.props.className === "surprise-badge").length, 0);
+});
+
+test("D9: visiting Security keeps previously opened goal and allowance forms mounted", () => {
+  const h = harness("Parent.jsx"), state = stateFixture();
+  const render = () => h.render(h.exports.default, { state, toast: noop });
+  let tree = render();
+  byText(tree, "Goals & tasks").props.onClick();
+  tree = render();
+  assert.equal(nodes(tree, (n) => n.type?.name === "Goals").length, 1);
+  byText(tree, "Allowance").props.onClick();
+  tree = render();
+  const allowance = nodes(tree, (n) => n.type?.name === "Allowance")[0];
+  byText(tree, "Friends & privacy").props.onClick();
+  state.settings.buddyEnabled = false;
+  tree = render();
+  assert.equal(nodes(tree, (n) => n.type?.name === "Allowance")[0].props.key, allowance.props.key);
+  assert.equal(nodes(tree, (n) => n.type?.name === "Goals").length, 1);
+  assert.equal(nodes(tree, (n) => n.type === "div" && n.props.hidden === true).length, 2);
 });

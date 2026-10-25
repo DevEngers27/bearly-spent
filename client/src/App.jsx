@@ -5,6 +5,8 @@ import Parent from "./Parent.jsx";
 import { SketchDefs } from "./Bear.jsx";
 import { Icon } from "./Icons.jsx";
 
+const hadControllerAtLoad = Boolean(navigator.serviceWorker?.controller);
+
 function initialRole() {
   const q = new URLSearchParams(location.search).get("role");
   return q === "parent" && hasParentToken() ? "parent" : q === "parent" ? "pin" : "child";
@@ -17,7 +19,7 @@ export default function App() {
   const [parentOffline, setParentOffline] = useState(false);
   const toast = useCallback((text, tone = "ok") => {
     const id = Math.random();
-    setToasts((t) => [...t, { id, text, tone }]);
+    setToasts([{ id, text, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3800);
   }, []);
   useEffect(() => {
@@ -30,7 +32,7 @@ export default function App() {
   const kidView = () => { setParentToken(null); setRole("child"); };
   useEffect(() => {
     window.addEventListener("mq:unauthorized", lock);
-    const onUpdate = () => setUpdated(true);
+    const onUpdate = () => { if (hadControllerAtLoad) setUpdated(true); };
     navigator.serviceWorker?.addEventListener("controllerchange", onUpdate);
     return () => {
       window.removeEventListener("mq:unauthorized", lock);
@@ -50,15 +52,17 @@ export default function App() {
             <span className="brand-sub">for grown-ups</span>
           </div>
           {role === "parent" && parentOffline && <span className="offline-pill" role="status">Offline</span>}
-          {role === "parent" && <button className="pbtn" onClick={lock}>Lock</button>}
-          <button className="pbtn" onClick={kidView}>Back to kid view</button>
+          <div className="appbar-actions">
+            <button className="pbtn" onClick={kidView}>Back to kid view</button>
+            {role === "parent" && <button className="pbtn" onClick={lock}>Lock</button>}
+          </div>
         </header>
       )}
       {role === "child" && <ChildRoot toast={toast} onGrownUps={lock} />}
       {role === "parent" && <ParentRoot toast={toast} onConnection={setParentOffline} />}
       {role === "pin" && <PinGate onOk={() => setRole("parent")} onCancel={kidView} />}
       <div className="toasts" aria-live="polite">
-        {updated && <button className="toast ok" onClick={() => location.reload()}>Updated! Tap to reload</button>}
+        {updated && <div className="toast ok update-toast"><button onClick={() => location.reload()}>Updated! Tap to reload</button><button aria-label="Dismiss update" onClick={() => setUpdated(false)}>×</button></div>}
         {toasts.map((t) => <div key={t.id} className={`toast ${t.tone}`}>{t.tone === "ok" && <Icon name="sparkle" size={18} />}{t.text}</div>)}
       </div>
     </div>

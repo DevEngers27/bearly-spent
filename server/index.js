@@ -95,6 +95,7 @@ function childView(db, now = Date.now()) {
     notifications: db.notifications.filter((n) => n.to === "child").slice(-20).reverse(),
     adventures: db.adventures.slice(-10).reverse().map(({ destId, ...adventure }) => adventure.status === "away" ? adventure : { ...adventure, destId }),
     postcards: db.postcards,
+    metrics: { postcards: game.postcardMetrics(db) },
     friends: db.friends.filter((f) => f.status !== "declined").map(game.friendView),
     trades: db.trades.slice(-10).reverse(),
     pendingRequests: db.approvals.filter((a) => a.status === "pending" && ["spend", "extra", "reward", "task", "friend", "trade"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.title })),
@@ -125,7 +126,8 @@ function parentView(db) {
     accounts: db.accounts,
     allowance: db.allowance,
     approvals: db.approvals.slice().reverse(),
-    notifications: db.notifications.filter((n) => n.to === "parent").slice(-30).reverse(),
+    notifications: db.notifications.filter((n) => n.to === "parent").slice().reverse()
+      .filter((n, i, all) => !n.ref || all.findIndex((other) => other.ref === n.ref) === i).slice(0, 30),
     transactions: db.transactions.slice(-60).reverse(),
     audit: db.audit.slice(-120).reverse(),
     tracking: db.tracking.slice(-20).reverse(),
@@ -174,6 +176,7 @@ app.post("/api/child/adventure", route((req) => {
   const { destId, ...adventure } = act((db) => actions.adventure(db, req.body), "adventure");
   return adventure;
 }));
+app.post("/api/child/adventure/:id/seen", route((req) => act((db) => actions.adventureSeen(db, req.params.id), "adventure_seen")));
 app.post("/api/child/cosmetic/buy", route((req) => act((db) => actions.buyCosmetic(db, req.body), "cosmetic")));
 app.post("/api/child/cosmetic/equip", route((req) => act((db) => actions.equip(db, req.body), "equip")));
 app.post("/api/child/bear/name", route((req) => act((db) => actions.renameBear(db, req.body), "rename")));
@@ -214,6 +217,7 @@ app.post("/api/buddy/speak", async (req, res) => {
 app.use("/api/parent", requireParent);
 app.post("/api/parent/approval/:id", route((req) => act((db) => actions.approval(db, req.body, req.params.id), "parent_decision")));
 app.post("/api/parent/goal", route((req) => act((db) => actions.goal(db, req.body), "goal_created")));
+app.post("/api/parent/goal/:id/cancel", route((req) => act((db) => actions.cancelGoal(db, req.params.id), "goal_cancelled")));
 app.post("/api/parent/mission", route((req) => act((db) => actions.mission(db, req.body), "mission_created")));
 app.post("/api/parent/allowance", route((req) => act((db) => actions.allowance(db, req.body), "allowance_settings")));
 // Demo control: fast-forward the schedule so the guardian pays this week's allowance now.

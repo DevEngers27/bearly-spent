@@ -33,6 +33,7 @@ export function audit(db, actor, action, detail, data = {}) {
 }
 
 export function notify(db, to, text, kind = "info", ref = null) {
+  if (ref && db.notifications.some((n) => n.to === to && n.ref === ref)) return;
   db.notifications.push({ id: uid("ntf"), ts: Date.now(), to, text, kind, ref, read: false });
   if (db.notifications.length > 200) db.notifications.splice(0, db.notifications.length - 200);
 }
@@ -106,12 +107,40 @@ export function createParentGoal(db, { title, type, count, reward }) {
   if (!["number", "string"].includes(typeof count) || !Number.isInteger(Number(count)) || !(Number(count) >= 1 && Number(count) <= 50)) throw new GameError("Count must be between 1 and 50");
   if (!["number", "string"].includes(typeof reward) || (typeof reward === "string" && !reward.trim()) || !Number.isFinite(Number(reward)) || !(Number(reward) >= 0 && Number(reward) <= 100)) throw new GameError("Reward must be between $0 and $100");
   count = Number(count);
+  const passed = LESSONS.filter((l) => db.child.lessonsDone.includes(l.id)).length;
+  const remaining = LESSONS.length - passed;
+  if (type === "lessons" && count > remaining) throw new GameError(`${db.child.name} has already passed ${passed} lessons — pick ${remaining} or fewer, or choose tasks`);
   reward = Math.round(Number(reward) * 100);
   const g = { id: uid("pg"), title: title.trim(), type, count, reward, progress: 0, status: "active", createdAt: Date.now() };
   db.parentGoals.push(g);
   notify(db, "child", `New goal from your grown-up: "${g.title}" — earn ${dollars(reward)}!`, "mission");
   audit(db, "parent", "goal_created", `Created goal "${g.title}" (${count} ${type}) for ${dollars(reward)}`, { goalId: g.id });
   return g;
+}
+
+export function cancelParentGoal(db, goalId) {
+  const goal = db.parentGoals.find((g) => g.id === goalId);
+  if (!goal || goal.status !== "active") throw new GameError("Only active goals can be cancelled");
+  goal.status = "cancelled";
+  goal.cancelledAt = Date.now();
+  notify(db, "child", `Your grown-up cancelled "${goal.title}". You can pick a new goal together!`, "info");
+  audit(db, "parent", "goal_cancelled", `Cancelled goal "${goal.title}"`, { goalId });
+  return goal;
+}
+
+// Resolve both the request and its inbox reminder together.
+export function resolveParentNotification(db, ref) {
+  for (const n of db.notifications) if (n.to === "parent" && n.ref === ref) n.read = true;
+}
+
+export function resolveEscalation(db, approval, status = "resolved") {
+  approval.status = status;
+  resolveParentNotification(db, approval.id);
+  notify(db, "parent", `Resolved: ${approval.title}`, "info", `resolved:${approval.id}`);
+}
+
+export function postcardMetrics(db) {
+  return { places: visitedSet(db).size, cards: db.postcards.length, total: Object.keys(PLACES).length };
 }
 
 // ------------------------------------------------------------------ missions
@@ -246,13 +275,14 @@ export function decide(db, approvalId, approve, note = "") {
   const a = db.approvals.find((x) => x.id === approvalId);
   const canDecline = a && !approve && a.status === "approved" && !a.paidTxnId && ["reward", "extra", "spend"].includes(a.kind);
   if (!a || (a.status !== "pending" && !canDecline)) throw new GameError("That request was already handled");
+  resolveParentNotification(db, a.id);
   a.status = approve ? "approved" : "declined";
   a.decidedAt = Date.now();
   a.note = note;
   audit(db, "parent", a.kind === "topup" ? "handled" : approve ? "approved" : "declined", `${a.kind === "topup" ? "Handled" : approve ? "Approved" : "Declined"}: ${a.title}`, { approvalId: a.id, kind: a.kind });
   if (!approve) {
     delete a.escalatedAt;
-    for (const related of db.approvals) if (related.approvalId === a.id && ["topup", "child_funds"].includes(related.kind)) related.status = "resolved";
+    for (const related of db.approvals) if (related.approvalId === a.id && ["topup", "child_funds"].includes(related.kind)) resolveEscalation(db, related);
   }
 
   switch (a.kind) {
@@ -311,14 +341,30 @@ export function decide(db, approvalId, approve, note = "") {
       break;
     case "topup":
       a.handled = true;
+      notify(db, "parent", `Funding request handled: ${a.title}`, "info", `resolved:${a.id}`);
       break;
   }
   return a;
 }
 
+// The period timestamp survives calendar-key changes. Older ledgers store the
+// payout time, which is a conservative fallback until the next scheduled payout.
+export function allowanceLastPaidAt(db) {
+  if (db.allowance.lastPaidAt == null) {
+    const paid = db.transactions.filter((t) => t.kind === "allowance" && t.status === "posted" && !t.injected);
+    db.allowance.lastPaidAt = paid.length ? Math.max(...paid.map((t) => t.ts)) : null;
+  }
+  return db.allowance.lastPaidAt;
+}
+
+export function allowancePaidRecently(db, now) {
+  const last = allowanceLastPaidAt(db);
+  return last != null && now - last < db.allowance.cadenceDays * 86400000 - 6 * 3600000;
+}
+
 export function requestAllowanceRun(db, now = Date.now()) {
   const period = `allowance:${dayKey(now, db.settings.timezone)}`;
-  if (db.allowance.lastPeriod === period || db.transactions.some((t) => t.status === "posted" && (t.ref === period || t.idempotencyKey === `${period}:save` || t.idempotencyKey === `${period}:spend`))) {
+  if (allowancePaidRecently(db, now) || db.allowance.lastPeriod === period || db.transactions.some((t) => t.status === "posted" && (t.ref === period || t.idempotencyKey === `${period}:save` || t.idempotencyKey === `${period}:spend`))) {
     throw new GameError("Allowance for today was already paid");
   }
   db.allowance.nextRun = Math.min(db.allowance.nextRun, now);
@@ -327,6 +373,13 @@ export function requestAllowanceRun(db, now = Date.now()) {
 // ------------------------------------------------------------------ adventures
 export function visitedSet(db) {
   return new Set(db.postcards.filter((p) => p.source === "trip" || (p.source === undefined && !p.from)).map((p) => p.defId));
+}
+
+export function markAdventureSeen(db, adventureId, now = Date.now()) {
+  const adventure = db.adventures.find((a) => a.id === adventureId);
+  if (!adventure || adventure.status !== "returned") throw new GameError("That postcard hasn't arrived yet");
+  adventure.revealedAt ??= now;
+  return adventure;
 }
 
 export function startAdventure(db, destId, now = Date.now()) {

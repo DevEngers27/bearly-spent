@@ -120,5 +120,15 @@ export function useLiveState(role) {
   return { state, error, refresh, offline: Boolean(error) };
 }
 
-export const money = (c) => `$${(c / 100).toFixed(2)}`;
-export const moneyShort = (c) => (c % 100 === 0 ? `$${c / 100}` : money(c));
+export const money = (c) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(c / 100);
+export const moneyShort = (c) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: c % 100 === 0 ? 0 : 2 }).format(c / 100);
+export const formatDate = (ts, options = {}) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", ...options }).format(new Date(ts));
+export const formatTime = (ts, options = {}) => new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", ...options }).format(new Date(ts));
+export const formatDateTime = (ts, options = {}) => formatDate(ts, { hour: "numeric", minute: "2-digit", ...options });
+
+// Older offline snapshots predate the shared metrics in the server views.
+export const postcardMetrics = (state) => state.metrics?.postcards || {
+  places: new Set(state.postcards.filter((p) => p.source === "trip" || (!p.source && !p.from)).map((p) => p.defId)).size,
+  cards: state.postcards.length,
+  total: Object.keys(state.catalog.places).length,
+};
