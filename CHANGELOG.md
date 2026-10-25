@@ -14,7 +14,7 @@ merged by Claude (see `docs/VERSIONING.md`).
 ## [0.7.0] — 2026-10-25
 
 One pot of real money, missions that keep coming, and the polish from the
-owner's first round of phone testing. 318 server tests and 173 client tests;
+owner's two rounds of phone testing. 325 server tests and 183 client tests;
 browser smoke of the new flows at 390×844 and 1280×900.
 
 ### Changed
@@ -34,12 +34,20 @@ browser smoke of the new flows at 390×844 and 1280×900.
   editable; the parent sees the plan.
 
 ### Added
+- Sign-up takes up to four children at once; each child card starts with
+  "Sign in on your child's device → Get a kid code", with the friend code
+  clearly separated; the Welcome screen says where kid codes come from.
+- The iPhone Shortcut instructions moved off the parent app onto a help page
+  (`/help/apple-cash`); the parent card keeps only the token controls.
+- Buddy's note shows when it was last updated and a pending state while a new
+  tip is being written.
 - Speech bubble can be closed (×, tap outside, Esc); buying clothes with
   points asks first; parents confirm goal deletion, unfriending and friend-code
   replacement; the requesting parent hears when the other family declines.
 
 ### Fixed
-- Talking to the bear during a trip no longer re-runs the bubble every second;
+- Talking to the bear during a trip shows a countdown that ticks in place, never
+  re-types, and lets go at 0:00; the bear is never drawn while away;
   "Linked ✓" survives leaving the Children section; album stamp strip and
   postcard counts are consistent; talk suggestions follow the current goal;
   received greetings show on the friend card; the closet confirmation is
