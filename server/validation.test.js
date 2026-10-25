@@ -39,14 +39,17 @@ test("topup requires a finite amount within its deposit limit", () => {
   rejectsUnchanged(db, () => actions.topup(db, {}));
 });
 
-test("topup converts dollars to cents and clears existing funding escalations", () => {
+test("topup converts dollars to cents and clears only parent-funded escalations", () => {
   const db = fresh();
-  db.approvals.push({ id: "a", kind: "topup", status: "pending", escalatedAt: 1 });
+  db.approvals.push({ id: "a", kind: "topup", status: "pending" });
+  db.approvals.push({ id: "r", kind: "reward", status: "approved", amount: 500, escalatedAt: 1 });
+  db.approvals.push({ id: "s", kind: "spend", status: "approved", amount: 500, memo: "Game", escalatedAt: 1 });
   const before = db.accounts.parent.balance;
   actions.topup(db, { amount: " 50 " });
   assert.equal(db.accounts.parent.balance, before + 5000);
   assert.equal(db.approvals[0].status, "approved");
-  assert.equal(Object.hasOwn(db.approvals[0], "escalatedAt"), false);
+  assert.equal(Object.hasOwn(db.approvals[1], "escalatedAt"), false, "parent-funded reward escalation is cleared");
+  assert.equal(db.approvals[2].escalatedAt, 1, "child-funded spend escalation is left for the guardian to retry");
   actions.topup(db, { amount: 0.01 });
   actions.topup(db, { amount: 1000 });
   assert.equal(db.accounts.parent.balance, before + 105001);

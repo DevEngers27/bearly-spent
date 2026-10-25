@@ -6,6 +6,7 @@ import * as game from "./domain.js";
 import { transfer } from "./bank.js";
 import { COSMETICS } from "./catalog.js";
 import { runGuardian, hasDueWork, pendingFindings, reconcileNow, spendPolicy, injectDuplicatePosting } from "./guardian.js";
+import { actions } from "./actions.js";
 
 const DAY = 86400000;
 const fresh = () => seed(Date.now());
@@ -18,9 +19,9 @@ function routeMutation(path, body = {}) {
   assert.ok(start >= 0);
   const end = indexSource.indexOf("\napp.post(", start + 1);
   let handler;
-  new Function("app", "route", "act", "cents", "game", indexSource.slice(start, end))(
+  new Function("app", "route", "act", "cents", "game", "actions", indexSource.slice(start, end))(
     { post: (_path, fn) => { handler = fn; } },
-    (fn) => fn, (fn) => fn, (v) => Math.round(Number(v) * 100), game,
+    (fn) => fn, (fn) => fn, (v) => Math.round(Number(v) * 100), game, actions,
   );
   return handler({ body });
 }
