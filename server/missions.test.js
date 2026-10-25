@@ -205,3 +205,18 @@ test("H2 real greeting: sender mission awards 15 once inside the cross-family tr
   const stored = JSON.parse(database().prepare("SELECT doc FROM children WHERE id = ?").get(aId).doc);
   assert.equal(stored.child.dailyMissions.done.filter((m) => m.key === "greet").length, 1);
 });
+
+test("H2 isolation: a broken mission state never blocks a save or a spend", () => {
+  const db = seed(Date.now());
+  db.child.dailyMissions = { dayKey: "nope", active: null, done: "x" };
+  const savings = db.accounts.savings.balance;
+  game.childSave(db, 200);
+  assert.equal(db.accounts.savings.balance, savings + 200);
+  assert.ok(Array.isArray(db.child.dailyMissions.active));
+  db.child.dailyMissions.active.push({ key: "save", assignedAt: 1 });
+  db.child.bear = null; // missionTitle would throw; the save must still land
+  const before = db.accounts.savings.balance;
+  db.child.lastSaveDay = null;
+  assert.doesNotThrow(() => game.childSave(db, 100));
+  assert.equal(db.accounts.savings.balance, before + 100);
+});

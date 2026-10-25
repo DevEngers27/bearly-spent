@@ -307,7 +307,8 @@ function missionEligible(db, key, day) {
 // Stable daily rotation keeps seed() untouched and repeat reads predictable.
 export function ensureDailyMissions(db, now = Date.now()) {
   const day = dayKey(now, db.settings.timezone);
-  if (db.child.dailyMissions?.dayKey !== day) db.child.dailyMissions = { dayKey: day, active: [], done: [] };
+  const shape = db.child.dailyMissions;
+  if (shape?.dayKey !== day || !Array.isArray(shape.active) || !Array.isArray(shape.done)) db.child.dailyMissions = { dayKey: day, active: [], done: [] };
   const daily = db.child.dailyMissions;
   if (daily.done.length >= DAILY_MISSION_CAP) { daily.active = []; return daily; }
   daily.active = daily.active.filter((m) => missionEligible(db, m.key, day));
@@ -340,16 +341,22 @@ export function missionsToday(db, now = Date.now()) {
 
 // Call before changing eligibility; track/save/lesson already paid their reward.
 export function missionEvent(db, key, now = Date.now()) {
-  const daily = db.child.dailyMissions?.dayKey === dayKey(now, db.settings.timezone) ? db.child.dailyMissions : ensureDailyMissions(db, now);
-  const m = MISSION_POOL.find((m) => m.key === key);
-  if (!m || daily.done.length >= DAILY_MISSION_CAP || !daily.active.some((a) => a.key === key) || daily.done.some((d) => d.key === key)) return false;
-  daily.active = daily.active.filter((a) => a.key !== key);
-  daily.done.push({ key, doneAt: now, pts: m.pts });
-  if (!["track", "save", "lesson"].includes(key)) addPoints(db, m.pts, `mission: ${missionTitle(db, m)}`);
-  audit(db, "child", "daily_mission_done", `Mission done: ${missionTitle(db, m)}`, { key, points: m.pts, dayKey: daily.dayKey });
-  notify(db, "child", `Mission done! +${m.pts} points`, "celebrate", `daily:${daily.dayKey}:${key}`);
-  ensureDailyMissions(db, now);
-  return true;
+  // Gamification must never break a save or spend: any surprise here is logged, not thrown.
+  try {
+    const daily = db.child.dailyMissions?.dayKey === dayKey(now, db.settings.timezone) ? db.child.dailyMissions : ensureDailyMissions(db, now);
+    const m = MISSION_POOL.find((m) => m.key === key);
+    if (!m || daily.done.length >= DAILY_MISSION_CAP || !daily.active.some((a) => a.key === key) || daily.done.some((d) => d.key === key)) return false;
+    daily.active = daily.active.filter((a) => a.key !== key);
+    daily.done.push({ key, doneAt: now, pts: m.pts });
+    if (!["track", "save", "lesson"].includes(key)) addPoints(db, m.pts, `mission: ${missionTitle(db, m)}`);
+    audit(db, "child", "daily_mission_done", `Mission done: ${missionTitle(db, m)}`, { key, points: m.pts, dayKey: daily.dayKey });
+    notify(db, "child", `Mission done! +${m.pts} points`, "celebrate", `daily:${daily.dayKey}:${key}`);
+    ensureDailyMissions(db, now);
+    return true;
+  } catch (e) {
+    console.error(`[missions] ${key}: ${e.message}`);
+    return false;
+  }
 }
 
 export function missionSeen(db, key, now = Date.now()) {
