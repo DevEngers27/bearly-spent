@@ -51,6 +51,9 @@ function open(filename) {
       child_id TEXT NOT NULL REFERENCES children(id), expires_at INTEGER NOT NULL, used_at INTEGER
     );
   `);
+  if (!db.prepare("PRAGMA table_info(sessions)").all().some((c) => c.name === "device_kind")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN device_kind TEXT NOT NULL DEFAULT 'browser'");
+  }
   restrictFiles(filename);
   return db;
 }

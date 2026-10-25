@@ -151,6 +151,7 @@ function Overview({ state }) {
       <div className="p-figures">
         <Figure label={`${state.child.name}'s savings`} value={money(state.accounts.savings.balance)} sub={goal ? `${Math.round((state.accounts.savings.balance / goal.target) * 100)}% of ${goal.title}` : "Set a savings goal"} />
         <Figure label="Spending money" value={money(state.accounts.spending.balance)} />
+        <Figure label="Apple Cash" value={money(state.accounts.wallet?.balance ?? 0)} sub="Tracked balance" />
         <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Simulated" />
         <Figure label="Adventure points" value={state.child.points} sub="Game points, not money" />
       </div>
@@ -290,7 +291,7 @@ function Allowance({ state, run, demo, busy }) {
 }
 
 function Activity({ state }) {
-  const label = { parent: "Funding", savings: "Savings", spending: "Spending", merchant: "Store" };
+  const label = { parent: "Funding", savings: "Savings", spending: "Spending", wallet: "Apple Cash", merchant: "Store" };
   return (
     <div className="p-stack">
       <h1>Transactions</h1>
@@ -301,10 +302,10 @@ function Activity({ state }) {
           {state.transactions.map((t) => (
             <tr key={t.id} className={t.status !== "posted" ? "struck" : t.flagged ? "flag" : ""}>
               <td>{formatDateTime(t.ts)}</td>
-              <td>{t.memo}{t.injected ? " (bank replay)" : ""}</td>
+              <td>{t.memo}{["wallet_in", "wallet_spend"].includes(t.kind) && <small className="wallet-tag">Apple Cash</small>}{t.injected ? " (bank replay)" : ""}{t.note && <small>{t.note}</small>}</td>
               <td>{label[t.from]} → {label[t.to]}</td>
               <td className="num">{money(t.amount)}</td>
-              <td>{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}</td>
+              <td>{t.status === "reversed" ? "duplicate reversed by Guardian" : t.status}{t.flagged ? " · flagged" : ""}{t.uncovered ? " · uncovered" : ""}</td>
             </tr>
           ))}
         </tbody>
@@ -419,7 +420,7 @@ function Settings({ state, run, demo, busy }) {
 }
 
 
-function Children({ me, refreshMe, run, busy }) {
+function Children({ state, me, refreshMe, run, busy }) {
   const [child, setChild] = useState({ name: "", age: "9", bearName: "" });
   const [links, setLinks] = useState({});
   const [now, setNow] = useState(Date.now());
@@ -444,12 +445,14 @@ function Children({ me, refreshMe, run, busy }) {
   return <div className="p-stack">
     <h1>Children</h1>
     <p className="p-muted">Each saver has their own allowance, bear and adventures. Kid codes work once and last 15 minutes.</p>
+    {state && <WalletLedger state={state} run={run} busy={busy} />}
     {me.children.map((summary) => {
       const link = links[summary.id];
       const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
       return <section className="p-card" key={summary.id}>
         <div className="row"><div><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></div><button className="pbtn" disabled={busy} onClick={() => generate(summary.id)}>Generate kid code</button></div>
         <Devices childId={summary.id} busy={busy} />
+        <AppleCashTracking childId={summary.id} pinSet={me.family.pinSet} busy={busy} />
         {link && <div className="p-stack">
           {seconds > 0 ? <>
             <label className="pform">Kid code<input className="kid-code" readOnly value={link.code} onFocus={(event) => event.target.select()} /></label>
@@ -466,6 +469,81 @@ function Children({ me, refreshMe, run, busy }) {
       <label>Bear's name<input required maxLength={24} {...field("bearName")} /></label>
       <button className="pbtn primary" disabled={busy}>Add child</button>
     </form>
+  </div>;
+}
+
+function WalletLedger({ state, run, busy }) {
+  const [form, setForm] = useState({ amount: "", note: "" });
+  return <section className="p-card p-stack">
+    <h2>{state.child.name}'s Apple Cash · {money(state.accounts.wallet?.balance ?? 0)}</h2>
+    <p className="p-muted">Tracked from your records and Wallet automations. Check the actual balance in Wallet.</p>
+    <form className="pform" onSubmit={async (event) => {
+      event.preventDefault();
+      if (await run("parent/wallet/send", form, "Apple Cash transfer recorded — this does not change the funding record")) setForm({ amount: "", note: "" });
+    }}>
+      <h3>Send via Apple Cash</h3>
+      <p>Send in Wallet first, then record it here. This form records the transfer; it does not send money.</p>
+      <p>The money comes from your own pocket. Recording it does not change the funding record.</p>
+      <div className="pform-row">
+        <label>Amount sent ($)<input type="number" min="0.01" max="10000" step="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+        <label>Note<input maxLength={120} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
+      </div>
+      <button className="pbtn primary" disabled={busy}>Record sent money</button>
+    </form>
+    {state.walletLastPing && <p>Last connection test: {formatDateTime(state.walletLastPing)}</p>}
+    <h3>Wallet ledger</h3>
+    <table className="ptable"><thead><tr><th>When</th><th>What</th><th>Amount</th><th>Status</th></tr></thead><tbody>
+      {!(state.walletTransactions?.length) && <tr><td colSpan="4">No Apple Cash activity yet.</td></tr>}
+      {state.walletTransactions?.map((t) => <tr key={t.id}><td>{formatDateTime(t.ts)}</td><td>{t.memo}{t.note && <small>{t.note}</small>}</td><td>{t.kind === "wallet_in" ? "+" : "−"}{money(t.amount)}</td><td>{t.uncovered ? "Uncovered — check outside transfers" : t.status}</td></tr>)}
+    </tbody></table>
+  </section>;
+}
+
+function AppleCashTracking({ childId, pinSet, busy }) {
+  const [credential, setCredential] = useState(null);
+  const [token, setToken] = useState("");
+  const [message, setMessage] = useState("");
+  const [run, pending] = useAction((text) => setMessage(text));
+  const path = `child/wallet/token?child=${encodeURIComponent(childId)}`;
+  useEffect(() => {
+    let active = true;
+    if (pinSet) api(path).then((result) => { if (active) setCredential(result); }).catch((err) => { if (active) setMessage(err.message); });
+    return () => { active = false; };
+  }, [path, pinSet]);
+  const generate = async () => {
+    const result = await run(() => api(path, {}));
+    if (result) { setCredential(result); setToken(result.token); setMessage("Copy this token now. Rotating it disconnects the previous Shortcut."); }
+  };
+  const test = async () => {
+    const result = await run(() => api(`child/wallet/ping?child=${encodeURIComponent(childId)}`, {}, { bearerToken: token }));
+    if (result) setMessage("Connected! Run the automation on your child's iPhone to check that setup too.");
+  };
+  const url = `${location.origin}/api/child/wallet/spend`;
+  return <div className="p-stack wallet-setup">
+    <h3>Apple Cash tracking</h3>
+    <p className="p-muted">Use your child's iPhone to record Wallet purchases automatically. Only select the Apple Cash card.</p>
+    {!pinSet ? <p>Set a parent PIN in Security, then unlock parent mode to create a Shortcut token.</p> : <>
+      <button className="pbtn" disabled={busy || pending} onClick={generate}>{credential?.id ? "Rotate Shortcut token" : "Generate Shortcut token"}</button>
+      {credential?.expiresAt && <p className="p-muted">Token expires {formatDateTime(credential.expiresAt)}. You can unlink it in Devices.</p>}
+      {token && <>
+        <label className="pform">Shortcut token<input className="shortcut-token" readOnly value={token} onFocus={(e) => e.target.select()} /></label>
+        <div className="row">
+          <button className="pbtn" disabled={busy || pending || !navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(token), undefined, "Token copied")}>Copy token</button>
+          <button className="pbtn" disabled={busy || pending} onClick={test}>Test connection</button>
+        </div>
+      </>}
+    </>}
+    {message && <p role="status">{message}</p>}
+    <ol>
+      <li>Open Shortcuts → Automation → Transaction on your child's iPhone.</li>
+      <li>Select the Apple Cash card and Run Immediately.</li>
+      <li>Add Get Contents of URL. Use POST with a JSON request body to <code>{url}</code>.</li>
+      <li>Add headers: <code>Content-Type: application/json</code> and <code>Authorization: Bearer YOUR_TOKEN</code>. Paste the token above.</li>
+      <li>Map the transaction's amount (dollars), merchant and date into the fields below. Format the date as ISO 8601 with a time zone. Use a stable transaction ID for <code>external_id</code>, and reuse it when retrying.</li>
+    </ol>
+    <pre>{JSON.stringify({ amount: 4.25, merchant: "Corner shop", at: "2026-10-24T12:30:00-07:00", external_id: "wallet-transaction-unique-id" }, null, 2)}</pre>
+    <p className="p-muted">If Wallet provides no transaction ID, make one from the original date, merchant and amount (64 characters max). Keep the same ID on retries. Test without a purchase by POSTing an empty JSON object to <code>{location.origin}/api/child/wallet/ping</code> with the same headers. Do not manually log purchases already recorded by the Shortcut.</p>
+    <p className="p-muted">Purchases and connection tests each allow 60 requests per hour per child session. If the Shortcut gets a 429 response, keep the purchase and retry after the Retry-After delay with the same transaction ID.</p>
   </div>;
 }
 

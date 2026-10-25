@@ -159,6 +159,47 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | `POST /api/parent/settings` | Partial `{requireTradeApproval?,buddyEnabled?,coopChallenge?}` | `{ok:true}`; strict booleans. Disabling Buddy cancels this child's queued/in-flight replans. |
 | `POST /api/parent/savings-goal` | Partial `{title?,target?}` | `{ok:true}`; updates first savings goal, target $1–$10,000. |
 
+## Apple Cash tracking (F2)
+
+| Method and route | Auth | Request / response |
+| --- | --- | --- |
+| `POST /api/parent/wallet/send` | Parent | `{amount,note?}` records an already-sent inflow `outside → wallet`, `kind:wallet_in`, memo `Sent via Apple Cash`; returns the transaction. $0.01–$10,000. Money comes from the parent's own pocket: only wallet is credited, with no debit or change to the child's funding record, savings or spending. This is tracking, not a payment instruction. |
+| `POST /api/child/wallet/spend` | Child | `{amount,merchant,at?,external_id?}` records `wallet → merchant`, `kind:wallet_spend`; returns the transaction plus `duplicate`. Amount $0.01–$10,000; merchant <=120 chars; date ISO 8601 with zone or Unix milliseconds; external ID <=64 chars. Keys persist per child after ledger retention. Short balances post with `uncovered:true`; over-limit purchases notify without a hold. G4 anomaly notices apply. |
+| `GET /api/child/wallet/token` | Parent + configured, unlocked PIN | `{token:null,id,expiresAt}` for the selected child's active Shortcut, null ID/time if absent; no mutation. |
+| `POST /api/child/wallet/token` | Parent + configured, unlocked PIN | `{}` rotates/revokes only that child's Shortcut sessions; returns `{token,id,expiresAt}`. Raw token is shown only in this response; hashes only in storage. |
+| `POST /api/child/wallet/ping` | Child | `{}` returns `{ok:true,childId,at}` and records the connection time without a transaction. |
+
+Ping and spend each allow 60 requests per hour per authenticated session and
+selected child, in independent fixed windows starting with the first request.
+This includes Shortcut Bearer tokens, paired child browsers and parent sessions
+using child routes. Authenticated invalid payloads and idempotent retries count.
+Excess requests return 429 with `{error:"Let's take a little break. Try again soon!",
+retryAfterSeconds:N}` and a matching `Retry-After: N` header; they do not change the
+wallet or ping time. Keep pending Shortcut purchases and retry after that delay
+with the original body and `external_id`. Limits are process-local and reset on
+API restart, like the other request limits.
+
+The ledger invariant is funding + savings + spending + wallet + posted merchant
+outflows − posted outside inflows. Recording sent Apple Cash increases wallet
+and outside inflows equally; it never reduces funding or drives funding negative.
+
+All routes honor `?child=`. Shortcut credentials are child-bound, fixed 180-day
+sessions with device kind `shortcut`. Devices responses now include `kind`
+(`browser` or `shortcut`); Shortcut name is `Apple Cash Shortcut`. Existing Unlink
+and family-wide logout revoke them. Normal paired sessions are unaffected by
+Shortcut rotation. Browser setup tests must omit cookies when using the Bearer
+token so the test cannot replace the parent's session cookie.
+
+New and migrated documents have `accounts.wallet` (`Apple Cash`, initial balance
+0). Child state adds `balances.wallet` and `walletLastTransaction` (null or latest
+recorded wallet transaction). Parent state includes `accounts.wallet`, up to 60
+`walletTransactions` newest first, and `walletLastPing` (null or Unix milliseconds).
+Wallet transactions include `note` for parent sends and `merchant`, `recordedAt`,
+`uncovered` and optional `external_id` for purchases. `uncovered` is historical;
+later incoming records reconcile the balance without rewriting that flag.
+These are real-family tracking routes, independent of demo controls. See
+[Shortcut setup](../docs/apple-cash-shortcut.md) for the exact automation body.
+
 ## Demo controls
 
 `MQ_DEMO=1` ensures a demo family exists with parent `demo@moneyquest.test` / `demo-pass-1234` and Mia/Maple, including two Chicago postcards. The password is hashed; there is no seeded PIN. Existing demo progress is preserved on restart. Every path under `/api/demo` returns 404 when demo mode is unset.

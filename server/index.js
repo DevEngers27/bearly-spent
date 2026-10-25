@@ -78,7 +78,8 @@ export function childView(db, now = Date.now()) {
     offline: false,
     budgetDoneThisWeek: db.child.lastBudgetWeek === week,
     child: db.child,
-    balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance },
+    balances: { savings: db.accounts.savings.balance, spending: db.accounts.spending.balance, wallet: db.accounts.wallet.balance },
+    walletLastTransaction: db.transactions.findLast((t) => ["wallet_in", "wallet_spend"].includes(t.kind)) || null,
     goals: db.savingsGoals.map((g) => ({ ...g, weeksLeft: game.weeksToGoal(db, g) })),
     allowance: { amount: db.allowance.amount, savePct: db.allowance.savePct, nextRun: db.allowance.nextRun, spendLimit: db.allowance.spendLimit },
     parentGoals: db.parentGoals,
@@ -132,6 +133,8 @@ export function parentView(db, before) {
     transactions: db.transactions.slice(-60).reverse(),
     audit: db.audit.slice(-120).reverse(),
     tracking: db.tracking.slice(-20).reverse(),
+    walletTransactions: db.transactions.filter((t) => ["wallet_in", "wallet_spend"].includes(t.kind)).slice(-60).reverse(),
+    walletLastPing: db.walletLastPing || null,
     friends: db.friends,
   };
 }
@@ -173,6 +176,22 @@ register("POST", "/api/parent/children", "parent", (req, ctx) => createChild(ctx
 register("POST", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.createLink(ctx, req.params.id, now));
 register("GET", "/api/state", "child", (req, ctx) => ({ childId: ctx.childId, ...childView(readChild(ctx.childId)) }));
 register("GET", "/api/parent/state", "parent", (req, ctx) => ({ childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before) }));
+register("GET", "/api/child/wallet/token", "parent", (req, ctx, res, now) => auth.walletToken(ctx, { now }));
+register("POST", "/api/child/wallet/token", "parent", (req, ctx, res, now) => {
+  actions.walletPing(null, req.body);
+  return auth.walletToken(ctx, { rotate: true, now });
+});
+register("POST", "/api/child/wallet/ping", "child", (req, ctx, res, now) => {
+  takeLimit("walletPing", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
+  actions.walletPing(null, req.body);
+  mutateChild(ctx.childId, (db) => { db.walletLastPing = now; });
+  return { ok: true, childId: ctx.childId, at: now };
+});
+register("POST", "/api/child/wallet/spend", "child", (req, ctx, res, now) => {
+  takeLimit("walletSpend", `${ctx.childId}:${ctx.session.token_hash}`, now, { retryAfter: true });
+  return runChildAction(ctx.childId, (db) => actions.walletSpend(db, req.body), "walletSpend", now);
+});
+register("POST", "/api/parent/wallet/send", "parent", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.walletSend(db, req.body), "wallet_in", now));
 
 export function stream(req, context, res) {
   res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-store, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });

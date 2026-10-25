@@ -746,3 +746,11 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 
 .p-device { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; overflow-wrap: anywhere; }
 .p-device > div { flex: 1 1 180px; min-width: 0; }
+.wallet-pill { display: grid; gap: 3px; width: 100%; padding: 12px 16px; border: 2px solid var(--line); border-radius: 18px; background: #FFFDF7; color: var(--ink); text-align: left; }
+.wallet-pill small { color: var(--ink-soft); overflow-wrap: anywhere; }
+.wallet-tag { display: inline-block; margin-left: 6px; padding: 2px 6px; border-radius: 8px; background: #E5EEF0; font-size: 12px; color: var(--ink); }
+.money-pots .wallet-pot { grid-column: 1 / -1; }
+.wallet-setup { margin-top: 16px; padding-top: 16px; border-top: 2px solid var(--line); overflow-wrap: anywhere; }
+.wallet-setup pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: #FFFDF7; border-radius: 10px; font-size: 13px; }
+.wallet-setup li { margin-bottom: 8px; }
+.shortcut-token { width: 100%; box-sizing: border-box; font-family: monospace; }

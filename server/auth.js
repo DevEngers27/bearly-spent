@@ -52,13 +52,13 @@ export function familyById(id) {
   return { id: row.id, name: row.name, parentPin: row.parent_pin, timezone: row.timezone, createdAt: row.created_at };
 }
 
-export function createSession({ familyId, userId = null, role = "parent", childId = null, ua = "", now = Date.now() }) {
+export function createSession({ familyId, userId = null, role = "parent", childId = null, ua = "", deviceKind = "browser", now = Date.now() }) {
   const token = crypto.randomBytes(32).toString("base64url");
   const duration = (role === "parent" ? 30 : 180) * DAY;
   database().prepare(`INSERT INTO sessions
-    (token_hash, user_id, family_id, role, child_id, created_at, expires_at, last_seen, ua)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(tokenHash(token), userId, familyId, role, childId, now, now + duration, now, String(ua).slice(0, 500));
+    (token_hash, user_id, family_id, role, child_id, created_at, expires_at, last_seen, ua, device_kind)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(tokenHash(token), userId, familyId, role, childId, now, now + duration, now, String(ua).slice(0, 500), deviceKind);
   return { token, session: database().prepare("SELECT * FROM sessions WHERE token_hash = ?").get(tokenHash(token)) };
 }
 
@@ -257,7 +257,22 @@ function deviceName(ua = "") {
 export function childDevices(context, childId, now = Date.now()) {
   childForDevices(context, childId);
   return database().prepare("SELECT * FROM sessions WHERE family_id = ? AND child_id = ? AND role = 'child' AND expires_at > ? ORDER BY created_at")
-    .all(context.family.id, childId, now).map((s) => ({ id: deviceId(s.token_hash), created_at: s.created_at, last_seen: s.last_seen, name: deviceName(s.ua) }));
+    .all(context.family.id, childId, now).map((s) => ({ id: deviceId(s.token_hash), created_at: s.created_at, last_seen: s.last_seen, kind: s.device_kind, name: s.device_kind === "shortcut" ? "Apple Cash Shortcut" : deviceName(s.ua) }));
+}
+
+export function walletToken(context, { rotate = false, now = Date.now() } = {}) {
+  if (context.role !== "parent") throw new GameError("A grown-up needs to sign in", 403);
+  if (!context.family.parentPin) throw new GameError("Set a parent PIN in Security first", 403);
+  if (context.session.unlocked_until <= now) throw new GameError("Please unlock parent mode", 403);
+  childForDevices(context, context.childId);
+  if (rotate) return transaction((db) => {
+    db.prepare("DELETE FROM sessions WHERE family_id = ? AND child_id = ? AND role = 'child' AND device_kind = 'shortcut'").run(context.family.id, context.childId);
+    const { token, session } = createSession({ familyId: context.family.id, childId: context.childId, role: "child", deviceKind: "shortcut", now });
+    return { token, id: deviceId(session.token_hash), expiresAt: session.expires_at };
+  });
+  const session = database().prepare("SELECT * FROM sessions WHERE family_id = ? AND child_id = ? AND role = 'child' AND device_kind = 'shortcut' AND expires_at > ? ORDER BY created_at DESC LIMIT 1")
+    .get(context.family.id, context.childId, now);
+  return session ? { token: null, id: deviceId(session.token_hash), expiresAt: session.expires_at } : { token: null, id: null, expiresAt: null };
 }
 export function unlinkDevice(context, childId, sessionId) {
   childForDevices(context, childId);

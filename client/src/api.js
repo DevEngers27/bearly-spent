@@ -50,23 +50,23 @@ export function apiUrl(path, includeChild = true) {
 }
 
 // Shared by JSON and audio requests so every authenticated route handles expiry.
-export async function apiResponse(path, body, { includeChild = true, handleUnauthorized = true, method } = {}) {
+export async function apiResponse(path, body, { includeChild = true, handleUnauthorized = true, method, bearerToken } = {}) {
   const version = identityVersion;
   const url = apiUrl(path, includeChild);
   const route = path.split("?")[0];
-  const parentRoute = route.startsWith("parent/") || route === "auth/logout-all";
+  const parentRoute = route.startsWith("parent/") || route === "auth/logout-all" || route === "child/wallet/token";
   const res = await fetch(url, {
     method: method || (body === undefined ? "GET" : "POST"),
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
+    credentials: bearerToken ? "omit" : "same-origin",
+    headers: { "Content-Type": "application/json", ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.status === 401 && handleUnauthorized && !["parent/unlock", "parent/pin/reset", "auth/login"].includes(route)) {
+  if (res.status === 401 && handleUnauthorized && !bearerToken && !["parent/unlock", "parent/pin/reset", "auth/login"].includes(route)) {
     clearSessionCache();
     window.dispatchEvent(new Event("mq:unauthorized"));
   }
   if (parentRoute && res.status === 423) window.dispatchEvent(new Event("mq:locked"));
-  if (res.status === 404) {
+  if (res.status === 404 && !bearerToken) {
     const childId = new URLSearchParams(url.split("?")[1]).get("child");
     if (childId && version === identityVersion) window.dispatchEvent(new Event("mq:child-reset"));
   }

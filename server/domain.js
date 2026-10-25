@@ -253,6 +253,51 @@ export function childSpend(db, { amount, memo }, policy, now = Date.now()) {
   return { held: false };
 }
 
+// Apple Cash entries record money that already moved outside MoneyQuest. They
+// are not bank instructions and must never mirror to Nessie or wait for funds.
+export function parentWalletSend(db, { amount, note = "" }, now = Date.now()) {
+  if (!Number.isInteger(amount) || amount < 1 || amount > 1000000) throw new GameError("Enter an amount from $0.01 to $10,000");
+  if (typeof note !== "string" || note.trim().length > 120) throw new GameError("Add a short note");
+  const txn = { id: uid("txn"), ts: now, from: "outside", to: "wallet", amount, kind: "wallet_in", memo: "Sent via Apple Cash", note: note.trim(), idempotencyKey: uid("wallet_in"), status: "posted" };
+  db.accounts.wallet.balance += amount;
+  db.transactions.push(txn);
+  notify(db, "child", `Your grown-up sent ${dollars(amount)} via Apple Cash!`, "money", txn.id);
+  audit(db, "parent", "wallet_in", `Recorded ${dollars(amount)} sent via Apple Cash`, { txnId: txn.id });
+  moneyMoved(db, "Apple Cash money received");
+  return txn;
+}
+
+export function childWalletSpend(db, { amount, merchant, at, external_id }, policy, now = Date.now()) {
+  if (!Number.isInteger(amount) || amount < 1 || amount > 1000000) throw new GameError("Enter how much you spent");
+  if (typeof merchant !== "string" || !merchant.trim() || merchant.trim().length > 120) throw new GameError("Where did you spend it?");
+  merchant = merchant.trim();
+  if (external_id !== undefined && (typeof external_id !== "string" || !external_id.trim() || external_id.trim().length > 64)) throw new GameError("Use a short transaction ID");
+  const key = external_id === undefined ? null : `wallet:${external_id.trim()}`;
+  let ts = now;
+  if (at !== undefined) {
+    if (typeof at === "number") ts = at;
+    else if (typeof at === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(at)) ts = Date.parse(at);
+    else throw new GameError("Use an ISO date with a time zone or a timestamp");
+    if (!Number.isSafeInteger(ts) || ts < 0 || !Number.isFinite(new Date(ts).getTime())) throw new GameError("Use a valid transaction date");
+  }
+  // Receipts survive the rolling transaction history, so an old automation
+  // retry still cannot debit twice after retention or a server restart.
+  const existing = key && (db.walletReceipts?.[key] || db.transactions.find((t) => t.idempotencyKey === key));
+  if (existing) return { ...existing, duplicate: true };
+  policy(db, amount, merchant, { alreadyPaid: true });
+  const uncovered = db.accounts.wallet.balance < amount;
+  const txn = { id: uid("txn"), ts, recordedAt: now, from: "wallet", to: "merchant", amount, kind: "wallet_spend", memo: merchant, merchant, idempotencyKey: key, status: "posted", uncovered };
+  if (external_id !== undefined) txn.external_id = external_id.trim();
+  db.accounts.wallet.balance -= amount;
+  db.transactions.push(txn);
+  if (key) (db.walletReceipts ||= {})[key] = { ...txn };
+  if (uncovered) notify(db, "parent", `${db.child.bear.name}'s Apple Cash shows ${dollars(-db.accounts.wallet.balance)} more spent than was sent — did you send money outside MoneyQuest?`, "guardian", `uncovered:${txn.id}`);
+  dailyTrackingBonus(db, now);
+  audit(db, "child", "wallet_spend", `Recorded ${dollars(amount)} paid with Apple Cash at ${merchant}`, { txnId: txn.id, uncovered });
+  moneyMoved(db, "Apple Cash purchase recorded");
+  return { ...txn, duplicate: false };
+}
+
 export function journal(db, { direction, amount, note }, now = Date.now()) {
   if (!["received", "spent", "saved"].includes(direction)) throw new GameError("Pick what happened");
   if (!Number.isInteger(amount) || !(amount >= 0 && amount <= 1000000)) throw new GameError("Enter an amount from $0 to $10,000");
