@@ -13,7 +13,7 @@ git -C "$ROOT" archive --format=tar "$REF" | tar -x -C "$STAGE"
 VERSION="$(git -C "$ROOT" describe --tags --always "$REF")"
 echo "$VERSION" > "$STAGE/VERSION"
 
-rsync -az --delete \
+rsync -az --delete --chmod=D755,F644 \
   --exclude '.git' --exclude 'data' --exclude 'client/src' --exclude 'bear_app_assets' --exclude 'bear_postcard_collection_15' \
   --exclude '*.test.js' --exclude '*.test.mjs' \
   "$STAGE"/ "$TARGET":/opt/moneyquest/
