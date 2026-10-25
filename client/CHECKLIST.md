@@ -31,3 +31,12 @@ The socket-free regression suite covers state, controls, and domain rules. These
 - [ ] **F6 — Away:** Tapping the sign shows “Maple is on a trip! Back in 0:42”; countdown stays live, no talk bar opens, and zero chat requests are sent.
 - [ ] **F6 — Offline:** Load the saved state offline; tapping Maple says “I can't chat while we're offline, but your postcards are right here!” and leaves the bar closed. Browse Album and open a cached postcard. Reconnect and chat again.
 - [ ] **F3 / F6 — Reduced motion and small screens:** At 320px width and with the mobile keyboard open, controls and reply remain usable above nav. With prefers-reduced-motion, sign is still, envelope/cards/sparkles do not animate, postcard picture appears immediately, and replies appear without typing animation. Add to album still closes normally.
+
+
+## F36 follow-up smoke regressions
+- [ ] At 390×844, a long reply (including an unbroken word), away-sign bubble, Buddy-off bubble and offline bubble keep `document.scrollingElement.scrollWidth <= innerWidth`.
+- [ ] On fresh child storage, seeded Chicago ×2 has no New badge. A later card is New across reloads until opened; a second child has its own baseline.
+- [ ] Before each reveal flip (including the bonus), no place name, story or postmark is readable. After the flip all appear. Reduced motion shows picture and details immediately.
+- [ ] Envelope shows a warm paper body, open flap, folded seams and a slight shadow. The body remains visible above the card.
+- [ ] Return copy says “an Acadia postcard”; album says “Collector's value” without pts; kid chat uses Maple and directs trips from Home, with a hint about secrets.
+- [ ] Visited place stamp stays compact; locked and unvisited sheets show their clue without hovering. Sound off shows a crossed speaker, pressed state and matching label/tooltip, persisting after reload.

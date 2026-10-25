@@ -48,11 +48,20 @@ export default function Child({ state, toast, onGrownUps, offline }) {
     }
     return ids;
   });
-  const [openedCards, setOpenedCards] = useState(() => storedList("mq_opened_cards"));
-  const newCards = state.postcards.filter((p) => p.source === "trip" && !openedCards.includes(p.id));
+  const albumKey = encodeURIComponent(state.child.id || state.child.name);
+  const baselineKey = `mq_album_baseline:${albumKey}`;
+  const openedKey = `mq_opened_cards:${albumKey}`;
+  const [initialCards] = useState(() => {
+    if (store.get(baselineKey, null) !== null) return storedList(baselineKey);
+    const ids = state.postcards.map((p) => p.id);
+    store.set(baselineKey, JSON.stringify(ids));
+    return ids;
+  });
+  const [openedCards, setOpenedCards] = useState(() => storedList(openedKey));
+  const newCards = state.postcards.filter((p) => !initialCards.includes(p.id) && !openedCards.includes(p.id));
   const openCard = (id) => {
     const next = [...new Set([...openedCards, ...state.postcards.filter((p) => p.defId === id).map((p) => p.id)])];
-    store.set("mq_opened_cards", JSON.stringify(next)); setOpenedCards(next);
+    store.set(openedKey, JSON.stringify(next)); setOpenedCards(next);
     open("postcard", { id });
   };
   const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard };
@@ -383,7 +392,7 @@ function MoneySheet({ state, run, close, start, busy }) {
           {mode === "save" && `Moves money from spending (${money(state.balances.spending)}) into savings.`}
           {mode === "spend" && `Buys over ${moneyShort(state.allowance.spendLimit)} need your grown-up's OK first.`}
           {mode === "log" && "For cash that isn't in the app. It goes in your diary."}
-          {mode === "ask" && "Your grown-up decides. Money Buddy can't move money."}
+          {mode === "ask" && "Your grown-up decides. Maple can't move money."}
         </p>
         <button className="btn honey wide" type="submit" disabled={busy}>{{ save: "Save it", spend: "Record it", log: "Add to diary", ask: "Send request" }[mode]}</button>
       </form>
@@ -499,7 +508,7 @@ function Missions({ state, run, open, busy }) {
               <li key={m.id} className={m.status === "done" ? "done" : m.status === "pending_review" ? "waiting" : ""}>
                 <button disabled={busy || m.status !== "open"} onClick={() => run(`child/mission/${m.id}/done`, {}, "Sent to your grown-up to check!")}>
                   <span className="box" aria-hidden="true">{m.status === "done" ? <Icon name="check" size={18} /> : m.status === "pending_review" ? <Icon name="hourglass" size={18} /> : null}</span>
-                  <span className="grow">{m.title}<small>{m.status === "pending_review" ? "Waiting for a grown-up to check" : m.status === "done" ? "Confirmed!" : m.createdBy.includes("buddy") ? "Idea from Money Buddy · tap when done" : "Tap when you're done"}</small></span>
+                  <span className="grow">{m.title}<small>{m.status === "pending_review" ? "Waiting for a grown-up to check" : m.status === "done" ? "Confirmed!" : m.createdBy.includes("buddy") ? "Idea from Maple · tap when done" : "Tap when you're done"}</small></span>
                   <span className="pts">+{m.points}</span>
                 </button>
               </li>
@@ -678,7 +687,7 @@ function PlaceSheet({ id, state, close, openCard }) {
         <span className={`rarity-chip ${p.rarity}`}>{RARITY_LABEL[p.rarity]}</span>
       </div>
       {owned && <><Stamp stamp={p.stamp} name={p.name} image={p.image} /><p className="story">{storyFor(p, state.child.bear.name)}</p><p className="fine">{visits ? `Visited ${visits} ${visits === 1 ? "time" : "times"}` : "A postcard from a friend. Maybe Maple will visit one day!"}</p></>}
-      {!owned && p.open && <p className="hand">{p.clue || `A little adventure in ${p.state}.`}</p>}
+      {!owned && <p className="hand">{p.clue || `A little adventure in ${p.state}.`}</p>}
       {!p.open && <p className="lock-note"><Icon name="lock" size={20} /> {p.lockReason}{p.progress ? ` (${p.progress})` : ""}</p>}
       {owned && <button className="link" onClick={() => openCard(id)}>See my postcard</button>}
     </Sheet>
@@ -714,9 +723,10 @@ function ReturnReveal({ state, latest, onSeen, onDone }) {
       <p className="center">A little adventure, just for you.</p>
       <div className={`return-parcel ${adding ? "adding" : ""}`} ref={parcel}>
         <svg className="return-envelope" viewBox="0 0 320 190" aria-hidden="true"><g filter="url(#mq-wobble)">
-          <path d="M8 40 L160 3 L312 40 V181 H8 Z" fill="#E8CB9C" stroke="#514738" strokeWidth="3" />
-          <path d="M8 40 L160 130 L312 40 V181 H8 Z" fill="#F3E9D2" stroke="#514738" strokeWidth="3" />
-          <path d="M8 181 L122 105 M312 181 L200 105" stroke="#B77E50" strokeWidth="2" />
+          <path className="envelope-flap" d="M8 65 L160 4 L312 65 Z" fill="#E8CB9C" stroke="#514738" strokeWidth="3" strokeLinejoin="round" />
+          <rect className="envelope-body" x="8" y="65" width="304" height="116" rx="5" fill="#FFF0CF" stroke="#514738" strokeWidth="3" />
+          <path d="M9 67 L160 145 L311 67 M9 179 L111 120 M311 179 L209 120" fill="none" stroke="#B77E50" strokeWidth="2" />
+          <circle cx="160" cy="145" r="12" fill="#D59A84" stroke="#B77E50" strokeWidth="2" />
         </g></svg>
         <div className="return-sparkles" aria-hidden="true"><i /><i /><i /><i /></div>
         <div className="reveal-stack">
@@ -724,8 +734,6 @@ function ReturnReveal({ state, latest, onSeen, onDone }) {
             <div key={c.id} className="return-card" style={{ "--delay": `${i * 2400}ms` }}>
               {i > 0 && <p className="hand surprise-title">…and a surprise!</p>}
               <FlipPostcard id={c.defId} place={state.catalog.places[c.defId]} bearName={state.child.bear.name} to={state.child.name} collectedAt={c.collectedAt} surprise={i > 0} revealDelay={i * 2400} />
-              <h2 className="hand">{state.catalog.places[c.defId].name}</h2>
-              <p className="story">{storyFor(state.catalog.places[c.defId], state.child.bear.name)}</p>
             </div>
           ))}
         </div>
@@ -955,7 +963,7 @@ function Buddy({ state, run, busy, offline, startTalk, transcriptOnly }) {
           </div>
         ))}
       </div>
-      <p className="fine">Money Buddy explains and plans. It can't move money, and your grown-up can read these chats.</p>
+      <p className="fine">{state.child.bear.name} explains and plans. It can't move money, and your grown-up can read these chats.</p>
       <p className="fine">Keep passwords, phone numbers and addresses private. We hide those details if you share them.</p>
       <button className="btn honey" onClick={startTalk}>Talk to {state.child.bear.name}</button>
     </div>
@@ -1083,7 +1091,7 @@ function TalkBar({ state, talk, busy, open }) {
     <section className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
       <div className="talk-links">
         <button className="link" onClick={() => open("chat")}>See our chat</button>
-        <button className="round-btn small" aria-label={`${talk.muted ? "Unmute" : "Mute"} ${state.child.bear.name}`} aria-pressed={talk.muted} onClick={talk.toggleMute}><Icon name="speaker" size={18} />{talk.muted && <span aria-hidden="true">/</span>}</button>
+        <button className="round-btn small" aria-label={talk.muted ? "Sound off" : "Sound on"} title={talk.muted ? "Sound off" : "Sound on"} aria-pressed={talk.muted} onClick={talk.toggleMute}><Icon name={talk.muted ? "speakerOff" : "speaker"} size={20} /></button>
         <button className="round-btn small" onClick={talk.close} aria-label="Close talk bar"><Icon name="close" size={16} /></button>
       </div>
       <div className="chips scroll">{suggestions.map((s) => <button type="button" key={s} className="chip" disabled={busy} onClick={() => send(s)}>{s}</button>)}</div>

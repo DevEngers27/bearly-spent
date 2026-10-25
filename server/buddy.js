@@ -368,7 +368,7 @@ export function offlineReply(db, text) {
     return "A need is something you must have to be safe and healthy, like food, a warm coat or school supplies. A want is something fun that's nice to have, like a new toy. It's good to pay for needs first, then save for wants!";
   }
   if (has(text, /\b(points?|trip|adventure|travel|map|postcard|secret places?)\b/)) {
-    return `You have ${db.child.points} adventure points. Points are game points, not money, so trips never touch your savings. Earn more by doing missions and lessons, then send ${bear} somewhere on the Map!`;
+    return `You have ${db.child.points} adventure points. Points are game points, not money, so trips never touch your savings. Earn more by doing missions and lessons, then send ${bear} on a trip from Home! Secret places turn up on trips as you build good saving habits.`;
   }
   if (has(text, /\b(allowance|payday|get paid)\b/)) {
     return `Your allowance is ${dollars(db.allowance.amount)} a week, and ${db.allowance.savePct}% goes straight into savings. The next one comes on ${new Date(db.allowance.nextRun).toDateString()}.`;
@@ -380,7 +380,7 @@ export function offlineReply(db, text) {
     return "Three saving tricks: save first when money comes in, wait one day before buying something you want, and compare prices before you buy. Small amounts add up!";
   }
   if (has(text, /^(hi|hey|hello|yo|good (morning|afternoon|evening))\b/)) {
-    return `Hi ${db.child.name}! I'm Money Buddy. You can ask me "Can I buy a $15 toy?", "When will I get my ${goal.title.toLowerCase()}?", or "Make me a saving plan".`;
+    return `Hi ${db.child.name}! I'm ${bear}. You can ask me "Can I buy a $15 toy?", "When will I get my ${goal.title.toLowerCase()}?", or "Make me a saving plan".`;
   }
   return `I'm not sure about that one. I'm best at money questions! Try "Can I buy a $15 toy?", "When will I get my ${goal.title.toLowerCase()}?", or "Make me a saving plan".`;
 }

@@ -46,7 +46,7 @@ export function PostcardTile({ id, place, count, onOpen, isNew = false, tilt = 0
         <span className={`rarity-chip ${place.rarity}`}>{RARITY_LABEL[place.rarity]}</span>
         {count > 1 && <span className="count-chip">×{count}</span>}
         {!owned && <small>{place.lockReason || "A future adventure"}</small>}
-        <small className="album-value" title="Postcard value. Every surprise trip costs 30 points.">Album value · {place.cost} pts</small>
+        <small className="album-value" title="A collecting score for swapping postcards. Every surprise trip costs 30 points.">Collector's value {place.cost}</small>
       </div>
     </button>
   );
@@ -54,42 +54,50 @@ export function PostcardTile({ id, place, count, onOpen, isNew = false, tilt = 0
 
 /** Two-sided postcard. Tap to flip between picture and story. */
 export function FlipPostcard({ id, place, bearName, to, collectedAt, startFlipped = false, surprise = false, revealDelay }) {
-  const [flipped, setFlipped] = useState(revealDelay !== undefined || startFlipped);
+  const revealing = revealDelay !== undefined;
+  const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const [flipped, setFlipped] = useState(() => (revealing && !reducedMotion()) || startFlipped);
+  const [revealed, setRevealed] = useState(() => !revealing || reducedMotion());
   useEffect(() => {
-    if (revealDelay === undefined) return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { setFlipped(false); return; }
-    const timer = setTimeout(() => setFlipped(false), revealDelay + 1200);
-    return () => clearTimeout(timer);
+    if (!revealing) return;
+    if (reducedMotion()) { setFlipped(false); setRevealed(true); return; }
+    const flip = setTimeout(() => setFlipped(false), revealDelay + 1200);
+    const finish = setTimeout(() => setRevealed(true), revealDelay + 2000);
+    return () => { clearTimeout(flip); clearTimeout(finish); };
   }, [revealDelay]);
+  const turn = () => { if (revealed) setFlipped((f) => !f); };
   return (
     <div className={`flip ${flipped ? "flipped" : ""} ${surprise ? "surprise" : ""}`}>
-      <div className="flip-inner" role="button" tabIndex="0" onClick={() => setFlipped((f) => !f)}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setFlipped((f) => !f))}
+      <div className="flip-inner" role="button" tabIndex={revealed ? 0 : -1} aria-disabled={!revealed} onClick={turn}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), turn())}
         aria-label={flipped ? "Show picture" : "Turn postcard over to read the story"} aria-pressed={flipped}>
-        <div className="flip-face front">
-          <img src={place.image} alt={`${bearName} at ${place.name}`} draggable="false" />
+        <div className="flip-face front" aria-hidden={!revealed}>
+          <img src={place.image} alt={revealed ? `${bearName} at ${place.name}` : ""} draggable="false" />
           {surprise && <span className="surprise-badge"><Icon name="sparkle" size={16} /> Surprise discovery!</span>}
           <span className="flip-hint">Tap to turn over</span>
         </div>
         <div className="flip-face back">
-          <div className="pc-back-left">
-            <p className="pc-greeting">Dear {to},</p>
-            <p className="pc-story">{storyFor(place, bearName)}</p>
-            <p className="pc-sign">Love, {bearName} <Icon name="paws" size={22} /></p>
-          </div>
-          <div className="pc-back-right">
-            <Stamp stamp={place.stamp} name={place.name} image={place.image} />
-            {collectedAt && (
-              <div className="postmark" aria-label={`Collected ${fmtDate(collectedAt)}`}>
-                <span>{place.state}</span>
-                <b>{fmtDate(collectedAt)}</b>
-              </div>
-            )}
-            <div className="address-lines" aria-hidden="true"><i /><i /><i /></div>
-            <p className="pc-place">{place.name}<br /><small>{place.state}</small></p>
-          </div>
+          {revealed ? <>
+            <div className="pc-back-left">
+              <p className="pc-greeting">Dear {to},</p>
+              <p className="pc-story">{storyFor(place, bearName)}</p>
+              <p className="pc-sign">Love, {bearName} <Icon name="paws" size={22} /></p>
+            </div>
+            <div className="pc-back-right">
+              <Stamp stamp={place.stamp} name={place.name} image={place.image} />
+              {collectedAt && (
+                <div className="postmark" aria-label={`Collected ${fmtDate(collectedAt)}`}>
+                  <span>{place.state}</span>
+                  <b>{fmtDate(collectedAt)}</b>
+                </div>
+              )}
+              <div className="address-lines" aria-hidden="true"><i /><i /><i /></div>
+              <p className="pc-place">{place.name}<br /><small>{place.state}</small></p>
+            </div>
+          </> : <p className="pc-greeting">A surprise from {bearName}…</p>}
         </div>
       </div>
+      {revealing && revealed && <><h2 className="hand">{place.name}</h2><p className="story">{storyFor(place, bearName)}</p></>}
     </div>
   );
 }

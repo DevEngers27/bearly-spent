@@ -33,6 +33,7 @@ const PATHS = {
   hourglass: <><path d="M7 3.5h10M7 20.5h10" {...s} fill="none" /><path d="M8 3.5c0 5 8 5 8 8.5s-8 3.5-8 8.5h8c0-5-8-5-8-8.5s8-3.5 8-8.5z" {...s} fill={C.cream} /><path d="M10 18.5h4l-2-2.5z" fill={C.honey} /></>,
   backpack: <><path d="M6.5 9.5a5.5 5.5 0 0 1 11 0v9a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2z" {...s} fill={C.sage} /><path d="M9 4.8V3.5h6v1.3" {...s} fill="none" /><rect x="9" y="13" width="6" height="4.5" rx="1" {...s} fill={C.cream} /></>,
   paws: <><g fill={C.bear} stroke={INK} strokeWidth="1.2"><ellipse cx="7" cy="15" rx="2.6" ry="2.2" /><circle cx="4.6" cy="11.6" r="1" /><circle cx="7" cy="10.6" r="1" /><circle cx="9.4" cy="11.6" r="1" /><ellipse cx="17" cy="10" rx="2.6" ry="2.2" /><circle cx="14.6" cy="6.6" r="1" /><circle cx="17" cy="5.6" r="1" /><circle cx="19.4" cy="6.6" r="1" /></g></>,
+  speakerOff: <><path d="M11 5 6 9H3v6h3l5 4V5Z" {...s} fill={C.cream} /><path d="m16 9 6 6m0-6-6 6" {...s} strokeWidth="2.4" fill="none" /></>,
   speaker: <><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" {...s} fill={C.honey} /><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" {...s} fill="none" /></>,
   heart: <path d="M12 19.5s-7.5-4.6-7.5-9.6A4.1 4.1 0 0 1 12 7.6a4.1 4.1 0 0 1 7.5 2.3c0 5-7.5 9.6-7.5 9.6z" {...s} fill={C.rose} />,
   balloon: <><ellipse cx="12" cy="9.5" rx="5.5" ry="6.5" {...s} fill={C.sky} /><path d="M11 16h2l-1 1.8z" {...s} fill={C.sky} /><path d="M12 17.8c-1 1.5 1 2.4 0 4" {...s} fill="none" /><path d="M9.6 6.6a3 3 0 0 1 2-1.6" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" fill="none" /></>,

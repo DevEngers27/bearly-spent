@@ -129,3 +129,13 @@ test("F3: validated trip action rejects malformed bodies and old destination-bas
   assert.equal(actions.adventure(legacy, { destId: "san_francisco" }).destId, "san_francisco");
   assert.equal(legacy.child.points, 300 - catalog.PLACES.san_francisco.cost);
 });
+
+
+test("F36.5: postcard articles", () => {
+  for (const [destId, article] of [["acadia_national_park", "an"], ["arches_national_park", "an"], ["seattle", "a"], ["yosemite_national_park", "a"]]) {
+    const db = fresh();
+    db.adventures.push({ id: "grammar", destId, status: "away", returnsAt: now, postcardIds: [] });
+    game.finalizeAdventures(db, now);
+    assert.equal(db.notifications.at(-1).text, `Maple is home with ${article} ${catalog.PLACES[destId].name} postcard!`);
+  }
+});
