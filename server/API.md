@@ -1,6 +1,6 @@
-# MoneyQuest server API (B5a)
+# MoneyQuest server API
 
-This is the contract for B5b. The server requires Node >=22.9 (built-in `node:sqlite` and the existing env-file flags). Launch/reset scripts include `--experimental-sqlite` for early Node 22 compatibility. For direct test commands on Node 22.9–22.12, use `NODE_OPTIONS=--experimental-sqlite node --test server/*.test.js`; later supported versions can run `node --test server/*.test.js`. See [Node 22.9 SQLite docs](https://nodejs.org/download/release/v22.9.0/docs/api/sqlite.html) for the flag requirement. Run `npm run dev` or `npm start` with your environment; neither command enables demo mode automatically. `.env.example` sets `MQ_DEMO=1`. Storage is `MQ_DATA_DIR/moneyquest.sqlite`, default `data/moneyquest.sqlite`.
+This is the API contract for the v0.4.0 release candidate; the cookie-based client is implemented in `client/src`. The server requires Node >=22.9 (built-in `node:sqlite` and the existing env-file flags). Launch/reset scripts include `--experimental-sqlite` for early Node 22 compatibility. For direct test commands on Node 22.9–22.12, use `NODE_OPTIONS=--experimental-sqlite node --test server/*.test.js`; later supported versions can run `node --test server/*.test.js`. See [Node 22.9 SQLite docs](https://nodejs.org/download/release/v22.9.0/docs/api/sqlite.html) for the flag requirement. Run `npm run dev` or `npm start` with your environment; neither command enables demo mode automatically. `.env.example` sets `MQ_DEMO=1`. Storage is `MQ_DATA_DIR/moneyquest.sqlite`, default `data/moneyquest.sqlite`.
 
 ## Conventions and authentication
 
@@ -16,7 +16,7 @@ Auth levels in the tables:
 - **Parent**: parent session; also requires a current unlock when the family has a PIN.
 - **Locked parent**: parent session, available before PIN unlock.
 
-Parents select a child with `?child=<id>` on authenticated routes; the default is the first-created child. Paired child sessions can select only their bound child. `GET /api/auth/me?child=<id>` returns the selection but does not change a server-side active-child setting. B5b should retain the selected ID and send it with each request. `/api/parent/children/:id/link` uses the path ID as its pairing target. Keep `?child=` consistent if also present.
+Parents select a child with `?child=<id>` on authenticated routes; the default is the first-created child. Paired child sessions can select only their bound child. `GET /api/auth/me?child=<id>` returns the selection but does not change a server-side active-child setting. The client retains the selected ID and sends it with each request. `/api/parent/children/:id/link` uses the path ID as its pairing target. Keep `?child=` consistent if also present.
 
 Request bodies must be JSON objects, at most **32 KB**. Strings are trimmed unless stated otherwise; ordinary notes/titles/reasons/memos cap at **120 characters**, identifiers at **64**, bear and child names at **24**, parent names at **64**, chat/speech at **500**. Passwords are untrimmed, 8–1024 characters when registering. Emails are trimmed/lowercased and at most 254 characters. Booleans must be JSON booleans. Numeric fields accept finite numbers or numeric strings; whole-number fields reject fractions. Money in requests is **dollars**, rounded to cents; money in responses and stored documents is **integer cents**. Optional fields may be omitted, not sent as null (except cosmetic unequip).
 
@@ -64,7 +64,7 @@ A paired child receives only its own summary in `children`; a parent receives al
 | `GET /api/parent/children/:id/devices` | Parent | No fields | Array of active paired child devices: `{id,created_at,last_seen,name}`. Times in Unix milliseconds; `name` is a short user-agent description. IDs are separate opaque digests, not session tokens or stored credential hashes. |
 | `DELETE /api/parent/children/:id/devices/:sessionId` | Parent | No fields | `{ok:true}`; revokes only that child's device within this family. Unknown child/device: 404. Requires PIN unlock when set. |
 
-New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Each child currently has its own funding account; shared family funding is a follow-up. The simulated `DIRECTORY` friend codes remain available through `/api/child/friend`; these are practice friends, not real multiplayer. `friendView` is unchanged and never contains money.
+New children start with zero balances, zero points, no transactions, postcards, adventures, linked friends or pending approvals, and a zero-dollar allowance. They keep the starter wardrobe/bee, empty activity lists and the example bicycle savings goal. Parents must configure allowance. Each child currently has its own funding account; shared family funding is a follow-up. New non-demo families cannot add funding through the current UI/API because top-ups are demo-only; configuring allowance alone does not fund it. The simulated `DIRECTORY` friend codes remain available through `/api/child/friend`; these are practice friends, not real multiplayer. `friendView` is unchanged and never contains money.
 
 PIN is an optional quick switch **inside a parent-authenticated device**, not a way to obtain a parent session on a paired child device. If a PIN is already set, changing it requires an unlocked parent session. A new password login starts locked until `/api/parent/unlock`. Child routes remain available from that parent session.
 
@@ -76,11 +76,11 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | `GET /api/parent/state` | Parent | `?child=`, `?before=<message-id>` optional | `ParentState` below. `before` is an exclusive chat cursor; unknown/pruned cursor returns 400. |
 | `GET /api/stream` | Child | `?child=` for parent | SSE, described below. |
 
-`ChildState` fields:
+`ChildState` fields (game calendar keys use the selected child document's `settings.timezone`, falling back to the server zone):
 
 | Field | Shape |
 | --- | --- |
-| `childId`, `version`, `now`, `offline`, `budgetDoneThisWeek` | Selected ID, child document version, server Unix milliseconds, `false`, boolean |
+| `childId`, `version`, `now`, `dayKey`, `weekKey`, `offline`, `budgetDoneThisWeek` | Selected ID, child document version, server Unix milliseconds, zoned `YYYY-MM-DD`, ISO `YYYY-Www`, `false`, boolean |
 | `child` | `{name, age, points, bear, ownedCosmetics, milestonesUnlocked, stats, lessonsDone, ...progressMarkers}`; bear has `name, hat, eyes, neck, outfit, held, friend, background`; stats have `savingsActions, learningDone, tracked, budgetsDone, adventures` |
 | `balances` | `{savings, spending}` in cents |
 | `goals` | `[{id, title, icon?, target, createdAt, weeksLeft}]`; weeksLeft can be null when nothing is saved weekly |
@@ -96,7 +96,7 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | `pendingRequests` | Pending child-visible `{id, kind, title}` approvals |
 | `plan` | Null or `{summary, steps, weeklySave, goalId, updatedAt, reason?, offline?}` |
 | `chat` | Last 30, oldest first; `{id, role, text, ts, redacted?, tools?, auto?}` |
-| `settings` | `{requireTradeApproval, buddyEnabled, coopChallenge}` |
+| `settings` | `{requireTradeApproval, buddyEnabled, coopChallenge, timezone?}`; timezone is an IANA name stored per child |
 | `catalog` | `{places, home, lessons, cosmetics, milestones, points, trip, greetings}`. Lessons omit answer keys; hidden places omit their name/image, expose `{rarity:"secret", hidden:true, clue, lon, lat}` until discovered. Visible places include `image, open, lockReason, progress`. Cosmetics include `unlocked`. |
 | `integrations` | `{buddy:"claude"|"offline", voice:"cartesia"|"browser", bank:"nessie"|"simulated"}` |
 
@@ -157,7 +157,7 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | `POST /api/parent/mission` | `{title,points?}` | Mission `{id,title,points,status,createdBy,createdAt}`; integer 5–100 points (default catalog parent points). |
 | `POST /api/parent/allowance` | Partial `{amount?,savePct?,spendLimit?,rewardDestination?}` | `{ok:true}`; amount $0–$100, savePct integer 0–100, spendLimit $0–$10,000, destination `spending` or `savings`. |
 | `POST /api/parent/funding/add` | `{amount,note?:string}` | `{ok:true}`; $1–$1,000, optional trimmed note up to 120 characters. Any family; PIN unlock required when set. Records a `funding_in` transaction (`external` → `parent`) for the selected child's funding account, with memo from note or `Added by <parentName>`. Audits `Recorded $X added to <childName>'s funding — real money stays with you`. No child notification; funding entries/notes stay in parent state. Clears parent-funded escalations so allowance/rewards can pay on the next Guardian pass (including the post-action pass). No route-specific rate limit; normal body limits apply. |
-| `POST /api/parent/settings` | Partial `{requireTradeApproval?,buddyEnabled?,coopChallenge?}` | `{ok:true}`; strict booleans. Disabling Buddy cancels this child's queued/in-flight replans. |
+| `POST /api/parent/settings` | Partial `{requireTradeApproval?,buddyEnabled?,coopChallenge?,timezone?}` | `{ok:true}`; strict booleans; timezone must be a valid IANA name. Disabling Buddy cancels this child's queued/in-flight replans. |
 | `POST /api/parent/savings-goal` | Partial `{title?,target?}` | `{ok:true}`; updates first savings goal, target $1–$10,000. |
 
 ## Demo controls
@@ -172,7 +172,7 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | `POST /api/parent/allowance/run-now` | Parent, demo enabled, demo family only | No fields | `{ok:true}`; fast-forward selected child's allowance while preserving overdue periods; rejects an already-paid current day; `demo_allowance_run` audit. |
 | `POST /api/parent/topup` | Parent, demo enabled, demo family only | `{amount}` | **Demo-only**; `{ok:true}`; $0.01–$1,000 to selected child's simulated parent funding account; `demo_topup` audit. Real families receive 404; use `POST /api/parent/funding/add` to record money set aside. |
 
-All four demo controls require demo mode and the demo family; real families receive 404 even when demo mode is enabled. These controls are not real bank deposits. `npm run reset` explicitly enables demo mode for that command and resets only the demo child in SQLite; it does not delete any family's database.
+All four demo controls require demo mode and the demo family; real families receive 404 even when demo mode is enabled. These controls are not real bank deposits. `npm run reset` explicitly enables demo mode for that command and resets only the demo child in SQLite; it does not delete any family's database. Stop the API before using the CLI reset and restart afterward: a running process caches documents and can write its old copy back. Use `POST /api/parent/reset` for a live demo reset, which also cancels queued/in-flight Buddy work for the selected child.
 
 On first startup an existing `MQ_DATA_DIR/db.json` is imported as the demo child/family before optional demo-account creation, then renamed `db.json.imported`. The legacy plaintext PIN is discarded. Malformed legacy files stop initialization and are left untouched. Import does not overwrite an already-existing demo family. When demo mode is disabled, imported progress remains stored and demo login is unavailable; enable demo mode to access that legacy demo family.
 
@@ -186,6 +186,6 @@ Retention per child: tracking **500**, audit **2000**, transactions **5000**, Bu
 
 Nessie defaults to `https://api.nessieisreal.com`. With `NESSIE_API_KEY` configured, an insecure URL prevents startup unless `NESSIE_ALLOW_HTTP=1` explicitly permits local development. Mirrors and asynchronous audit callbacks retain the originating child's context. The local simulated ledger remains authoritative; no real money moves. Live external service availability was not exercised by the server tests.
 
-Passwords and PINs use `scrypt$32768$8$1$<16-byte-salt-base64>$<64-byte-key-base64>` with constant-time verification. The optional family timezone is stored in SQLite and returned by `/api/auth/me`; this batch does not alter the existing game/calendar reward rules.
+Passwords and PINs use `scrypt$32768$8$1$<16-byte-salt-base64>$<64-byte-key-base64>` with constant-time verification. The registration timezone is stored on the SQLite family row and returned by `/api/auth/me`. Game/calendar rules currently use each child document's `settings.timezone`, falling back to the server zone. The parent UI initializes a missing child setting from the browser and edits it through `/api/parent/settings`; changing it does not update the family row or siblings.
 
-The old `POST /api/parent/login` PIN-to-token flow and `x-parent-token` header are removed. B5b must implement account login/register, cookie auth, pairing, active-child selection, PIN unlock and logout using the routes above.
+The old `POST /api/parent/login` PIN-to-token flow and `x-parent-token` header are removed. The client implements account login/register, cookie auth, pairing, active-child selection, PIN unlock/reset, device unlinking and family-wide logout using the routes above.
