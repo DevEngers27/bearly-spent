@@ -598,6 +598,13 @@ function DressSheet({ state, run, close, busy }) {
           <button key={k} role="tab" aria-selected={slot === k} className={slot === k ? "on" : ""} onClick={() => { setSlot(k); setPurchase(null); }}>{label}</button>
         ))}
       </div>
+      {purchase && <div className="paper-card" role="group" aria-live="polite" aria-label="Buy clothing">
+        <p>Spend {purchase.cost} points on the {purchase.label}? You have {state.child.points}.</p>
+        <div className="btn-row">
+          <button className="btn honey" disabled={busy || state.child.points < purchase.cost} onClick={async () => { if (await run("child/cosmetic/buy", { id: purchase.id }, `Unlocked ${purchase.label}!`)) setPurchase(null); }}>{state.child.points < purchase.cost ? `Earn ${purchase.cost - state.child.points} more points` : "Buy"}</button>
+          <button className="btn" disabled={busy} onClick={() => setPurchase(null)}>Not now</button>
+        </div>
+      </div>}
       <div className="swatches">
         {slot !== "background" && (
           <button disabled={busy} className={`swatch none ${!bear[slot] ? "on" : ""}`} onClick={() => run("child/cosmetic/equip", { kind: slot, value: null })}>
@@ -620,13 +627,6 @@ function DressSheet({ state, run, close, busy }) {
           );
         })}
       </div>
-      {purchase && <div className="paper-card" role="group" aria-label="Buy clothing">
-        <p>Spend {purchase.cost} points on the {purchase.label}? You have {state.child.points}.</p>
-        <div className="btn-row">
-          <button className="btn honey" disabled={busy || state.child.points < purchase.cost} onClick={async () => { if (await run("child/cosmetic/buy", { id: purchase.id }, `Unlocked ${purchase.label}!`)) setPurchase(null); }}>{state.child.points < purchase.cost ? `Earn ${purchase.cost - state.child.points} more points` : "Buy"}</button>
-          <button className="btn" disabled={busy} onClick={() => setPurchase(null)}>Not now</button>
-        </div>
-      </div>}
       <p className="fine">Savings milestones unlock special items forever. Spending never takes them away.</p>
     </Sheet>
   );
