@@ -55,7 +55,7 @@ export function apiUrl(path, includeChild = true) {
   return `/api/${path}${selection ? `${query ? "&" : "?"}child=${encodeURIComponent(selectedChild)}` : ""}`;
 }
 
-// Shared by JSON and audio requests so every authenticated route handles expiry.
+// Every authenticated request handles expiry.
 export async function apiResponse(path, body, { includeChild = true, handleUnauthorized = true, method, bearerToken } = {}) {
   const version = identityVersion;
   const url = apiUrl(path, includeChild);
@@ -106,9 +106,9 @@ export async function api(path, body, options) {
       navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage({ type: "mq:cache-art", images })).catch(() => {});
     }
   }
-  // Lock changes authentication, not game state. Refreshing a departing parent
-  // view here would immediately request protected state with the new lock.
-  if (path.split("?")[0] !== "parent/lock" && (body !== undefined || options?.method === "DELETE")) window.dispatchEvent(new Event("mq:changed"));
+  // Lock and logout change authentication, not game state. Refreshing a departing
+  // view here would immediately request protected state with the changed session.
+  if (!["parent/lock", "auth/logout", "auth/logout-all"].includes(path.split("?")[0]) && (body !== undefined || options?.method === "DELETE")) window.dispatchEvent(new Event("mq:changed"));
   return data;
 }
 

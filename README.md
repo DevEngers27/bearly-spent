@@ -25,7 +25,7 @@ cp .env.example .env
 
 The template sets `MQ_DEMO=1`. Welcome then shows **Try the demo family**, or you can sign in as **demo@moneyquest.test / demo-pass-1234**. The demo has Mia and Maple, $20 savings, $10 spending, $250 funding, 500 points and two Chicago postcards. There is **no default parent PIN**. Disable `MQ_DEMO` for a deployment without demo login and demo controls.
 
-API keys are optional: without them, the server uses the simulated bank, a rule-based Buddy and browser speech. This still needs a running local API; it does not make chat work without a network connection. Set optional Claude, Nessie and Cartesia keys in `.env`; see [.env.example](.env.example). `ADVENTURE_SECONDS` defaults to **60**.
+API keys are optional: without them, the server uses the simulated bank, a rule-based Buddy. This still needs a running local API; it does not make chat work without a network connection. Set optional Claude and Nessie keys in `.env`; see [.env.example](.env.example). `ADVENTURE_SECONDS` defaults to **60**.
 
 For a production build and a single app origin:
 
@@ -56,13 +56,13 @@ Choose **Create family** on Welcome. Enter the parent's name, email, password (a
 - **Add money:** Parent → Allowance → Add money records funding for the selected child so allowance and approved rewards can be paid in the ledger; it does not move real money.
 - **End access:** Sign out ends the current parent session. Security → **Sign out everywhere** asks for confirmation, then revokes every parent and kid session in the family, including the current device. Kid devices need new codes afterward. Other families stay signed in.
 
-Passwords and PINs are salted **scrypt** hashes. Sessions use **HttpOnly, SameSite=Lax** cookies (`Secure` in production/HTTPS); only token hashes are stored server-side. Parent sessions slide for 30 days, with a 90-day maximum; paired kid sessions last 180 days. Login, registration, pairing, PIN attempts, Buddy and voice have rate limits. Per-child retention caps are **200 chat messages, 500 diary entries, 2,000 audit entries, 5,000 transactions and 200 notifications per recipient**. Cached child state is stored on the device for offline reading, so use a trusted device and clear site data when retiring it.
+Passwords and PINs are salted **scrypt** hashes. Sessions use **HttpOnly, SameSite=Lax** cookies (`Secure` in production/HTTPS); only token hashes are stored server-side. Parent sessions slide for 30 days, with a 90-day maximum; paired kid sessions last 180 days. Login, registration, pairing, PIN attempts, Buddy have rate limits. Per-child retention caps are **200 chat messages, 500 diary entries, 2,000 audit entries, 5,000 transactions and 200 notifications per recipient**. Cached child state is stored on the device for offline reading, so use a trusted device and clear site data when retiring it.
 
 ## Two-minute demo
 
 Start with a fresh demo child; the full five-lesson walkthrough may take longer than two minutes.
 
-1. **Parent → Goals & tasks:** Create a $5 reward goal counting all five remaining money lessons **before** doing lessons. Only first passes after goal creation count. The count cannot exceed unpassed lessons; if some are already done, lower the count or choose tasks/saving actions.
+1. **Parent → Goals & tasks:** Create a $5 reward goal counting five of the fifteen money lessons **before** doing lessons. Only first passes after goal creation count. The count cannot exceed unpassed lessons; if some are already done, lower the count or choose tasks/saving actions.
 2. **Parent → Children:** Generate a kid code and link a second browser profile/device through **I have a kid code**. Keep the parent view open for live approvals. Alternatively, set a PIN in Security and use Kid mode on the shared device.
 3. **Kid → Missions:** Pass the five different lessons. **Parent → Approvals:** approve the $5 reward. With the demo's default reward destination, savings go from **$20 to $25**, unlocking the **bow tie**. In Kid → Home → Dress up → Neckwear, equip it. Replaying lessons gives no extra points or goal progress.
 4. **Kid → Home → Save money:** Choose **$2** and press **Save it** three times, waiting for each response. The amount stays filled in; savings become **$31**, spending **$4**. Each transfer counts as a saving action, but saving points are awarded once per local day.
@@ -81,7 +81,7 @@ Start with a fresh demo child; the full five-lesson walkthrough may take longer 
 | Limits and calendar | `server/limits.js`, `server/time.js` | Process-local rate/concurrency/SSE limits; time-zone day keys and Monday–Sunday ISO weeks |
 | Game and catalog | `server/domain.js`, `server/catalog.js` | Lessons, goals, surprise draws, permanent milestones, wardrobe, practice friends and trades |
 | Ledger Guardian | `server/guardian.js`, `server/bank.js` | G1–G5 policies, cent-based idempotent simulated transfers and optional Nessie mirror |
-| Money Buddy and voice | `server/buddy.js`, `server/voice.js` | Four-tool Claude loop, redaction, output guard, rule-based fallback and optional Cartesia TTS |
+| Money Buddy | `server/buddy.js` | Four-tool Claude loop, redaction, output guard and rule-based text fallback |
 | Client | `client/src/App.jsx`, `Child.jsx`, `Parent.jsx`, `api.js` | React 18 account/child selection, talk on Home, parent console, cookie requests, SSE plus five-second polling |
 | Reveals and counts | `server/domain.js`, `server/index.js`, `client/src/Child.jsx` | Server `revealedAt` receipts across devices, local receipt retry, shared `metrics.postcards` for trip places versus all cards |
 | PWA and art | `client/public/sw.js`, `client/src/Bear.jsx`, `MapView.jsx`, `Postcard.jsx` | Built-shell cache, warmed art, layered bear poses, read-only map and illustrated flip cards |
@@ -117,12 +117,11 @@ The configured defaults are **claude-opus-5-5** with adaptive thinking at low ef
 | Friends | Practice friends, approval-gated linking and configurable trade approval | Friends' collections and team progress are simulated; no real multiplayer; friend views exclude balances, transactions and allowance |
 | Claude | Optional Messages/tool loop, redaction and Haiku output screening | Mock-tested; live-key service/model availability was not verified for this documentation pass |
 | Nessie | Optional asynchronous HTTPS sandbox mirror; local ledger remains authoritative; errors enter audit | Live sandbox unverified; best effort, not settlement or complete reconciliation; reversals are local only |
-| Cartesia | Optional 60-second TTS-only token, browser bytes request, then server proxy fallback (`sonic-3.6`, API version `2026-08-14`) | Mock coverage, no live-key verification; browser speech is the final fallback where supported |
 | Demo controls | Seeded balances, top-up, payday fast-forward, duplicate injection and reset | Available only to the demo family with `MQ_DEMO=1` |
 
 ### Offline postcards and icons
 
-After an online visit to the **production build**, the service worker caches the shell and hashed assets and warms available postcard/bear art. A paired kid device with a matching cached identity and `mq_last_state` can reload offline and read its cached album; wait for cache warming before disconnecting. API responses stay out of Cache Storage. Offline actions, chat and voice are disabled; fresh state replaces the snapshot on reconnect. A first visit or missing snapshot shows a retry screen. Parent data is not restored as an offline parent session.
+After an online visit to the **production build**, the service worker caches the shell and hashed assets and warms available postcard/bear art. A paired kid device with a matching cached identity and `mq_last_state` can reload offline and read its cached album; wait for cache warming before disconnecting. API responses stay out of Cache Storage. Offline actions and chat are disabled; fresh state replaces the snapshot on reconnect. A first visit or missing snapshot shows a retry screen. Parent data is not restored as an offline parent session.
 
 The UI uses hand-drawn SVGs in `client/src/Icons.jsx` plus illustrated PNGs. Custom icons can go in `client/public/icons/ui/<name>.png` and be registered in `CUSTOM`. The bear wardrobe has 26 illustrated items across hats, glasses, neckwear, outfits, bags, things to hold and little friends, plus three home scenes. Closet thumbnails preview the new shared-canvas art. Two-paw props temporarily hide outfits, neckwear and bags; putting them down brings those layers back. Travel and reveal poses show the plain bear. Existing saves retire removed cosmetics without point refunds, keep catalog-valid items and earned milestone rewards, and receive the free map, bee and forest scene.
 
@@ -132,7 +131,7 @@ The UI uses hand-drawn SVGs in `client/src/Icons.jsx` plus illustrated PNGs. Cus
 - Funding accounts are per child. New families start at zero; Add money records funding for ledger payouts, while demo-only top-ups simulate deposits.
 - Spending outside Apple Cash is manually recorded, and the cash diary does not change balances. Savings cannot yet be withdrawn or used for an actual purchase; Buddy's savings-purchase simulation is hypothetical.
 - Friends and their team contributions are simulated. Team progress has no completion reward, and some aspirational milestone effects in the catalog are not rendered.
-- Browser speech and press-and-hold recognition depend on browser support and permissions. External integration badges reflect configuration, not a successful live connection.
+- External integration badges reflect configuration, not a successful live connection.
 - [Apple Cash tracking](docs/apple-cash-shortcut.md) deducts purchases logged manually or by an iPhone Shortcut from the same funding account that covers allowance. Add money in Allowance; short-funded receipts wait in Inbox for Record now or Dismiss. MoneyQuest cannot send Apple Cash or read the actual Wallet balance. Check Wallet and avoid logging a purchase twice.
 
 ## Testing and review
@@ -405,7 +404,6 @@ Children who have less money should still be able to enjoy the game, unlock adve
 | **Anthropic** | Claude-powered age-appropriate financial guidance, adaptive missions, and financial reasoning |
 | **Meta — Bringing People Closer Together with AI** | Cooperative financial challenges and AI-supported family interactions, beyond basic friend lists |
 | **SpacetimeDB** | Real-time synchronization for social postcard exchange and shared challenges |
-| **Cartesia** | An interactive Maple voice companion, if voice becomes a core part of the experience |
 
 These are potential track matches, not guaranteed eligibility. Each sponsor's required technology must be used meaningfully.
 
@@ -431,7 +429,6 @@ For Cal Hacks, the goal is to deliver a polished, working prototype instead of a
 - Friend invitation and postcard trading.
 - More Maple customization.
 - Real-time collaborative financial missions.
-- Voice interaction using Cartesia.
 - Broader financial account integrations.
 
 ### Hackathon Demo Scenario

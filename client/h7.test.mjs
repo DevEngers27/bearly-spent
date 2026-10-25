@@ -164,7 +164,7 @@ test("H7.3 valid and invalid code receipts look alike; outgoing status advances 
     change(nodes(render(), (n) => n.type === "input")[0], valid ? "BCDF3467" : "ZZZZZZZZ");
     await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
     receipts.push(normalized(render()));
-    assert.equal(calls[0][2], "Sent! Your grown-up needs to say yes before it reaches your friend.");
+    assert.equal(calls[0][2], "Sent! Your grown-ups are checking.");
     assert.match(receipts.at(-1), /Waiting for your grown-up to say yes/);
     const reopened = harness("Child.jsx", { session: h.session });
     assert.match(normalized(reopened.render(reopened.exports.Friends, { state })), /Waiting for your grown-up to say yes/);

@@ -128,7 +128,7 @@ test("W4.2: a 12-line bubble scrolls above the fully grown bear at 390x844", asy
   const reply = Array.from({ length: 12 }, (_, i) => `Line ${i + 1}: try a small saving step.`).join("\n");
   const render = () => h.render(h.exports.SpeechBubble, { text: reply });
   render(); h.flush();
-  assert.equal(nodes(render(), (n) => n.props.className === "bear-bubble-text")[0].props.children[0], reply);
+  assert.equal(nodes(render(), (n) => n.props.className === "bear-bubble-text")[0].props.children[0].props.text, reply);
   const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
   const rule = (selector) => css.split(`${selector} {`)[1].split("}")[0];
   const px = (body, name) => Number(body.match(new RegExp(`(?:^|;)\\s*${name}: ([\\d.]+)px`))[1]);

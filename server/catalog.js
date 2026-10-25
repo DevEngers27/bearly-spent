@@ -139,7 +139,7 @@ export function bonusDiscoveries(destId, child, owned) {
   return out;
 }
 
-// Five short lessons = the "financial literacy challenges" a parent goal can require.
+// Short lessons = the "financial literacy challenges" a parent goal can require.
 export const LESSONS = [
   {
     id: "needs_wants", title: "Needs vs. Wants", icon: "basket",
@@ -180,6 +180,86 @@ export const LESSONS = [
       { q: "A budget is…", options: ["A plan for your money", "A kind of bank"], answer: 0 },
       { q: "If you spend more than you planned, you should…", options: ["Adjust your plan", "Give up"], answer: 0 },
       { q: "Saving a little every week is better than…", options: ["Saving nothing", "Saving a lot"], answer: 0 },
+    ],
+  },
+  {
+    id: "sales", title: "Sale Sleuth", icon: "magnifier",
+    questions: [
+      { q: "A $10 puzzle is 20% off. That saves $2. What do you pay before tax?", options: ["$2", "$8", "$12"], answer: 1 },
+      { q: "A sale toy costs $8. The same toy costs $7 elsewhere. Which costs less?", options: ["The $8 sale toy", "The $7 toy"], answer: 1 },
+      { q: "A sale ends today, but you don't need the item. What keeps your savings safe?", options: ["Skip it", "Buy it because the sale ends"], answer: 0 },
+    ],
+  },
+  {
+    id: "wait", title: "Sleep on It", icon: "hourglass",
+    questions: [
+      { q: "You suddenly want a $12 toy. What helps you decide calmly?", options: ["Buy before thinking", "Wait a day and check your plan"], answer: 1 },
+      { q: "You still want a book after a week and saved enough for it. What's a thoughtful next step?", options: ["Check your list and budget", "Buy two because you waited"], answer: 0 },
+      { q: "You save $4 each week toward a $16 game. Starting at $0, how long will it take?", options: ["2 weeks", "4 weeks", "8 weeks"], answer: 1 },
+    ],
+  },
+  {
+    id: "unit_price", title: "Price per Piece", icon: "abacus",
+    questions: [
+      { q: "Four pencils cost $2. What is the cost of each pencil?", options: ["50 cents", "$2", "$8"], answer: 0 },
+      { q: "Six identical pencils cost $3; four cost $4. Which has the lower price per pencil?", options: ["Four for $4", "Six for $3"], answer: 1 },
+      { q: "You need two apples. A big bag will spoil before you eat it. What should you compare?", options: ["Only the bag's size", "Cost and how much you'll use"], answer: 1 },
+    ],
+  },
+  {
+    id: "giving", title: "A Little to Share", icon: "gift",
+    questions: [
+      { q: "You plan $2 of your $10 allowance for giving. How much is left for other plans?", options: ["$8", "$10", "$12"], answer: 0 },
+      { q: "You want to help but have no money to give. What could you offer?", options: ["Promise money you don't have", "Time to help with a grown-up"], answer: 1 },
+      { q: "Someone online asks for a donation and your code. What should you do first?", options: ["Send the code so they can help", "Ask a trusted grown-up to check"], answer: 1 },
+    ],
+  },
+  {
+    id: "ads", title: "Ad Detective", icon: "magnifier",
+    questions: [
+      { q: "An ad says a toy will make everyone like you. What is the ad trying to do?", options: ["Make you want to buy", "Promise real friendships"], answer: 0 },
+      { q: "An ad says 'Only today!' What helps you decide?", options: ["Hurry so you don't miss out", "Pause and compare with your plan"], answer: 1 },
+      { q: "A big picture makes a tiny toy look huge. What can you check with a grown-up?", options: ["The real size and details", "Only the bright picture"], answer: 0 },
+    ],
+  },
+  {
+    id: "big_goal", title: "Small Steps, Big Goal", icon: "target",
+    questions: [
+      { q: "Your goal costs $30 and you have $10. How much more do you need?", options: ["$10", "$20", "$40"], answer: 1 },
+      { q: "You need $20 more and save $5 a week. How many weeks will that take?", options: ["4", "5", "10"], answer: 0 },
+      { q: "Your goal feels far away. What helps you keep going?", options: ["Track each small step", "Stop checking your savings"], answer: 0 },
+    ],
+  },
+  {
+    id: "tax_tips", title: "More than the Price Tag", icon: "basket",
+    questions: [
+      { q: "A notebook is $5 and sales tax adds 40 cents. What is the total?", options: ["$4.60", "$5", "$5.40"], answer: 2 },
+      { q: "Lunch costs $10 including tax. You plan a $2 tip with your grown-up. Total?", options: ["$10", "$12", "$8"], answer: 1 },
+      { q: "You have exactly the price on a toy's tag. What should you check before buying?", options: ["Whether tax adds to the total", "Whether the tag is colorful"], answer: 0 },
+    ],
+  },
+  {
+    id: "borrowing", title: "Borrow with Care", icon: "heart",
+    questions: [
+      { q: "A friend lends you a book until Friday. What is a fair plan?", options: ["Keep it until they ask", "Care for it and return it Friday"], answer: 1 },
+      { q: "You can't return a borrowed game on time. What should you do?", options: ["Tell your friend and agree on a new day", "Wait quietly until they forget"], answer: 0 },
+      { q: "A friend asks to borrow your saved money. You feel unsure. What can you do?", options: ["Say yes so they won't be upset", "Say no and talk to your grown-up"], answer: 1 },
+    ],
+  },
+  {
+    id: "money_safe", title: "Keep It Safe", icon: "lock",
+    questions: [
+      { q: "You find a wallet at school. Who can help return it safely?", options: ["A trusted teacher", "Someone in an online chat"], answer: 0 },
+      { q: "A message asks for your kid sign-in code. What should you do?", options: ["Send it if they seem friendly", "Keep it private and tell your grown-up"], answer: 1 },
+      { q: "You're taking $5 to a school fair. What helps you keep track of it?", options: ["A secure pocket and a plan", "Leave it loose on a table"], answer: 0 },
+    ],
+  },
+  {
+    id: "fair_swaps", title: "A Fair Swap", icon: "swap",
+    questions: [
+      { q: "Your friend offers a postcard swap. What makes it fair?", options: ["Both understand and freely agree", "One friend decides for both"], answer: 0 },
+      { q: "A postcard is special to you. Your friend wants it. What can you say?", options: ["I have to swap if you want it", "I'd like to keep this one"], answer: 1 },
+      { q: "Before a swap, you notice a card has a torn corner. What should happen?", options: ["Hide it until after the swap", "Point it out before anyone agrees"], answer: 1 },
     ],
   },
 ];

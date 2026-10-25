@@ -4,6 +4,7 @@
 // that cannot move money: `update_savings_plan` (shown on the dashboard) and
 // `propose_mission` (goes to the parent's approval queue). When no API key is
 // configured, a small deterministic fallback keeps the demo working.
+import { LESSONS } from "./catalog.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { readChild, mutateChild, childIdFor, uid } from "./store.js";
 import { audit, notify, weeksToGoal, currentGoal, ensureDailyMissions, missionsToday, GameError } from "./domain.js";
@@ -86,6 +87,7 @@ export function snapshot(db) {
     allowance_saved_percent: db.allowance.savePct,
     next_allowance_date: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(db.allowance.nextRun)),
     purchase_limit_without_parent: dollars(db.allowance.spendLimit),
+    lessons: { finished: db.child.lessonsDone.length, total: LESSONS.length },
     adventure_points: db.child.points,
     savings_goals: goals,
     parent_goals: db.parentGoals.filter((g) => g.status === "active").map((g) => ({ title: g.title, progress: `${g.progress}/${g.count}`, reward: dollars(g.reward) })),
@@ -222,6 +224,7 @@ Content rules:
 - If the child steers toward these topics, respond with one gentle sentence, suggest talking to a trusted grown-up when it is a safety topic, then return to money or the bear without discussing the unsafe details.
 
 How to talk:
+- Use at most bold and short bullet lists, no headings, tables or links.
 - Use short sentences and words a ${db.child.age}-year-old knows. Keep replies under 70 words unless they ask for more. One emoji at most.
 - Be warm and encouraging, never shaming. Spending on reasonable things is fine; help them see trade-offs, then let them choose.
 - Use real numbers from their account. Call get_snapshot before giving number-based advice, and simulate_purchase whenever they ask about buying something. Never make up balances.

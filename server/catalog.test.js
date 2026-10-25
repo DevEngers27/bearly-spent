@@ -260,9 +260,9 @@ test("five lesson replays award only 20 total points and one goal and coop step"
   passLesson(db, LESSONS[0]);
   assert.equal(laterGoal.progress, 0);
   for (const lesson of LESSONS.slice(1)) passLesson(db, lesson);
-  assert.equal(db.child.points, before + 100);
-  assert.equal(db.child.stats.learningDone, 5);
-  assert.equal(db.child.coopLearning, 5);
+  assert.equal(db.child.points, before + LESSONS.length * 20);
+  assert.equal(db.child.stats.learningDone, LESSONS.length);
+  assert.equal(db.child.coopLearning, LESSONS.length);
   assert.equal(goal.status, "awaiting_approval");
   assert.equal(db.approvals.filter((a) => a.goalId === goal.id).length, 1);
 });

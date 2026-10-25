@@ -20,12 +20,12 @@ Auth levels in the tables:
 
 Parents select a child with `?child=<id>` on authenticated routes; the default is the first-created child. Paired child sessions can select only their bound child. `GET /api/auth/me?child=<id>` returns the selection but does not change a server-side active-child setting. The client retains the selected ID and sends it with each request. `/api/parent/children/:id/link` uses the path ID as its pairing target. Keep `?child=` consistent if also present.
 
-Request bodies must be JSON objects, at most **32 KB**. Strings are trimmed unless stated otherwise; ordinary notes/titles/reasons/memos cap at **120 characters**, identifiers at **64**, bear and child names at **24**, parent names at **64**, chat/speech at **500**. Passwords are untrimmed, 8–1024 characters when registering. Emails are trimmed/lowercased and at most 254 characters. Booleans must be JSON booleans. Numeric fields accept finite numbers or numeric strings; whole-number fields reject fractions. Money in requests is **dollars**, rounded to cents; money in responses and stored documents is **integer cents**. Optional fields may be omitted, not sent as null (except cosmetic unequip).
+Request bodies must be JSON objects, at most **32 KB**. Strings are trimmed unless stated otherwise; ordinary notes/titles/reasons/memos cap at **120 characters**, identifiers at **64**, bear and child names at **24**, parent names at **64**, chat at **500**. Passwords are untrimmed, 8–1024 characters when registering. Emails are trimmed/lowercased and at most 254 characters. Booleans must be JSON booleans. Numeric fields accept finite numbers or numeric strings; whole-number fields reject fractions. Money in requests is **dollars**, rounded to cents; money in responses and stored documents is **integer cents**. Optional fields may be omitted, not sent as null (except cosmetic unequip).
 
-Every API response has `Cache-Control: no-store` (SSE adds `no-transform`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `Permissions-Policy: camera=(), microphone=(self)`. The static app and API receive this CSP:
+Every API response has `Cache-Control: no-store` (SSE adds `no-transform`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `Permissions-Policy: camera=(), microphone=()`. The static app and API receive this CSP:
 
 ```text
-default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.cartesia.ai https://fonts.googleapis.com https://fonts.gstatic.com
+default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com
 ```
 
 ## Accounts, pairing and PIN
@@ -109,7 +109,8 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | `chat` | Last 30, oldest first; `{id, role, text, ts, redacted?, tools?, auto?}` |
 | `settings` | `{requireTradeApproval, buddyEnabled, coopChallenge, timezone?}`; timezone is an IANA name stored per child |
 | `catalog` | `{places, home, lessons, cosmetics, milestones, points, trip, greetings}`. Lessons omit answer keys; hidden places omit their name/image, expose `{rarity:"secret", hidden:true, clue, lon, lat}` until discovered. Visible places include `image, open, lockReason, progress`. Cosmetics include `unlocked`. |
-| `integrations` | `{buddy:"claude"|"offline", voice:"cartesia"|"browser", bank:"nessie"|"simulated"}` |
+| `lessons` | `{next,finished,total}`; fifteen lessons in catalog order. `next` contains up to five unpassed lesson objects; `finished` contains passed review objects. Objects include zero-based `order` and questions without answers, also in `catalog.lessons`. First passes award `POINTS.lesson` once; reviews never award points or progress. |
+| `integrations` | `{buddy:"claude"|"offline", bank:"nessie"|"simulated"}` |
 
 `ParentState` extends `ChildState` and overrides/adds:
 
@@ -157,8 +158,6 @@ All routes below have **Child** auth and support parent `?child=` selection. Unl
 | `POST /api/child/greet` | `{friendId,index}` | `{ok:true}`; predefined greeting index 0 through `catalog.greetings.length-1`, approved friend. |
 | `POST /api/child/notifications/read` | No fields | `{ok:true}`; marks only child notifications read. |
 | `POST /api/buddy/chat` | `{text}` | `{reply,toolsUsed}`; nonempty <=500 characters, Buddy enabled. 30/hour/child and only 1 in flight/child; returns 429 while Buddy is thinking. Redacts PII, retains Haiku screening for live replies. |
-| `POST /api/buddy/speak` | `{text}` | `audio/mpeg` bytes; nonempty <=500 characters, Buddy enabled. 60/hour/child; 404 if Cartesia not configured. |
-| `POST /api/voice/token` | No fields | `{token,version,request:{model_id,voice,output_format,language,generation_config}}`; Buddy enabled, 20/10 minutes/child; 404 without Cartesia. `token` is Cartesia's short-lived TTS-only token, not the MoneyQuest session. |
 
 Wardrobe slots are `hat`, `eyes`, `neck`, `outfit`, `bag`, `held`, `friend`, `background`. The catalog has 26 illustrated items and three scenes. New children own `held:map`, `friend:bee_friend`, and `background:forest`; only the bee and forest start equipped. Buying equips that item, including bags; unknown or retired IDs are rejected. A held map, magnifying glass, leaf umbrella or mug replaces the front bear image and temporarily hides outfit, neckwear and bag layers without unequipping them. Other poses show the plain bear.
 
@@ -302,21 +301,13 @@ challenges are available only in the demo; real families start with no friends.
 `POST /api/child/friend {code}` sends a real friend request and always returns
 `{ok:true,message:"Request sent"}` for a syntactically valid string, including
 unrecognized/self/duplicate codes. No target name, family, bear or postcards are
-returned. The initiating child's submission counts as their yes. Its parent sees
-a `friend_request` approval with an anonymous title. After that parent approves,
-state advances from `pending_parent_a` to `pending_parent_b`; the recipient
-parent sees the requester's first name and family label, and the recipient kid
-sees only the first name and Accept/Decline. Recipient kid and parent can say yes
-in either order. Both parents use `POST /api/parent/approval/:id`. All four yeses
-are necessary for `approved`. Either decline closes both records with only
-“didn't go through” notices, without sharing private reasons.
+returned. The initiating child's submission counts as their yes. Both parents immediately get an Inbox approval and bell notification; the receiving child gets an anonymous bell notice and pending friend card. The receiving side sees no sender name or family label until the sender's parent approves. Its anonymous Inbox title is “A child from another family wants to be friends with Ben — their grown-up is checking too” (using the child's first name). After sender-parent approval the existing card and bell notice gain the sender's first name and family label, and the kid gets a named notice. Both parent approvals and the receiving child's consent can arrive in any order; all three are required for `approved`. While sender-parent consent is missing the status is `pending_parent_a`, otherwise `pending_parent_b` until all consent is recorded. A decline closes both records without sharing private reasons.
 
 Pending friend views expose `{id,real:true,status,incoming,childAccepted}` plus
-only the incoming requester's first name. Approved views add `name` (first name),
+the incoming requester's first name and `familyLabel` only after sender-parent approval. Approved views add `name` (first name),
 `bear` (cosmetic slots only), `postcards` (place IDs, repeated for counts), and
-`greetings` and `metrics.postcards:{places,cards,total}`; the metrics use the same trip-place and physical-card counts as the owner view. They never expose money, family name, peer child IDs or friend codes.
-Parent state uses these same friend views. Recipient pending requests are hidden
-until the initiating parent approves. Friend approval titles in child state omit
+`greetings` and `metrics.postcards:{places,cards,total}`; the metrics use the same trip-place and physical-card counts as the owner view. They never expose money, peer child IDs or friend codes. Only the consented family display label is shared.
+Parent state uses these same friend views. Recipient pending requests are visible anonymously until the initiating parent approves. Friend approval titles in child state omit
 family labels.
 
 `POST /api/child/trade {friendId,give,get}` requires an accepted friendship and
@@ -358,8 +349,7 @@ The child UI keeps an identical “Request sent” receipt for valid and invalid
 Outgoing requests show “Waiting for your grown-up to say yes” at `pending_parent_a`,
 then “Sent to your friend's family” at `pending_parent_b`, then the approved friend.
 A local session receipt supplies the same first status for an invalid code, without
-revealing whether it matched. The requester parent is notified to approve in
-Approvals; approval sends the request to the other family, which must also agree.
+revealing whether it matched. The requester parent is notified to check the request in Inbox. The other family receives an anonymous request immediately and must also agree.
 The Children section retains kid-code status in family-scoped session storage,
 including “Linked ✓”, when leaving and reopening the section.
 ### Daily missions (H2)
@@ -411,3 +401,9 @@ call retries once after 800 ms, then returns the offline planner reply with
 “Ask <bear> again” to resend the original question. Successful Claude replies and
 no-key offline replies omit that flag. Disabling Buddy or changing/resetting the
 child document during the retry prevents stale replies from being saved.
+
+### H9 device sign-out and chat formatting
+
+Paired kids can use Me → This device → Sign out, then inline confirmation. A successful `POST /api/auth/logout` clears cached identity, selected child, navigation and per-child album/reveal keys, returns to Welcome and asks for a new kid code. A failed request retains the session and confirmation. Parent-session Kid mode keeps its Grown-ups lock switch.
+
+Chat is text only. Child transcript, typewritten speech bubble and parent Buddy log render paragraphs, line breaks, bold, italic, short ordered/unordered lists and inline code. Raw HTML is escaped, URLs remain text, and other syntax is left as text. No external rendering dependency is used.

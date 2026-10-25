@@ -103,7 +103,7 @@ test("child sessions are bound to one child and every parent route rejects them"
   assert.equal(readChild(other.body.id).child.bear.name, "Bear");
 });
 
-test("all game, Buddy, voice, stream and parent routes require a session", async () => {
+test("all game, Buddy, stream and parent routes require a session", async () => {
   const anonymous = device();
   for (const entry of routeActions.filter((r) => r.access !== "public")) {
     const url = entry.path.replace(":id", "test");
@@ -125,7 +125,7 @@ test("parent child selection keeps funding accounts, settings and mutations sepa
   assert.equal((await a.browser.call("GET", `/api/auth/me?child=${id}`)).body.activeChild.id, id);
   await a.browser.call("POST", `/api/parent/settings?child=${id}`, { buddyEnabled: false });
   assert.equal(readChild(a.id).settings.buddyEnabled, true);
-  for (const path of ["/api/buddy/chat", "/api/buddy/speak", "/api/voice/token"]) {
+  for (const path of ["/api/buddy/chat"]) {
     assert.equal((await a.browser.call("POST", `${path}?child=${id}`, { text: "Hello" })).status, 400);
   }
   assert.ok(!readChild(id).audit.some((a) => a.action === "demo_topup"));
@@ -291,15 +291,9 @@ test("Buddy replans and cancellation are keyed per child, including tools and gu
   assert.ok(!readChild(a.id).audit.some((a) => a.action === "buddy_guard_blocked"));
 });
 
-test("voice, speech, login and registration fixed windows use the specified scopes and limits", async () => {
+test("login and registration fixed windows use the specified scopes and limits", async () => {
   const a = await family("a"), b = await family("b");
   const now = Date.now();
-  for (const [path, max, duration] of [["/api/buddy/speak", 60, HOUR], ["/api/voice/token", 20, 10 * MINUTE]]) {
-    for (let i = 0; i < max; i++) assert.equal((await a.browser.call("POST", path, { text: "Hi" }, { now })).status, 404);
-    assert.equal((await a.browser.call("POST", path, { text: "Hi" }, { now })).status, 429);
-    assert.equal((await b.browser.call("POST", path, { text: "Hi" }, { now })).status, 404);
-    assert.equal((await a.browser.call("POST", path, { text: "Hi" }, { now: now + duration })).status, 404);
-  }
   for (let i = 0; i < 5; i++) assert.equal((await device(`ip-${i}`).call("POST", "/api/auth/login", { email: "a@example.test", password: "bad" }, { now })).status, 401);
   assert.equal((await device("new-ip").call("POST", "/api/auth/login", { email: " A@example.test ", password: "bad" }, { now })).status, 429);
   for (let i = 0; i < 10; i++) takeLimit("loginIp", "blocked-ip", now);
@@ -342,7 +336,7 @@ test("Express enforces the 32 KB JSON body cap and API headers on parser and rou
     assert.equal(result.headers["cache-control"], "no-store");
     assert.equal(result.headers["x-content-type-options"], "nosniff");
     assert.equal(result.headers["referrer-policy"], "no-referrer");
-    assert.equal(result.headers["permissions-policy"], "camera=(), microphone=(self)");
+    assert.equal(result.headers["permissions-policy"], "camera=(), microphone=()");
     assert.match(result.headers["content-security-policy"], /default-src 'self'/);
   }
   const unknown = await device().call("GET", "/api/unknown");

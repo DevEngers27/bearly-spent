@@ -92,7 +92,7 @@ test("G3 Friends real empty state has code form, no practice hints or coop, and 
   assert.equal(input.props.maxLength, 8);
   input.props.onChange({ target: { value: "bcdf3467" } });
   await nodes(render(), (n) => n.type === "form")[0].props.onSubmit(submit);
-  assert.equal(JSON.stringify(calls[0]), JSON.stringify(["child/friend", { code: "BCDF3467" }, "Sent! Your grown-up needs to say yes before it reaches your friend."]));
+  assert.equal(JSON.stringify(calls[0]), JSON.stringify(["child/friend", { code: "BCDF3467" }, "Sent! Your grown-ups are checking."]));
   assert.equal(nodes(render(), (n) => n.type === "input")[0].props.value, "");
 });
 

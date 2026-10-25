@@ -11,7 +11,7 @@ import * as catalog from "../server/catalog.js";
 import { childView } from "../server/index.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
-  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, speak, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog, Devices, WalletLedger, AppleCashTracking", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
+  const extra = { "Child.jsx": "Home, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet, TalkBar, useMapleTalk, SpeechBubble, ReturnReveal, Album, countdown, BearFigure, FlipPostcard, PostcardTile", "Parent.jsx": "Overview, Goals, SavingsGoal, Allowance, Activity, Inbox, Guardian, Settings, Children, Security, BuddyLog, Devices, WalletLedger, AppleCashTracking", "App.jsx": "PinGate, Loading, AuthScreen, ChildRoot, ParentRoot, setSelectedChild" }[name];
   const result = await build({
     stdin: { contents: await readFile(new URL(`src/${name}`, import.meta.url), "utf8") + (extra ? `\nexport { ${extra} };` : ""), resolveDir: new URL("src/", import.meta.url).pathname, loader: "jsx" },
     bundle: true, write: false, format: "cjs", external: ["react"], jsxFactory: "h", jsxFragment: "Fragment", define: { "import.meta.env.PROD": "false" },
@@ -68,7 +68,7 @@ function nodes(tree, predicate) {
   if (!tree || typeof tree !== "object") return [];
   return [...(predicate(tree) ? [tree] : []), ...(tree.props?.children || []).flatMap((c) => nodes(c, predicate))];
 }
-const text = (tree) => typeof tree === "string" || typeof tree === "number" ? String(tree) : (tree?.props?.children || []).map(text).join(" ");
+const text = (tree) => tree?.type?.name === "Markdown" ? text(tree.type(tree.props)) : typeof tree === "string" || typeof tree === "number" ? String(tree) : (tree?.props?.children || []).map(text).join(" ");
 const byText = (tree, label) => nodes(tree, (n) => n.type === "button" && text(n).replace(/\s+/g, " ").trim().includes(label))[0];
 const noop = () => {};
 const submit = { preventDefault() {} };
@@ -460,7 +460,7 @@ test("B5b: cookies and selected child reach actions, state, chat cursors and aud
   const h = harness("api.js"), requests = [];
   h.fetch = async (url, options) => { requests.push({ url, options }); return new Response("{}"); };
   h.exports.setSelectedChild("child two");
-  for (const [path, body] of [["state"], ["parent/goal", { title: "Read" }], ["parent/state?before=msg-1"], ["voice/token", {}], ["buddy/speak", { text: "Hi" }], ["auth/me"], ["auth/login", { email: "a@b.test", password: "password" }]]) await h.exports.api(path, body);
+  for (const [path, body] of [["state"], ["parent/goal", { title: "Read" }], ["parent/state?before=msg-1"], ["auth/me"], ["auth/login", { email: "a@b.test", password: "password" }]]) await h.exports.api(path, body);
   for (const { url, options } of requests) {
     assert.equal(options.credentials, "same-origin");
     assert.deepEqual(Object.keys(options.headers), ["Content-Type"]);
@@ -1126,9 +1126,8 @@ test("F6: talk guards Buddy-off, away and offline with warm bubbles and no reque
   }
 });
 
-test("F6: one talk request sets thinking then happy, safety replies rest, and mute persists", async () => {
+test("F6: one talk request sets thinking then happy, safety replies rest, with text replies", async () => {
   const h = harness("Child.jsx"), state = stateFixture();
-  h.storage.set("mq_muted", "true");
   let finish, calls = 0;
   const props = { state, run: () => { calls++; return new Promise((r) => { finish = r; }); } };
   let talk = h.render(h.exports.useMapleTalk, props); h.flush();
@@ -1142,7 +1141,6 @@ test("F6: one talk request sets thinking then happy, safety replies rest, and mu
   const safety = talk.send("Hi"); finish({ reply: "Hmm, let's talk about your savings." }); await safety;
   talk = h.render(h.exports.useMapleTalk, props);
   assert.equal(talk.mood, "resting");
-  talk.toggleMute(); assert.equal(h.storage.get("mq_muted"), "false");
 });
 
 test("F6: going away during a reply closes the bar and ignores the stale reply", async () => {
@@ -1158,22 +1156,13 @@ test("F6: going away during a reply closes the bar and ignores the stale reply",
   assert.equal(talk.isOpen, false); assert.equal(talk.bubble, "");
 });
 
-test("F6: talk bar offers exactly three suggestions, conditional hold-to-talk and transcript link", () => {
+test("F6: talk bar offers exactly three suggestions, text input and transcript link", () => {
   const h = harness("Child.jsx"), state = stateFixture();
   const props = { state, talk: { close: noop, send: async () => false }, open: noop };
   let tree = h.render(h.exports.TalkBar, props);
   assert.equal(nodes(tree, (n) => n.props.className === "chip").length, 3);
   assert.ok(byText(tree, "Can I buy a toy for $8?"));
   assert.equal(nodes(tree, (n) => n.props["aria-label"] === "Hold to talk").length, 0);
-  let session, stopped = 0;
-  h.window.SpeechRecognition = class { constructor() { session = this; } start() {} stop() { stopped++; } };
-  tree = h.render(h.exports.TalkBar, props);
-  const mic = nodes(tree, (n) => n.props["aria-label"] === "Hold to talk")[0];
-  mic.props.onPointerDown({ preventDefault: noop, currentTarget: {} });
-  session.onresult({ results: [[{ transcript: "My little saving plan" }]] });
-  tree = h.render(h.exports.TalkBar, props);
-  assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value, "My little saving plan");
-  mic.props.onPointerUp(); assert.equal(stopped, 1);
   assert.ok(byText(tree, "See our chat"));
   const chat = harness("Child.jsx");
   tree = chat.render(chat.exports.Buddy, { state, startTalk: noop });
@@ -1182,32 +1171,7 @@ test("F6: talk bar offers exactly three suggestions, conditional hold-to-talk an
   assert.ok(byText(tree, "Talk to Maple"));
 });
 
-test("F6: speech tries Cartesia token then proxy then browser; muted reply sends no voice requests", async () => {
-  const h = harness("Child.jsx"), calls = [], spoken = [];
-  h.window.speechSynthesis = { cancel: noop, speak: (u) => spoken.push(u.text) };
-  h.fetch = async (url) => { calls.push(url); return new Response("unavailable", { status: 503 }); };
-  await h.exports.speak("A little saving!", "cartesia");
-  assert.deepEqual(calls, ["/api/voice/token", "/api/buddy/speak"]);
-  assert.deepEqual(spoken, ["A little saving!"]);
-  calls.length = 0; spoken.length = 0;
-  h.storage.set("mq_muted", "true");
-  const props = { state: stateFixture(), run: async () => ({ reply: "A little saving!" }) };
-  let talk = h.render(h.exports.useMapleTalk, props); h.flush();
-  await talk.send("Hi");
-  assert.equal(calls.length, 0); assert.equal(spoken.length, 0);
-});
 
-test("F6: late voice fallback is suppressed after mute or leaving the turn", async () => {
-  const h = harness("Child.jsx"), spoken = [];
-  h.window.speechSynthesis = { cancel: noop, speak: (u) => spoken.push(u.text) };
-  let enabled = true, finish;
-  h.fetch = () => new Promise((r) => { finish = r; });
-  const speech = h.exports.speak("A late reply", "cartesia", () => enabled);
-  enabled = false;
-  finish(new Response("unavailable", { status: 503 }));
-  await speech;
-  assert.equal(spoken.length, 0);
-});
 
 test("F3 / F6: reduced motion shows postcard picture and full polite bubble immediately", () => {
   const h = harness("Child.jsx"), state = stateFixture();
@@ -1219,7 +1183,7 @@ test("F3 / F6: reduced motion shows postcard picture and full polite bubble imme
   tree = bubble.render(bubble.exports.SpeechBubble, { text: "Here is a little plan." }); bubble.flush();
   tree = bubble.render(bubble.exports.SpeechBubble, { text: "Here is a little plan." });
   assert.equal(tree.props["aria-live"], "polite");
-  assert.equal(nodes(tree, (n) => n.props["aria-hidden"] === "true" && n.type === "span")[0].props.children[0], "Here is a little plan.");
+  assert.equal(nodes(tree, (n) => n.props.className === "bear-bubble-text")[0].props.children[0].props.text, "Here is a little plan.");
   const bear = harness("Child.jsx");
   tree = bear.render(bear.exports.BearFigure, { bear: state.child.bear, mood: "thinking" });
   assert.match(tree.props.className, /pose-threeQuarter mood-thinking/);
@@ -1399,18 +1363,6 @@ test("F36.6: intrinsic stamp width", async () => {
   assert.match(css, /\.stamp\s*\{[^}]*width:\s*fit-content;[^}]*justify-self:\s*start/);
 });
 
-test("F36.7: legible sound toggle", () => {
-  for (const muted of [false, true]) {
-    const h = harness("Child.jsx"), state = stateFixture();
-    let toggles = 0;
-    const tree = h.render(h.exports.TalkBar, { state, talk: { muted, toggleMute: () => toggles++, close: noop }, open: noop });
-    const button = nodes(tree, (n) => n.type === "button" && n.props["aria-label"] === (muted ? "Sound off" : "Sound on"))[0];
-    assert.equal(button.props["aria-pressed"], muted);
-    assert.equal(button.props.title, muted ? "Sound off" : "Sound on");
-    assert.equal(nodes(button, (n) => n.type?.name === "Icon")[0].props.name, muted ? "speakerOff" : "speaker");
-    button.props.onClick(); assert.equal(toggles, 1);
-  }
-});
 
 test("F36.8: visible map clues", () => {
   for (const open of [true, false]) {
@@ -1451,9 +1403,9 @@ test("D2: impossible lesson goals ask a grown-up and zero remaining never sugges
   const parent = harness("Parent.jsx");
   state.child.lessonsDone = catalog.LESSONS.slice(0, 3).map((l) => l.id);
   let goals = parent.render(parent.exports.Goals, { state });
-  assert.match(text(goals), /2\s+lessons remaining/);
+  assert.match(text(goals), /12\s+lessons remaining/);
   const count = nodes(goals, (n) => n.type === "input" && n.props.type === "number")[0];
-  assert.equal(count.props.max, 2);
+  assert.equal(count.props.max, catalog.LESSONS.length - 3);
   let request;
   goals = parent.render(parent.exports.Goals, { state, run: (...args) => { request = args; } });
   byText(goals, "Cancel").props.onClick();
@@ -1655,11 +1607,11 @@ test("W2.1: optional cross-origin font failure never rejects service-worker inst
   for (const asset of ["/", "/assets/app.js", "/assets/app.css", "https://fonts.googleapis.com/ok"]) assert.ok(w.entries.has(new URL(asset, "https://moneyquest.test").href));
 });
 
-test("W2.2: paired kids have no sign-out callback or floating pill", async () => {
+test("W2.2: paired kids have a sheet sign-out callback and no floating pill", async () => {
   const h = await appHarness(meFixture("child"));
   const tree = h.tree();
   assert.equal(nodes(tree, (n) => n.type?.name === "SignOut").length, 0);
-  assert.equal(nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.onSignOut, undefined);
+  assert.equal(typeof nodes(tree, (n) => n.type?.name === "ChildRoot")[0].props.onSignOut, "function");
   const root = harness("App.jsx");
   root.fetch = async () => new Response(JSON.stringify(stateFixture()));
   root.render(root.exports.ChildRoot, { childId: "child-one", toast: noop }); root.flush();
@@ -2057,7 +2009,7 @@ test("W3.2: a 12-line reply stays in a bordered bubble with a separate inner scr
   render(); h.flush();
   const tree = render();
   const content = nodes(tree, (n) => n.props.className === "bear-bubble-text")[0];
-  assert.equal(content.props.children[0], reply);
+  assert.equal(content.props.children[0].props.text, reply);
   assert.ok(tree.props.children.includes(content), "text is inside the border-owning element");
   assert.equal(nodes(tree, (n) => n.type === "svg").length, 0, "no scaled outline ending above the last line");
   const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
@@ -2166,6 +2118,6 @@ test("W3.6: money inputs offer decimal keyboards while lesson counts stay numeri
     const decimal = nodes(tree, (n) => n.type === "input" && n.props.inputMode === "decimal");
     assert.equal(decimal.length, expected, component);
     assert.ok(decimal.every((n) => n.props.type === "number"));
-    if (component === "Goals") assert.equal(nodes(tree, (n) => n.type === "input" && n.props.value === 5 && n.props.max === 5)[0].props.inputMode, undefined);
+    if (component === "Goals") assert.equal(nodes(tree, (n) => n.type === "input" && n.props.value === catalog.LESSONS.length && n.props.max === catalog.LESSONS.length)[0].props.inputMode, undefined);
   }
 });

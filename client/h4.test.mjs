@@ -124,7 +124,7 @@ test("H4.2 bubble close button, outside scene, Escape and talk-bar close dismiss
   const state = stateFixture(), h = harness("Child.jsx");
   const props = { state, run: async () => ({ reply: "Hello Mia!" }) };
   const talk = () => h.render(h.exports.useMapleTalk, props);
-  talk(); h.flush(); talk().toggleMute(); talk().open();
+  talk(); h.flush(); talk().open();
   await talk().send("Hello");
   assert.equal(talk().bubble, "Hello Mia!");
   const messageId = talk().bubbleId;
@@ -278,7 +278,7 @@ test("H4.9 suggestions follow the current goal; friend card shows latest receive
   const h = harness("Child.jsx"), state = stateFixture();
   state.goals = [{ id: "bike", title: "Bicycle", target: 5000, status: "archived" }, { id: "book", title: "Space book", target: 1000, status: "active" }];
   state.currentGoalId = "book";
-  const talk = { muted: true, close: noop, toggleMute: noop };
+  const talk = { close: noop };
   const render = () => h.render(h.exports.TalkBar, { state, talk });
   assert.match(text(render()), /When can I save \$10 for Space book/); assert.doesNotMatch(text(render()), /bike/i);
   state.goals[1].status = "archived";

@@ -938,7 +938,11 @@ function coopProgress(db) {
 /** What a friend is allowed to see. Never includes money. */
 export function friendView(f) {
   if (f.real) {
-    if (f.status !== "approved") return { id: f.id, real: true, status: f.status, incoming: !f.initiator, childAccepted: f.childAccepted, ...(f.initiator ? {} : { name: firstName(readChild(f.peerId)) }) };
+    if (f.status !== "approved") {
+      const peer = !f.initiator && readChild(f.peerId);
+      const consented = peer && peer.friends.some((a) => a.id === f.id && a.initiator && a.parentAccepted);
+      return { id: f.id, real: true, status: f.status, incoming: !f.initiator, childAccepted: f.childAccepted, ...(consented ? { name: firstName(peer), familyLabel: familyLabel(f.peerId) } : {}) };
+    }
     const peer = readChild(f.peerId);
     const bear = Object.fromEntries(["name", "hat", "eyes", "neck", "outfit", "held", "friend", "background"].map((key) => [key, peer.child.bear[key]]));
     return { id: f.id, real: true, status: f.status, name: firstName(peer), bear, postcards: peer.postcards.map((p) => p.defId), metrics: { postcards: postcardMetrics(peer) }, greetings: f.greetings || [] };
@@ -1009,10 +1013,14 @@ function advanceFriend(docs, friends) {
   const a = friends[aIndex], b = friends[1 - aIndex];
   const status = !a.parentAccepted ? "pending_parent_a" : !b.parentAccepted || !b.childAccepted ? "pending_parent_b" : "approved";
   friends.forEach((f) => { f.status = status; });
-  if (a.parentAccepted && !docs[1 - aIndex].approvals.some((r) => r.real && r.socialId === a.id)) {
-    const sender = docs[aIndex], recipient = docs[1 - aIndex];
-    socialApproval(recipient, "friend_request", b, `${firstName(sender)} (from ${childIdFor(sender) ? familyLabel(childIdFor(sender)) : `${sender.family.parentName}'s family`}) wants to be friends with ${firstName(recipient)}`);
-    notify(recipient, "child", `${firstName(sender)} wants to be friends`, "info");
+  const sender = docs[aIndex], recipient = docs[1 - aIndex];
+  let card = recipient.approvals.find((r) => r.real && r.socialId === a.id);
+  if (!card) card = socialApproval(recipient, "friend_request", b, `A child from another family wants to be friends with ${firstName(recipient)} — their grown-up is checking too`);
+  if (a.parentAccepted) {
+    card.title = `${firstName(sender)} (from ${familyLabel(childIdFor(sender))}) wants to be friends with ${firstName(recipient)}`;
+    for (const n of recipient.notifications.filter((n) => n.to === "parent" && n.ref === card.id)) n.text = card.title;
+    if (!b.nameRevealed) notify(recipient, "child", `${firstName(sender)} wants to be friends`, "info");
+    b.nameRevealed = true;
   }
   if (status === "approved") docs.forEach((d, i) => {
     notify(d, "child", `You and ${firstName(docs[1 - i])} are now friends!`, "celebrate");
@@ -1021,7 +1029,7 @@ function advanceFriend(docs, friends) {
 }
 
 export function socialFriendsView(d) {
-  return d.friends.filter((f) => (isDemoChild(d) || f.real) && !["declined", "removed"].includes(f.status) && !(f.real && !f.initiator && f.status === "pending_parent_a")).map(friendView);
+  return d.friends.filter((f) => (isDemoChild(d) || f.real) && !["declined", "removed"].includes(f.status)).map(friendView);
 }
 
 export function socialTradesView(d) {
@@ -1064,7 +1072,9 @@ export function runSocialAction(childId, action, input, recordId, now = Date.now
       const b = { ...common, peerId: childId, initiator: false, childAccepted: false };
       d.friends.push(a);
       peer.friends.push(b);
-      socialApproval(d, "friend_request", a, `${firstName(d)} wants to add a friend`, "Approving sends the request to the other family; they also have to agree", `${firstName(d)} wants to add a friend — approve it in Approvals to send the request`);
+      socialApproval(d, "friend_request", a, `${firstName(d)} wants to add a friend`, "Both grown-ups and the other child need to say yes. Your child’s name stays private until you approve.", `${firstName(d)} wants to add a friend — check the request in your Inbox`);
+      socialApproval(peer, "friend_request", b, `A child from another family wants to be friends with ${firstName(peer)} — their grown-up is checking too`);
+      notify(peer, "child", "Someone sent you a friend request — your grown-ups are checking", "info");
       audit(d, "child", "friend_requested", "Friend request sent");
       return { ok: true, message: "Request sent" };
     }
@@ -1136,7 +1146,6 @@ export function runSocialAction(childId, action, input, recordId, now = Date.now
       audit(d, "parent", approve ? "approved" : "declined", `${approve ? "Approved" : "Declined"}: ${approval.title}`);
     } else {
       if (records[0].initiator || records[0].childAccepted) throw unavailable();
-      if (!isTrade && records[0].status === "pending_parent_a") throw unavailable();
       records[0].childAccepted = approve;
     }
     if (!approve) {

@@ -12,7 +12,6 @@ import { actions } from "./actions.js";
 import { dayKey, weekKey } from "./time.js";
 import * as auth from "./auth.js";
 import { takeLimit, withChat, openFamilyStream } from "./limits.js";
-import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
 import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, TRIP, placeStatus } from "./catalog.js";
 
@@ -84,6 +83,7 @@ function walletSummary(db, now) {
 
 export function childView(db, now = Date.now()) {
   game.normalizeGoals(db);
+  const lessons = LESSONS.map((l, order) => ({ ...l, order, questions: l.questions.map(({ q, options }) => ({ q, options })) }));
   const todayMissions = game.missionsToday(db, now);
   const day = dayKey(now, db.settings.timezone);
   const week = weekKey(now, db.settings.timezone);
@@ -123,6 +123,7 @@ export function childView(db, now = Date.now()) {
     parentGoals: db.parentGoals,
     missions: db.missions,
     missionsToday: todayMissions,
+    lessons: { next: lessons.filter((l) => !db.child.lessonsDone.includes(l.id)).slice(0, 5), finished: lessons.filter((l) => db.child.lessonsDone.includes(l.id)), total: lessons.length },
     transactions: db.transactions.filter((t) => t.kind !== "funding_in" && (t.from !== "parent" || t.to !== "parent")).slice(-30).reverse(),
     notifications: db.notifications.filter((n) => n.to === "child").slice(-20).reverse(),
     adventures: db.adventures.slice(-10).reverse().map(({ destId, ...adventure }) => adventure.status === "away" ? adventure : { ...adventure, destId }),
@@ -140,14 +141,14 @@ export function childView(db, now = Date.now()) {
       places,
       home: HOME,
       // Answers stay on the server.
-      lessons: LESSONS.map((l) => ({ ...l, questions: l.questions.map(({ q, options }) => ({ q, options })) })),
+      lessons,
       cosmetics: COSMETICS.map((c) => ({ ...c, unlocked: game.cosmeticUnlocked(db, c) })),
       milestones: MILESTONES,
       points: POINTS,
       trip: TRIP,
       greetings: game.isDemoChild(db) ? game.GREETINGS : game.GREETINGS.filter((g) => !/team challenge/i.test(g)),
     },
-    integrations: { buddy: buddyMode(), voice: voiceEnabled() ? "cartesia" : "browser", bank: nessieEnabled() ? "nessie" : "simulated" },
+    integrations: { buddy: buddyMode(), bank: nessieEnabled() ? "nessie" : "simulated" },
   };
 }
 
@@ -347,24 +348,6 @@ register("POST", "/api/child/notifications/read", "child", (req, ctx, res, now) 
 });
 register("POST", "/api/buddy/chat", "child", (req, ctx, res, now) => actions.chat(readChild(ctx.childId), req.body,
   (text) => withChat(ctx.childId, () => chat(ctx.childId, text), now)));
-function buddyEnabled(childId) {
-  if (!readChild(childId).settings.buddyEnabled) throw new GameError("Money Buddy is turned off by your grown-up");
-}
-register("POST", "/api/buddy/speak", "child", async (req, ctx, res, now) => {
-  buddyEnabled(ctx.childId);
-  const text = actions.speakText(null, req.body);
-  takeLimit("speak", ctx.childId, now);
-  if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
-  const audio = await synthesize(text);
-  res.set("Content-Type", "audio/mpeg").send(audio);
-  return SENT;
-});
-register("POST", "/api/voice/token", "child", async (req, ctx, res, now) => {
-  buddyEnabled(ctx.childId);
-  takeLimit("voice", ctx.childId, now);
-  if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
-  return { token: await mintAccessToken(), version: CARTESIA_VERSION, request: voiceConfig() };
-});
 for (const action of ["approval", "goal", "mission", "allowance", "settings", "savingsGoal", "fundingAdd"]) {
   const path = action === "fundingAdd" ? "funding/add" : action === "savingsGoal" ? "savings-goal" : action === "approval" ? "approval/:id" : action;
   register("POST", `/api/parent/${path}`, "parent", (req, ctx, res, now) => {
@@ -420,8 +403,8 @@ register("POST", "/api/parent/reset", "parent", (req, ctx) => {
 export const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
-  "Permissions-Policy": "camera=(), microphone=(self)",
-  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.cartesia.ai https://fonts.googleapis.com https://fonts.gstatic.com",
+  "Permissions-Policy": "camera=(), microphone=()",
+  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
 };
 
 async function execute(entry, req, res, now) {

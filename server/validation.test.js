@@ -342,11 +342,6 @@ test("chat rejects non-strings and long messages before calling Buddy", () => {
   rejectsUnchanged(db, () => actions.chat(db, { text: "Hello" }, () => assert.fail("disabled Buddy was called")));
 });
 
-test("speech text is validated without coercing objects or arrays", () => {
-  const db = fresh();
-  for (const text of [123, {}, [], null, "", "a".repeat(501)]) rejectsUnchanged(db, () => actions.speakText(db, { text }));
-  assert.equal(actions.speakText(db, { text: " Hello " }), "Hello");
-});
 
 test("legacy default-PIN login action is removed", () => {
   assert.equal(actions.login, undefined);

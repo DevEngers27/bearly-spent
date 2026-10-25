@@ -75,6 +75,7 @@ test("H2 client cap, weekly budget and lesson Review label preserve their separa
   const h = harness(), state = stateFixture();
   state.missionsToday = { active: [], done: [], doneCount: 6, cap: 6 };
   state.child.lessonsDone = [state.catalog.lessons[0].id];
+  state.lessons = childView({ ...seed(Date.now()), child: state.child }).lessons;
   state.child.lastBudgetWeek = state.weekKey;
   const tree = h.render(h.exports.Missions, { state, open: noop });
   assert.match(text(tree), /All done for today — amazing!/);

@@ -8,6 +8,7 @@ import { Icon } from "./Icons.jsx";
 const hadControllerAtLoad = Boolean(navigator.serviceWorker?.controller);
 
 export default function App() {
+  const [welcomeHint, setWelcomeHint] = useState("");
   const [me, setMe] = useState(null);
   const [view, setView] = useState("loading");
   const [demo, setDemo] = useState(false);
@@ -40,6 +41,7 @@ export default function App() {
     rememberSession(next);
     try { localStorage.setItem("mq_selected_child", activeChild.id); } catch {}
     setMe(next);
+    setWelcomeHint("");
     setError(null);
     const kidMode = next.role === "parent" && savedMode === "kid";
     const locked = next.role === "parent" && !kidMode && next.family.pinSet && (next.unlockedUntil <= Date.now() || savedMode === "locked");
@@ -160,6 +162,7 @@ export default function App() {
   }, [view, pinOpen, me?.role]);
   const signOut = async () => {
     await api("auth/logout", {});
+    setWelcomeHint(me?.role === "child" ? "You signed out. Ask your grown-up for a new kid code to come back." : "");
     welcomeDiscovery.current = false;
     welcome();
   };
@@ -227,8 +230,8 @@ export default function App() {
         </header>
       )}
       {view === "loading" && <Loading error={error} onRetry={() => retryAuth.current()} onGrownUps={cachedParentSession() ? backToGrownUps : undefined} />}
-      {!me && view !== "loading" && <AuthScreen key={view} screen={view} navigate={setView} demo={demo} onSession={acceptSession} error={error} />}
-      {me && view === "kid" && <ChildRoot key={me.activeChild.id} childId={me.activeChild.id} toast={toast} onGrownUps={me.role === "parent" ? enterParent : undefined} />}
+      {!me && view !== "loading" && <AuthScreen key={view} screen={view} navigate={setView} demo={demo} onSession={acceptSession} error={error} welcomeHint={welcomeHint} />}
+      {me && view === "kid" && <ChildRoot key={me.activeChild.id} childId={me.activeChild.id} toast={toast} onGrownUps={me.role === "parent" ? enterParent : undefined} onSignOut={me.role === "child" ? signOut : undefined} />}
       {me?.role === "parent" && view === "parent" && <ParentRoot key={me.activeChild.id} childId={me.activeChild.id} me={me} refreshMe={refreshMe} onSignOut={signOut} onSignOutAll={signOutAll} toast={toast} onConnection={setParentOffline} />}
       {me?.role === "parent" && pinOpen && <PinGate onOk={(result) => { setMe({ ...me, unlockedUntil: result.unlockedUntil }); setPinOpen(false); setView("parent"); }} onReset={async () => { await refreshMe(); setPinOpen(false); setView("parent"); }} onCancel={() => leaveParent()} />}
       <div className="toasts" aria-live="polite">
@@ -252,7 +255,7 @@ function SignOut({ onSignOut, toast }) {
   return <button className="pbtn" disabled={busy} onClick={() => run(onSignOut)}>Sign out</button>;
 }
 
-function ChildRoot({ childId, toast, onGrownUps }) {
+function ChildRoot({ childId, toast, onGrownUps, onSignOut }) {
   const { state, error, offline, refresh } = useLiveState("child", childId);
   const hasState = Boolean(state);
   const bearName = state?.child.bear.name;
@@ -260,7 +263,7 @@ function ChildRoot({ childId, toast, onGrownUps }) {
     if (offline && hasState) toast(offlineMessage(bearName));
   }, [offline, hasState, bearName, toast]);
   if (!state) return <Loading error={error} onRetry={refresh} onGrownUps={onGrownUps} />;
-  return <Child state={state} toast={toast} offline={offline} onGrownUps={onGrownUps} />;
+  return <Child state={state} toast={toast} offline={offline} onGrownUps={onGrownUps} onSignOut={onSignOut} />;
 }
 
 function ParentRoot({ childId, me, refreshMe, onSignOut, onSignOutAll, toast, onConnection }) {
@@ -270,7 +273,7 @@ function ParentRoot({ childId, me, refreshMe, onSignOut, onSignOutAll, toast, on
   return <Parent state={state} me={me} refreshMe={refreshMe} onSignOut={onSignOut} onSignOutAll={onSignOutAll} toast={toast} offline={offline} />;
 }
 
-function AuthScreen({ screen, navigate, demo, onSession, error }) {
+function AuthScreen({ screen, navigate, demo, onSession, error, welcomeHint }) {
   const [fields, setFields] = useState({ parentName: "", email: "", password: "", code: "" });
   const [children, setChildren] = useState([{ id: 0, name: "", age: "9", bearName: "" }]);
   const nextChildId = useRef(1);
@@ -302,6 +305,7 @@ function AuthScreen({ screen, navigate, demo, onSession, error }) {
         <h1>{screen === "welcome" ? "Welcome to MoneyQuest" : screen === "create" ? "Create your family" : screen === "link" ? "Your adventure starts here" : "Welcome back"}</h1>
         {screen === "welcome" ? <>
           <p>Save a little. Learn a lot. Grow together.</p>
+          {welcomeHint && <p role="status">{welcomeHint}</p>}
           {error && <p role="alert">Can't connect right now. Check your connection and try again.</p>}
           <button className="btn honey wide" onClick={() => navigate("signin")}>Sign in</button>
           <button className="btn sage wide" onClick={() => navigate("create")}>Create family</button>
