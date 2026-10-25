@@ -1,0 +1,98 @@
+// Validated route actions, kept separate from the listening HTTP server for tests.
+import * as game from "./domain.js";
+import { spendPolicy } from "./guardian.js";
+import { chat } from "./buddy.js";
+import { PLACES, POINTS } from "./catalog.js";
+import { money, integer, str, bool, id, oneOf, object } from "./validate.js";
+
+const action = (fn) => (db, body, ...args) => fn(db, object(body), ...args);
+const optionalNote = (body) => Object.hasOwn(body, "note") ? str(body.note, { required: false }) : "";
+
+export const actions = {
+  login: action((db, body) => {
+    if (typeof body.pin !== "string" || body.pin !== db.family.parentPin) throw new game.GameError("Wrong PIN", 401);
+  }),
+  save: action((db, body) => game.childSave(db, money(body.amount, { min: 100 }))),
+  spend: action((db, body) => game.childSpend(db, {
+    amount: money(body.amount, { min: 1 }), memo: str(body.memo),
+  }, spendPolicy)),
+  extra: action((db, body) => game.requestExtraAllowance(db, {
+    amount: money(body.amount, { min: 100, max: 5000 }), reason: str(body.reason),
+  })),
+  journal: action((db, body) => game.journal(db, {
+    direction: oneOf(body.direction, ["received", "spent", "saved"]), amount: money(body.amount), note: str(body.note),
+  })),
+  budget: action((db, body) => {
+    const allocations = object(body.allocations);
+    const validated = Object.fromEntries(Object.entries(allocations).map(([k, v]) => [k, money(v)]));
+    for (const key of ["save", "needs", "fun", "give"]) {
+      if (!Object.hasOwn(validated, key)) throw new game.GameError("Fill in every part of your budget");
+    }
+    return game.completeBudget(db, validated);
+  }),
+  lesson: action((db, body) => {
+    const lessonId = id(body.lessonId);
+    if (!Array.isArray(body.answers) || !body.answers.every((v) => Number.isInteger(v))) throw new game.GameError("Answer every question with a choice");
+    return game.completeLesson(db, lessonId, body.answers);
+  }),
+  missionDone: (db, missionId) => game.childMarkMissionDone(db, id(missionId)),
+  adventure: action((db, body) => game.startAdventure(db, id(body.destId))),
+  buyCosmetic: action((db, body) => game.buyCosmetic(db, id(body.id))),
+  equip: action((db, body) => game.equip(db, id(body.kind), body.value === null ? null : id(body.value))),
+  renameBear: action((db, body) => game.renameBear(db, str(body.name, { max: 24 }))),
+  friend: action((db, body) => game.friendView(game.addFriendByCode(db, id(body.code)))),
+  trade: action((db, body) => {
+    const friendId = id(body.friendId), give = id(body.give), get = id(body.get);
+    if (!Object.hasOwn(PLACES, give) || !Object.hasOwn(PLACES, get)) throw new game.GameError("Pick two postcards");
+    return game.proposeTrade(db, friendId, give, get);
+  }),
+  greet: action((db, body) => game.sendGreeting(db, id(body.friendId), integer(body.index, { max: game.GREETINGS.length - 1 }))),
+  chat: action((db, body, send = chat) => {
+    if (typeof body.text === "string" && !body.text.trim()) throw new game.GameError("Say something first!");
+    const text = str(body.text, { max: 500 });
+    if (!db.settings.buddyEnabled) throw new game.GameError("Money Buddy is turned off by your grown-up");
+    return send(text);
+  }),
+  speakText: action((db, body) => str(body.text, { max: 500 })),
+  approval: action((db, body, approvalId) => game.decide(db, id(approvalId), bool(body.approve), optionalNote(body))),
+  goal: action((db, body) => game.createParentGoal(db, {
+    title: str(body.title), type: oneOf(body.type, ["lessons", "tasks", "save_actions"]),
+    count: integer(body.count, { min: 1, max: 50 }), reward: money(body.reward, { max: 10000 }) / 100,
+  })),
+  mission: action((db, body) => game.createParentMission(db, {
+    title: str(body.title), points: Object.hasOwn(body, "points") ? integer(body.points, { min: 5, max: 100 }) : POINTS.parent,
+  })),
+  allowance: action((db, body) => {
+    const update = {};
+    if (Object.hasOwn(body, "amount")) update.amount = money(body.amount, { max: 10000 });
+    if (Object.hasOwn(body, "savePct")) update.savePct = integer(body.savePct, { max: 100 });
+    if (Object.hasOwn(body, "spendLimit")) update.spendLimit = money(body.spendLimit);
+    if (Object.hasOwn(body, "rewardDestination")) update.rewardDestination = oneOf(body.rewardDestination, ["spending", "savings"]);
+    const a = Object.assign(db.allowance, update);
+    game.audit(db, "parent", "allowance_updated", `Allowance ${(a.amount / 100).toFixed(2)}/wk, ${a.savePct}% saved, purchase limit $${(a.spendLimit / 100).toFixed(2)}`);
+  }),
+  topup: action((db, body) => {
+    const amount = money(body.amount, { min: 1, max: 100000 });
+    db.accounts.parent.balance += amount;
+    // Unblock anything the guardian escalated for lack of funds.
+    db.approvals.forEach((a) => {
+      if (a.escalatedAt && !a.paidTxnId) delete a.escalatedAt;
+      if (a.kind === "topup" && a.status === "pending") a.status = "approved";
+    });
+    game.audit(db, "parent", "topup", `Added $${(amount / 100).toFixed(2)} to the funding account (simulated deposit)`);
+  }),
+  settings: action((db, body) => {
+    const update = {};
+    for (const key of ["requireTradeApproval", "buddyEnabled", "coopChallenge"]) {
+      if (Object.hasOwn(body, key)) update[key] = bool(body[key]);
+    }
+    Object.assign(db.settings, update);
+    game.audit(db, "parent", "settings", `Updated settings: ${JSON.stringify(update)}`);
+  }),
+  savingsGoal: action((db, body) => {
+    const update = {};
+    if (Object.hasOwn(body, "title")) update.title = str(body.title);
+    if (Object.hasOwn(body, "target")) update.target = money(body.target, { min: 100 });
+    Object.assign(db.savingsGoals[0], update);
+  }),
+};

@@ -6,7 +6,7 @@
 // configured, a small deterministic fallback keeps the demo working.
 import Anthropic from "@anthropic-ai/sdk";
 import { read, mutate, uid } from "./store.js";
-import { audit, notify, weeksToGoal } from "./domain.js";
+import { audit, notify, weeksToGoal, GameError } from "./domain.js";
 
 const MODEL = process.env.BUDDY_MODEL || "claude-opus-5";
 const EFFORT = process.env.BUDDY_EFFORT || "low"; // kid chat: keep latency low
@@ -318,7 +318,7 @@ export function offlinePlan(db, reason) {
 // ------------------------------------------------------------------ public API
 export async function chat(userText) {
   const { text, found } = redact(String(userText || "").slice(0, 500));
-  if (!text.trim()) throw new Error("empty message");
+  if (!text.trim()) throw new GameError("Say something first!");
   mutate((d) => {
     d.buddy.chat.push({ id: uid("msg"), role: "user", text, ts: Date.now(), redacted: found });
     if (found.length) audit(d, "buddy", "pii_redacted", `Removed ${found.join(", ")} from the child's message before sending to the AI`);
