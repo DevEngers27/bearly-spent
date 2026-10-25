@@ -1,0 +1,189 @@
+{
+  "source": "watercolor_bear_character_turnaround.png / watercolor_bear_adventure_sticker_sheet.png",
+  "poses": {
+    "bear_front": {
+      "file": "bear/bear_front.png",
+      "size": [
+        394,
+        411
+      ]
+    },
+    "bear_side": {
+      "file": "bear/bear_side.png",
+      "size": [
+        391,
+        420
+      ]
+    },
+    "bear_back": {
+      "file": "bear/bear_back.png",
+      "size": [
+        388,
+        416
+      ]
+    },
+    "bear_three_quarter": {
+      "file": "bear/bear_three_quarter.png",
+      "size": [
+        372,
+        423
+      ]
+    }
+  },
+  "accessories": {
+    "round_glasses": {
+      "file": "accessories/round_glasses.png",
+      "size": [
+        340,
+        151
+      ]
+    },
+    "heart_glasses": {
+      "file": "accessories/heart_glasses.png",
+      "size": [
+        320,
+        150
+      ]
+    },
+    "red_bow_tie": {
+      "file": "accessories/red_bow_tie.png",
+      "size": [
+        240,
+        158
+      ]
+    },
+    "yellow_bow": {
+      "file": "accessories/yellow_bow.png",
+      "size": [
+        292,
+        184
+      ]
+    },
+    "knit_beanie": {
+      "file": "accessories/knit_beanie.png",
+      "size": [
+        264,
+        218
+      ]
+    },
+    "flower_sunhat": {
+      "file": "accessories/flower_sunhat.png",
+      "size": [
+        447,
+        219
+      ]
+    },
+    "ranger_hat": {
+      "file": "accessories/ranger_hat.png",
+      "size": [
+        377,
+        241
+      ]
+    },
+    "flower_crown": {
+      "file": "accessories/flower_crown.png",
+      "size": [
+        371,
+        241
+      ]
+    },
+    "striped_shirt": {
+      "file": "accessories/striped_shirt.png",
+      "size": [
+        359,
+        212
+      ]
+    },
+    "green_hoodie": {
+      "file": "accessories/green_hoodie.png",
+      "size": [
+        390,
+        237
+      ]
+    },
+    "red_scarf": {
+      "file": "accessories/red_scarf.png",
+      "size": [
+        336,
+        255
+      ]
+    },
+    "camera": {
+      "file": "accessories/camera.png",
+      "size": [
+        367,
+        237
+      ]
+    },
+    "magnifying_glass": {
+      "file": "accessories/magnifying_glass.png",
+      "size": [
+        205,
+        232
+      ]
+    },
+    "green_book": {
+      "file": "accessories/green_book.png",
+      "size": [
+        282,
+        256
+      ]
+    },
+    "picnic_basket": {
+      "file": "accessories/picnic_basket.png",
+      "size": [
+        293,
+        256
+      ]
+    },
+    "honey_jar": {
+      "file": "accessories/honey_jar.png",
+      "size": [
+        218,
+        256
+      ]
+    },
+    "mushroom": {
+      "file": "accessories/mushroom.png",
+      "size": [
+        217,
+        245
+      ]
+    },
+    "leaf_umbrella": {
+      "file": "accessories/leaf_umbrella.png",
+      "size": [
+        338,
+        280
+      ]
+    },
+    "adventure_map": {
+      "file": "accessories/adventure_map.png",
+      "size": [
+        379,
+        261
+      ]
+    },
+    "sleeping_cap": {
+      "file": "accessories/sleeping_cap.png",
+      "size": [
+        363,
+        260
+      ]
+    },
+    "bee_friend": {
+      "file": "accessories/bee_friend.png",
+      "size": [
+        363,
+        245
+      ]
+    },
+    "butterfly_friend": {
+      "file": "accessories/butterfly_friend.png",
+      "size": [
+        340,
+        273
+      ]
+    }
+  }
+}
