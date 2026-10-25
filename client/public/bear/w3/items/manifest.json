@@ -1,0 +1,390 @@
+{
+ "canvas": [
+  428,
+  414
+ ],
+ "base": "bear_front.png",
+ "note": "Every layer shares the base canvas: draw at x=0,y=0,width=100% of the front pose. Full-body items replace the base bear (they include the bear with its paw moved). Layers re-cut per region (v0.8.4): every piece re-registered against the base, halos and stray fragments removed.",
+ "slots": {
+  "hat": [
+   "explorer_hat",
+   "straw_hat",
+   "beanie",
+   "flower_crown",
+   "baseball_cap",
+   "sleep_cap"
+  ],
+  "eyes": [
+   "round_glasses",
+   "sunglasses"
+  ],
+  "neck": [
+   "red_scarf",
+   "checkered_scarf",
+   "bow_tie",
+   "bandana"
+  ],
+  "outfit": [
+   "explorer_jacket",
+   "raincoat",
+   "sweater",
+   "striped_shirt",
+   "overalls",
+   "cardigan"
+  ],
+  "bag": [
+   "camera",
+   "small_purse"
+  ],
+  "held": [
+   "map",
+   "magnifying_glass",
+   "leaf",
+   "mug"
+  ],
+  "friend": [
+   "butterfly_friend",
+   "bee_friend"
+  ]
+ },
+ "items": {
+  "explorer_hat": {
+   "file": "explorer_hat.png",
+   "slot": "hat",
+   "label": "Explorer hat",
+   "fullBody": false,
+   "bbox": [
+    39,
+    17,
+    397,
+    161
+   ],
+   "thumb": "thumbs/explorer_hat.png"
+  },
+  "straw_hat": {
+   "file": "straw_hat.png",
+   "slot": "hat",
+   "label": "Straw hat",
+   "fullBody": false,
+   "bbox": [
+    32,
+    18,
+    396,
+    162
+   ],
+   "thumb": "thumbs/straw_hat.png"
+  },
+  "beanie": {
+   "file": "beanie.png",
+   "slot": "hat",
+   "label": "Beanie",
+   "fullBody": false,
+   "bbox": [
+    71,
+    5,
+    363,
+    172
+   ],
+   "thumb": "thumbs/beanie.png"
+  },
+  "flower_crown": {
+   "file": "flower_crown.png",
+   "slot": "hat",
+   "label": "Flower crown",
+   "fullBody": false,
+   "bbox": [
+    57,
+    17,
+    382,
+    151
+   ],
+   "thumb": "thumbs/flower_crown.png"
+  },
+  "baseball_cap": {
+   "file": "baseball_cap.png",
+   "slot": "hat",
+   "label": "Baseball cap",
+   "fullBody": false,
+   "bbox": [
+    55,
+    10,
+    349,
+    140
+   ],
+   "thumb": "thumbs/baseball_cap.png"
+  },
+  "sleep_cap": {
+   "file": "sleep_cap.png",
+   "slot": "hat",
+   "label": "Sleep cap",
+   "fullBody": false,
+   "bbox": [
+    87,
+    6,
+    383,
+    180
+   ],
+   "thumb": "thumbs/sleep_cap.png"
+  },
+  "round_glasses": {
+   "file": "round_glasses.png",
+   "slot": "eyes",
+   "label": "Round glasses",
+   "fullBody": false,
+   "bbox": [
+    78,
+    90,
+    357,
+    192
+   ],
+   "thumb": "thumbs/round_glasses.png"
+  },
+  "sunglasses": {
+   "file": "sunglasses.png",
+   "slot": "eyes",
+   "label": "Heart sunglasses",
+   "fullBody": false,
+   "bbox": [
+    80,
+    111,
+    358,
+    195
+   ],
+   "thumb": "thumbs/sunglasses.png"
+  },
+  "red_scarf": {
+   "file": "red_scarf.png",
+   "slot": "neck",
+   "label": "Red scarf",
+   "fullBody": false,
+   "bbox": [
+    78,
+    168,
+    365,
+    354
+   ],
+   "thumb": "thumbs/red_scarf.png"
+  },
+  "checkered_scarf": {
+   "file": "checkered_scarf.png",
+   "slot": "neck",
+   "label": "Checkered scarf",
+   "fullBody": false,
+   "bbox": [
+    71,
+    166,
+    371,
+    359
+   ],
+   "thumb": "thumbs/checkered_scarf.png"
+  },
+  "bow_tie": {
+   "file": "bow_tie.png",
+   "slot": "neck",
+   "label": "Bow tie",
+   "fullBody": false,
+   "bbox": [
+    154,
+    188,
+    275,
+    253
+   ],
+   "thumb": "thumbs/bow_tie.png"
+  },
+  "bandana": {
+   "file": "bandana.png",
+   "slot": "neck",
+   "label": "Bandana",
+   "fullBody": false,
+   "bbox": [
+    91,
+    188,
+    348,
+    313
+   ],
+   "thumb": "thumbs/bandana.png"
+  },
+  "explorer_jacket": {
+   "file": "explorer_jacket.png",
+   "slot": "outfit",
+   "label": "Explorer jacket",
+   "fullBody": false,
+   "bbox": [
+    36,
+    178,
+    403,
+    356
+   ],
+   "thumb": "thumbs/explorer_jacket.png"
+  },
+  "raincoat": {
+   "file": "raincoat.png",
+   "slot": "outfit",
+   "label": "Raincoat",
+   "fullBody": false,
+   "bbox": [
+    40,
+    178,
+    399,
+    364
+   ],
+   "thumb": "thumbs/raincoat.png"
+  },
+  "sweater": {
+   "file": "sweater.png",
+   "slot": "outfit",
+   "label": "Flower sweater",
+   "fullBody": false,
+   "bbox": [
+    38,
+    185,
+    400,
+    357
+   ],
+   "thumb": "thumbs/sweater.png"
+  },
+  "striped_shirt": {
+   "file": "striped_shirt.png",
+   "slot": "outfit",
+   "label": "Striped shirt",
+   "fullBody": false,
+   "bbox": [
+    44,
+    184,
+    391,
+    346
+   ],
+   "thumb": "thumbs/striped_shirt.png"
+  },
+  "overalls": {
+   "file": "overalls.png",
+   "slot": "outfit",
+   "label": "Overalls",
+   "fullBody": false,
+   "bbox": [
+    77,
+    185,
+    362,
+    361
+   ],
+   "thumb": "thumbs/overalls.png"
+  },
+  "cardigan": {
+   "file": "cardigan.png",
+   "slot": "outfit",
+   "label": "Cardigan",
+   "fullBody": false,
+   "bbox": [
+    42,
+    178,
+    396,
+    350
+   ],
+   "thumb": "thumbs/cardigan.png"
+  },
+  "camera": {
+   "file": "camera.png",
+   "slot": "bag",
+   "label": "Camera",
+   "fullBody": false,
+   "bbox": [
+    87,
+    180,
+    353,
+    307
+   ],
+   "thumb": "thumbs/camera.png"
+  },
+  "small_purse": {
+   "file": "small_purse.png",
+   "slot": "bag",
+   "label": "Small purse",
+   "fullBody": false,
+   "bbox": [
+    96,
+    184,
+    335,
+    347
+   ],
+   "thumb": "thumbs/small_purse.png"
+  },
+  "map": {
+   "file": "map.png",
+   "slot": "held",
+   "label": "Adventure map",
+   "fullBody": true,
+   "bbox": [
+    48,
+    21,
+    392,
+    383
+   ],
+   "thumb": "thumbs/map.png"
+  },
+  "magnifying_glass": {
+   "file": "magnifying_glass.png",
+   "slot": "held",
+   "label": "Magnifying glass",
+   "fullBody": true,
+   "bbox": [
+    49,
+    24,
+    392,
+    383
+   ],
+   "thumb": "thumbs/magnifying_glass.png"
+  },
+  "leaf": {
+   "file": "leaf.png",
+   "slot": "held",
+   "label": "Leaf umbrella",
+   "fullBody": true,
+   "bbox": [
+    32,
+    0,
+    392,
+    383
+   ],
+   "thumb": "thumbs/leaf.png"
+  },
+  "mug": {
+   "file": "mug.png",
+   "slot": "held",
+   "label": "Cocoa mug",
+   "fullBody": true,
+   "bbox": [
+    46,
+    24,
+    392,
+    381
+   ],
+   "thumb": "thumbs/mug.png"
+  },
+  "butterfly_friend": {
+   "file": "butterfly_friend.png",
+   "slot": "friend",
+   "label": "Butterfly buddy",
+   "fullBody": false,
+   "bbox": [
+    41,
+    168,
+    148,
+    273
+   ],
+   "thumb": "thumbs/butterfly_friend.png"
+  },
+  "bee_friend": {
+   "file": "bee_friend.png",
+   "slot": "friend",
+   "label": "Bee buddy",
+   "fullBody": false,
+   "bbox": [
+    169,
+    5,
+    266,
+    92
+   ],
+   "thumb": "thumbs/bee_friend.png"
+  }
+ }
+}

@@ -4,7 +4,7 @@
 // poses (back, side, three-quarter) are used for travel and reveal moments.
 
 const POSES = {
-  front: { src: "/bear/w2/poses/bear_front.png", w: 428, h: 414 },
+  front: { src: "/bear/w3/poses/bear_front.png", w: 428, h: 414 },
   back: { src: "/bear/poses/bear_back.png", w: 356, h: 384 },
   side: { src: "/bear/poses/bear_side.png", w: 359, h: 388 },
   threeQuarter: { src: "/bear/poses/bear_three_quarter.png", w: 340, h: 391 },
@@ -60,7 +60,7 @@ function Layer({ id, item }) {
     zIndex: item.z,
     transform: `translate(-50%, -50%) rotate(${item.rot || 0}deg) scaleX(${item.flip ? -1 : 1})`,
   };
-  return <img className={`bear-item slot-${item.slot} ${item.float ? "floaty" : ""}`} src={`/bear/w2/items/${id}.png`} alt="" style={style} draggable="false" />;
+  return <img className={`bear-item slot-${item.slot} ${item.float ? "floaty" : ""}`} src={`/bear/w3/items/${id}.png`} alt="" style={style} draggable="false" />;
 }
 
 /**
@@ -84,7 +84,7 @@ export function BearFigure({ bear, pose = "front", mood = "idle", size = 200, fl
   return (
     <div className={`bear pose-${pose} mood-${mood} ${className}`} style={{ width: size, aspectRatio: `${p.w} / ${p.h}` }} role="img" aria-label={`${bear.name} the bear, ${label}`}>
       <div className="bear-body" style={{ transform: flip ? "scaleX(-1)" : undefined }}>
-        <img className="bear-base" src={fullBody ? `/bear/w2/items/${fullBody}.png` : p.src} alt="" draggable="false" />
+        <img className="bear-base" src={fullBody ? `/bear/w3/items/${fullBody}.png` : p.src} alt="" draggable="false" />
         {SLOTS.map((slot) => {
           if (fullBody && ["held", "outfit", "neck", "bag"].includes(slot)) return null;
           const id = worn[slot];

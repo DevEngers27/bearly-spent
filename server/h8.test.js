@@ -8,7 +8,7 @@ import { seed, demoSeed, migrate, readChild, _clearStoreForTest } from "./store.
 import { _databaseForTest, closeDatabase } from "./db.js";
 import * as game from "./domain.js";
 
-const publicBear = new URL("../client/public/bear/w2/", import.meta.url);
+const publicBear = new URL("../client/public/bear/w3/", import.meta.url);
 const manifest = JSON.parse(fs.readFileSync(new URL("items/manifest.json", publicBear), "utf8"));
 const defaults = ["held:map", "friend:bee_friend", "background:forest"];
 const known = new Set(COSMETICS.map((c) => c.id));

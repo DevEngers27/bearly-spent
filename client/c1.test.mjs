@@ -358,7 +358,7 @@ test("C1 / C3: static cache excludes failures and API; snapshot art warms withou
   assert.equal(await w.request("/api/state"), undefined);
   assert.equal(await w.request("/postcards/chicago.png", "cors", "POST"), undefined);
   w.fetch = async () => new Response("postcard");
-  await w.trigger("message", { data: { type: "mq:cache-art", images: ["/postcards/chicago.png", "/bear/w2/poses/bear_front.png", "/api/state", "https://other.test/postcards/test.png"] } });
+  await w.trigger("message", { data: { type: "mq:cache-art", images: ["/postcards/chicago.png", "/bear/w3/poses/bear_front.png", "/api/state", "https://other.test/postcards/test.png"] } });
   assert.equal(w.entries.size, 2);
   w.fetch = async () => { throw new Error("Offline"); };
   assert.equal(await (await w.request("/postcards/chicago.png")).text(), "postcard");

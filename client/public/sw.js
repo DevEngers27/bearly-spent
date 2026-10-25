@@ -1,6 +1,6 @@
 // MoneyQuest service worker: keeps the built shell and postcard art offline.
 // API calls always go to the network; the child snapshot lives in localStorage.
-const VERSION = "mq-v7"; // wardrobe art lives under /bear/w2 so older caches can never serve it
+const VERSION = "mq-v8"; // wardrobe art lives under /bear/w3 (re-cut layers); older caches can never serve it
 const SHELL = ["/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png", "/icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

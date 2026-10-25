@@ -6,7 +6,7 @@ import { build } from "esbuild";
 import { seed } from "../server/store.js";
 import { COSMETICS } from "../server/catalog.js";
 
-const manifest = JSON.parse(await readFile(new URL("public/bear/w2/items/manifest.json", import.meta.url), "utf8"));
+const manifest = JSON.parse(await readFile(new URL("public/bear/w3/items/manifest.json", import.meta.url), "utf8"));
 const sources = Object.fromEntries(await Promise.all(["Bear.jsx", "Child.jsx", "Icons.jsx", "api.js"].map(async (name) => {
   const extra = { "Bear.jsx": "POSES, POSE_ITEMS, placeItem, Layer", "Child.jsx": "DressSheet, moodFor" }[name];
   const result = await build({
@@ -66,13 +66,13 @@ test("H8.1 every item renders on the shared canvas at its slot z without rotatio
     const tree = expand(BearFigure({ bear: { name: "Pecan", [asset.slot]: id } }));
     assert.equal(tree.props.style.aspectRatio, "428 / 414");
     assert.match(tree.props["aria-label"], /^Pecan the bear/);
-    assert.equal(nodes(tree, (n) => n.type === "img" && n.props.src === `/bear/w2/items/${id}.png`).length, 1);
-    const bytes = await readFile(new URL(`public/bear/w2/items/${id}.png`, import.meta.url));
+    assert.equal(nodes(tree, (n) => n.type === "img" && n.props.src === `/bear/w3/items/${id}.png`).length, 1);
+    const bytes = await readFile(new URL(`public/bear/w3/items/${id}.png`, import.meta.url));
     assert.deepEqual([bytes.readUInt32BE(16), bytes.readUInt32BE(20), bytes[25]], [428, 414, 6]);
-    const thumb = await readFile(new URL(`public/bear/w2/thumbs/${id}.png`, import.meta.url));
+    const thumb = await readFile(new URL(`public/bear/w3/thumbs/${id}.png`, import.meta.url));
     assert.deepEqual([thumb.readUInt32BE(16), thumb.readUInt32BE(20)], [160, 160]);
   }
-  const bytes = await readFile(new URL("public/bear/w2/poses/bear_front.png", import.meta.url));
+  const bytes = await readFile(new URL("public/bear/w3/poses/bear_front.png", import.meta.url));
   assert.deepEqual([bytes.readUInt32BE(16), bytes.readUInt32BE(20)], [428, 414]);
   const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.bear-item \{[^}]*height: 100%/);
@@ -85,12 +85,12 @@ test("H8.1 full-body props replace the base once and clothes return when put dow
   for (const held of ["map", "magnifying_glass", "leaf", "mug"]) {
     const worn = { ...bear, held }, before = JSON.stringify(worn);
     const tree = expand(BearFigure({ bear: worn }));
-    assert.equal(base(tree).props.src, `/bear/w2/items/${held}.png`);
-    assert.deepEqual(layers(tree).map((n) => n.props.src).sort(), ["beanie", "sunglasses", "bee_friend"].map((id) => `/bear/w2/items/${id}.png`).sort());
+    assert.equal(base(tree).props.src, `/bear/w3/items/${held}.png`);
+    assert.deepEqual(layers(tree).map((n) => n.props.src).sort(), ["beanie", "sunglasses", "bee_friend"].map((id) => `/bear/w3/items/${id}.png`).sort());
     assert.equal(JSON.stringify(worn), before);
   }
   const tree = expand(BearFigure({ bear: { ...bear, held: null } }));
-  assert.equal(base(tree).props.src, "/bear/w2/poses/bear_front.png");
+  assert.equal(base(tree).props.src, "/bear/w3/poses/bear_front.png");
   assert.equal(layers(tree).length, 6);
 });
 
@@ -114,12 +114,12 @@ test("H8.1 moods add map, sleep cap and mug only to empty slots without changing
   for (const [mood, slot, id] of [["happy", "held", "map"], ["resting", "hat", "sleep_cap"], ["eating", "held", "mug"]]) {
     const bear = { name: "Bo" };
     const tree = expand(BearFigure({ bear, mood }));
-    assert.ok(nodes(tree, (n) => n.props.src === `/bear/w2/items/${id}.png`).length);
+    assert.ok(nodes(tree, (n) => n.props.src === `/bear/w3/items/${id}.png`).length);
     assert.deepEqual(bear, { name: "Bo" });
     const chosen = slot === "hat" ? "straw_hat" : "leaf";
     const occupied = expand(BearFigure({ bear: { ...bear, [slot]: chosen }, mood }));
-    assert.ok(nodes(occupied, (n) => n.props.src === `/bear/w2/items/${chosen}.png`).length);
-    assert.equal(nodes(occupied, (n) => n.props.src === `/bear/w2/items/${id}.png`).length, 0);
+    assert.ok(nodes(occupied, (n) => n.props.src === `/bear/w3/items/${chosen}.png`).length);
+    assert.equal(nodes(occupied, (n) => n.props.src === `/bear/w3/items/${id}.png`).length, 0);
   }
   const { moodFor } = harness("Child.jsx").exports;
   const now = new Date(2026, 9, 25, 12).getTime();
@@ -140,7 +140,7 @@ test("H8.4 closet has eight tabs, every thumbnail, a live preview and named two-
   for (const [i, slot] of ["hat", "eyes", "neck", "outfit", "bag", "held", "friend", "background"].entries()) {
     tabs[i].props.onClick();
     const images = nodes(render(), (n) => n.type === "img" && n.props.className === "swatch-art");
-    assert.deepEqual(images.map((n) => n.props.src), COSMETICS.filter((c) => c.kind === slot && slot !== "background").map((c) => `/bear/w2/thumbs/${c.value}.png`));
+    assert.deepEqual(images.map((n) => n.props.src), COSMETICS.filter((c) => c.kind === slot && slot !== "background").map((c) => `/bear/w3/thumbs/${c.value}.png`));
   }
   for (const held of ["map", "magnifying_glass", "leaf", "mug"]) {
     state.child.bear.held = held;
@@ -190,11 +190,11 @@ test("H8.5 remaining illustrated icons exist and production warming includes lay
   await api.exports.api("state");
   assert.equal(api.messages.length, 1);
   const images = api.messages[0].images;
-  assert.ok(!images.includes("/bear/w2/items/mushroom.png"));
+  assert.ok(!images.includes("/bear/w3/items/mushroom.png"));
   for (const id of Object.keys(manifest.items)) {
-    assert.ok(images.includes(`/bear/w2/items/${id}.png`));
-    assert.ok(images.includes(`/bear/w2/thumbs/${id}.png`));
+    assert.ok(images.includes(`/bear/w3/items/${id}.png`));
+    assert.ok(images.includes(`/bear/w3/thumbs/${id}.png`));
   }
   for (const src of images) await access(new URL(`public${src}`, import.meta.url));
-  assert.match(await readFile(new URL("public/sw.js", import.meta.url), "utf8"), /const VERSION = "mq-v7"/);
+  assert.match(await readFile(new URL("public/sw.js", import.meta.url), "utf8"), /const VERSION = "mq-v8"/);
 });
