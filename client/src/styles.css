@@ -237,6 +237,19 @@ button.stat-stamp { cursor: pointer; }
   outline: none;
 }
 .sheet.tall { min-height: 60vh; }
+.sheet.full-height { height: 100dvh; max-height: 100dvh; }
+.identity-chip { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; border: 1.5px solid var(--ink); border-radius: 18px; padding: 1px 12px 1px 4px; background: var(--paper); color: var(--ink); font: inherit; cursor: pointer; max-width: 100%; }
+.identity-chip span { overflow-wrap: anywhere; }
+.profile-portrait { display: grid; justify-items: center; }
+.profile-portrait h3 { font-size: 30px; overflow-wrap: anywhere; }
+.profile-rename { display: grid; gap: 12px; }
+.profile-rename label { display: grid; gap: 6px; }
+.profile-numbers { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 12px 0; }
+.profile-numbers dd { margin: 0; font-weight: 700; }
+.profile-badges { list-style: none; padding: 0; display: grid; gap: 12px; }
+.profile-badges li { display: flex; align-items: center; gap: 10px; }
+.profile-shortcuts { display: flex; flex-wrap: wrap; gap: 10px; }
+.child-profile-form { margin-top: 16px; }
 @keyframes sheet-up { from { transform: translateY(40%); opacity: 0.4; } }
 .grabber { width: 44px; height: 5px; border-radius: 3px; background: var(--line); margin: 2px auto 8px; }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }

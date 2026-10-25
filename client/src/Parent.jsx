@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAction } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
+import ChildProfileForm from "./ChildProfileForm.jsx";
+import Account from "./Account.jsx";
 
 const SECTIONS = [
   ["inbox", "Approvals"],
@@ -12,6 +14,7 @@ const SECTIONS = [
   ["buddy", "Buddy chats"],
   ["settings", "Friends & privacy"],
   ["children", "Children"],
+  ["account", "Account"],
   ["security", "Security"],
 ];
 
@@ -66,6 +69,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
         {sec === "buddy" && <BuddyLog {...ctx} />}
         {sec === "settings" && <Settings {...ctx} />}
         {sec === "children" && <Children me={me} refreshMe={refreshMe} {...ctx} />}
+        {sec === "account" && <Account key={JSON.stringify([me.user, me.family.displayName])} me={me} refreshMe={refreshMe} run={run} busy={busy} />}
         {sec === "security" && <Security me={me} refreshMe={refreshMe} onSignOut={onSignOut} onSignOutAll={onSignOutAll} {...ctx} />}
       </main>
     </div>
@@ -485,6 +489,7 @@ function Children({ state, me, refreshMe, run, busy }) {
       const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
       return <section className="p-card" key={summary.id}>
         <div className="row"><div><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></div><button className="pbtn" disabled={busy} onClick={() => generate(summary.id)}>Generate kid code</button></div>
+        <ChildProfileForm key={JSON.stringify(summary)} summary={summary} refreshMe={refreshMe} run={run} busy={busy} />
         <Devices childId={summary.id} busy={busy} />
         <AppleCashTracking childId={summary.id} pinSet={me.family.pinSet} busy={busy} />
         {link && <div className="p-stack">

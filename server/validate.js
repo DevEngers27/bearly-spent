@@ -35,6 +35,12 @@ export function bool(v) {
   return v;
 }
 
+export function profileName(v) {
+  const name = str(v, { max: 24 });
+  if (!/[\p{L}\p{N}]/u.test(name)) throw new GameError("Pick a name with letters or numbers");
+  return name;
+}
+
 export function id(v) {
   const value = str(v, { max: 64 });
   if (value.includes("/")) throw new GameError("Pick a valid item");

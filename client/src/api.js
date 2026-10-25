@@ -60,14 +60,14 @@ export async function apiResponse(path, body, { includeChild = true, handleUnaut
   const version = identityVersion;
   const url = apiUrl(path, includeChild);
   const route = path.split("?")[0];
-  const parentRoute = route.startsWith("parent/") || route === "auth/logout-all" || route === "child/wallet/token";
+  const parentRoute = route.startsWith("parent/") || ["auth/logout-all", "auth/account", "auth/email", "auth/password", "child/wallet/token"].includes(route);
   const res = await fetch(url, {
     method: method || (body === undefined ? "GET" : "POST"),
     credentials: bearerToken ? "omit" : "same-origin",
     headers: { "Content-Type": "application/json", ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.status === 401 && handleUnauthorized && !bearerToken && !["parent/unlock", "parent/pin/reset", "auth/login"].includes(route)) {
+  if (res.status === 401 && handleUnauthorized && !bearerToken && !["parent/unlock", "parent/pin/reset", "auth/login", "auth/email", "auth/password"].includes(route)) {
     clearSessionCache();
     window.dispatchEvent(new Event("mq:unauthorized"));
   }

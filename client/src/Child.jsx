@@ -64,7 +64,7 @@ export default function Child({ state, toast, onGrownUps, offline }) {
     store.set(openedKey, JSON.stringify(next)); setOpenedCards(next);
     open("postcard", { id });
   };
-  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard };
+  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard, onGrownUps };
   // Replay locally acknowledged receipts on reconnect (including older devices).
   useEffect(() => {
     if (offline) return;
@@ -82,7 +82,7 @@ export default function Child({ state, toast, onGrownUps, offline }) {
     <div className="kid-app">
       <header className="kid-head">
         <div className="hello">
-          <span className="hello-small">Hi, {state.child.name}!</span>
+          <button className="identity-chip" onClick={() => open("profile")} aria-label={`About ${state.child.name}`}><BearFigure bear={state.child.bear} size={40} /><span>{state.child.name}</span></button>
           <div className="stat-stamps">
             <button className="stat-stamp honey" onClick={() => open("money")} aria-label={`${money(state.balances.savings)} saved. Open my money`}>
               <Icon name="honey" size={22} />{money(state.balances.savings)}
@@ -128,10 +128,22 @@ export default function Child({ state, toast, onGrownUps, offline }) {
 }
 
 // ------------------------------------------------------------------ sheets
-export function Sheet({ title, onClose, children, tall, fullscreen }) {
+export function Sheet({ title, onClose, children, tall, fullscreen, fullHeight }) {
   const ref = useRef(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  useEffect(() => {
+    if (!fullHeight) return;
+    const marker = `profile-${Date.now()}-${Math.random()}`;
+    history.pushState({ ...history.state, mqSheet: marker }, "");
+    let backed = false;
+    const onBack = () => { backed = true; closeRef.current(); };
+    window.addEventListener("popstate", onBack);
+    return () => {
+      window.removeEventListener("popstate", onBack);
+      if (!backed && history.state?.mqSheet === marker) history.back();
+    };
+  }, [fullHeight]);
   useEffect(() => {
     const prev = document.activeElement;
     ref.current?.focus();
@@ -155,7 +167,7 @@ export function Sheet({ title, onClose, children, tall, fullscreen }) {
   }, []);
   return (
     <div className={`sheet-bg ${fullscreen ? "return-bg" : ""}`} onClick={fullscreen ? undefined : onClose}>
-      <section className={`sheet ${tall ? "tall" : ""} ${fullscreen ? "return-dialog" : ""}`} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} ref={ref} tabIndex="-1">
+      <section className={`sheet ${tall ? "tall" : ""} ${fullscreen ? "return-dialog" : ""} ${fullHeight ? "full-height" : ""}`} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} ref={ref} tabIndex="-1">
         <div className="grabber" aria-hidden="true" />
         <div className="sheet-head">
           <h2>{title}</h2>
@@ -170,6 +182,8 @@ export function Sheet({ title, onClose, children, tall, fullscreen }) {
 function SheetRouter({ sheet, ...ctx }) {
   const { state, close } = ctx;
   switch (sheet.type) {
+    case "profile": return <ProfileSheet {...ctx} />;
+    case "friends": return <Sheet title="Friends" onClose={close} tall><Friends {...ctx} /></Sheet>;
     case "chat": return <Sheet title="Our chat" onClose={close} tall><Buddy {...ctx} transcriptOnly /></Sheet>;
     case "money": return <MoneySheet {...ctx} start={sheet.start} startWallet={sheet.wallet} />;
     case "dress": return <DressSheet {...ctx} />;
@@ -193,6 +207,43 @@ function SheetRouter({ sheet, ...ctx }) {
       );
     default: return null;
   }
+}
+
+function ProfileSheet({ state, run, busy, close, open, onGrownUps }) {
+  const [editing, setEditing] = useState(false);
+  const [bearName, setBearName] = useState(state.child.bear.name);
+  useEffect(() => { setBearName(state.child.bear.name); }, [state.child.bear.name]);
+  const profile = state.profile;
+  const stats = profile?.stats || {
+    points: state.child.points,
+    postcards: { collected: new Set(state.postcards.map((p) => p.defId)).size, total: Object.values(state.catalog.places).filter((p) => p.open).length },
+    tripsTaken: state.child.stats.adventures, lessonsFinished: state.child.lessonsDone.length,
+    missionsDone: state.missions.filter((m) => m.status === "done").length,
+  };
+  const badges = profile?.badges || state.child.milestonesUnlocked.slice().reverse().map((at) => state.catalog.milestones.find((m) => m.at === at)).filter(Boolean);
+  const rename = async (event) => {
+    event.preventDefault();
+    if (await run("child/profile", { bearName }, "Bear name saved")) setEditing(false);
+  };
+  return <Sheet title={state.child.name} onClose={close} fullHeight>
+    <div className="profile-portrait"><BearFigure bear={state.child.bear} size={180} /><h3 className="hand">{state.child.bear.name}</h3></div>
+    {editing ? <form className="profile-rename" onSubmit={rename}>
+      <label>Bear's name<input required maxLength={24} value={bearName} onChange={(e) => setBearName(e.target.value)} /></label>
+      <div className="row"><button className="btn honey" disabled={busy}>Save name</button><button type="button" className="btn" disabled={busy} onClick={() => { setBearName(state.child.bear.name); setEditing(false); }}>Cancel</button></div>
+    </form> : <button className="link" disabled={busy} onClick={() => setEditing(true)}>Rename my bear</button>}
+    <section><h3 className="hand">About me</h3><p>{state.child.name} · Age {state.child.age}</p><p className="fine">Ask a grown-up to change these</p></section>
+    {typeof state.friendCode === "string" && <section><h3 className="hand">Friend code</h3><div className="row"><strong>{state.friendCode}</strong><button className="btn" disabled={!navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(state.friendCode), undefined, "Friend code copied")}>Copy</button></div></section>}
+    <section><h3 className="hand">My numbers</h3><dl className="profile-numbers">
+      <dt>Points</dt><dd>{stats.points}</dd>
+      <dt>Postcards collected / open places</dt><dd>{stats.postcards.collected} / {stats.postcards.total}</dd>
+      <dt>Trips taken</dt><dd>{stats.tripsTaken}</dd>
+      <dt>Lessons finished</dt><dd>{stats.lessonsFinished}</dd>
+      <dt>Missions done</dt><dd>{stats.missionsDone}</dd>
+      {Number.isFinite(stats.longestStreak) && <><dt>Longest streak</dt><dd>{stats.longestStreak} days</dd></>}
+    </dl>{Number.isFinite(profile?.since) && <p className="fine">Saving since {new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: state.settings.timezone || "UTC" }).format(profile.since)}</p>}</section>
+    <section><h3 className="hand">Badges</h3>{badges.length ? <ul className="profile-badges">{badges.map((badge) => <li key={badge.at}><Icon name="star" size={22} /><div><strong>{badge.label}</strong><p className="fine">{badge.reward}</p></div></li>)}</ul> : <p className="fine">Keep saving to earn your first badge!</p>}</section>
+    <div className="profile-shortcuts"><button className="btn sage" onClick={() => open("friends")}>Add a friend</button><button className="btn honey" onClick={() => open("dress")}>Dress up</button>{onGrownUps && <button className="btn" onClick={() => { close(); onGrownUps(); }}>Grown-ups</button>}</div>
+  </Sheet>;
 }
 
 // ------------------------------------------------------------------ home
@@ -956,7 +1007,7 @@ async function speak(text, mode, allowed = () => true) {
   if (allowed()) speakBrowser(clean);
 }
 
-function Buddy({ state, run, busy, offline, startTalk, transcriptOnly }) {
+function Buddy({ state, run, busy, offline, startTalk, transcriptOnly, open }) {
   const chatRef = useRef(null);
   const chat = state.chat;
   useEffect(() => {
@@ -965,7 +1016,7 @@ function Buddy({ state, run, busy, offline, startTalk, transcriptOnly }) {
   }, [chat.length]);
   return (
     <div className="page buddy">
-      {!transcriptOnly && <h1 className="page-title">Our chat</h1>}
+      {!transcriptOnly && <div className="row"><h1 className="page-title">Our chat</h1><button className="btn" onClick={() => open("profile")}>Me</button></div>}
       {!state.goals[0] && <section className="paper-card"><h2 className="hand">Set a savings goal</h2><p>Ask your grown-up to help choose one.</p></section>}
       <div className="chat" ref={chatRef}>
         {chat.length === 0 && <p className="msg assistant">Our chats will be right here. What would you like to know?</p>}

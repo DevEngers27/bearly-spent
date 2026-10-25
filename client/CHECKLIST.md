@@ -78,3 +78,14 @@ Socket-free regressions cover named-bear rendering, bubble structure/CSS, lockou
 - [ ] **W3.5 — Session cleanup:** Visit Album, open cards and mute speech, then unlink that kid device or Sign out everywhere. After its next authenticated 401, navigation, reveal/album receipts and mute keys are removed alongside identity/state. Re-link: Home opens. An ordinary reload of the same valid session retains navigation; failed global sign-out retains it too.
 - [ ] **W3.6 — Amount keyboard:** On a phone, check Add money, Allowance, purchase limit, goal reward, savings target, Save/Spent and Send via Apple Cash: each amount input offers the decimal keyboard.
 - [ ] **W3.7/8 — Demo/docs:** On a fresh demo follow the README's payday step before Post a duplicate. Accounts explains Add money; Known limitations links the Apple Cash Shortcut guide and explains tracking boundaries.
+
+## G5 profiles
+
+Socket-free regression coverage: `server/profile.test.js` and `client/profile.test.mjs`. Browser checks below remain pending; no listening server was started in this batch.
+
+- [ ] At 320px/390px and desktop sizes, Home's bear/name chip is at least 44px tall and opens the full-height profile sheet. Chat's Me button opens the same sheet. Tab/Shift+Tab stay inside; Escape, Close and the backdrop restore the opener.
+- [ ] Check the equipped bear portrait, name/age, saving month, points, distinct postcard places/currently open places, trips, lessons, missions and newest-first badges. A missing streak is omitted. Without a string `state.friendCode`, omit the Friend code row; with G3 state, Copy works. Add a friend opens the existing Friends UI, Dress up opens the closet, and paired kid sessions have no Grown-ups shortcut.
+- [ ] Rename the bear: 24-character names work; blank, emoji-only and 25-character names fail. Cancel preserves the name. Success updates other screens/devices and notifies the parent; no PIN is needed.
+- [ ] Parent → Account sits between Children and Security. Save parent/family names, change email with a password, and change password. Wrong-password errors preserve the signed-in session and draft. A duplicate email fails. Password success signs out other parent sessions for that user and keeps this session plus paired kid devices.
+- [ ] Children → Edit profile supports Save/Cancel for each card. Update a sibling while another child is selected; summaries, account labels and kid notifications use the new names. Locking parent mode blocks all account/profile changes until unlocked; paired kids cannot use these parent routes.
+- [ ] Rename the demo child/bear, then reset the demo: seed names return. No friend-request copy changes are part of G5.

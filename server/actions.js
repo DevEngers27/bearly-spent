@@ -4,7 +4,7 @@ import { spendPolicy } from "./guardian.js";
 import { chat } from "./buddy.js";
 import { childIdFor } from "./store.js";
 import { PLACES, POINTS } from "./catalog.js";
-import { money, integer, str, bool, id, oneOf, object } from "./validate.js";
+import { money, integer, str, bool, id, oneOf, object, profileName } from "./validate.js";
 
 const action = (fn) => (db, body, ...args) => fn(db, object(body), ...args);
 const optionalNote = (body) => Object.hasOwn(body, "note") ? str(body.note, { required: false }) : "";
@@ -15,6 +15,13 @@ function clearFundingEscalations(db) {
     if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
     if (a.kind === "topup" && a.status === "pending") game.resolveEscalation(db, a, "approved");
   });
+}
+
+function renameProfileBear(db, name) {
+  const bearName = profileName(name);
+  db.child.bear.name = bearName;
+  game.audit(db, "child", "bear_renamed", `Renamed the bear to ${bearName}`);
+  game.notify(db, "parent", `${db.child.name} renamed the bear to ${bearName}`);
 }
 
 export const actions = {
@@ -56,7 +63,8 @@ export const actions = {
   adventure: action((db, body) => game.startAdventure(db, id(body.destId))),
   buyCosmetic: action((db, body) => game.buyCosmetic(db, id(body.id))),
   equip: action((db, body) => game.equip(db, id(body.kind), body.value === null ? null : id(body.value))),
-  renameBear: action((db, body) => game.renameBear(db, str(body.name, { max: 24 }))),
+  renameBear: action((db, body) => renameProfileBear(db, body.name)),
+  profile: action((db, body) => renameProfileBear(db, body.bearName)),
   friend: action((db, body) => game.friendView(game.addFriendByCode(db, id(body.code)))),
   trade: action((db, body) => {
     const friendId = id(body.friendId), give = id(body.give), get = id(body.get);
