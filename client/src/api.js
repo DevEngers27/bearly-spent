@@ -4,7 +4,8 @@
 // action, on server-sent "changed" events, and on a slow poll as a fallback.
 import { useEffect, useState, useCallback, useRef } from "react";
 
-let parentToken = sessionStorage.getItem("mq_parent") || null;
+let parentToken = null;
+try { parentToken = sessionStorage.getItem("mq_parent") || null; } catch {}
 export const setParentToken = (t) => {
   parentToken = t;
   try { t ? sessionStorage.setItem("mq_parent", t) : sessionStorage.removeItem("mq_parent"); } catch {}
@@ -17,14 +18,60 @@ export async function api(path, body) {
     headers: { "Content-Type": "application/json", ...(parentToken ? { "x-parent-token": parentToken } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  if (res.status === 401) {
+    setParentToken(null);
+    window.dispatchEvent(new Event("mq:unauthorized"));
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error || (res.status >= 500 ? "Something went wrong on the server. Try again." : `Request failed (${res.status})`));
     err.status = res.status;
     throw err;
   }
+  if (path === "state" && body === undefined) {
+    try { localStorage.setItem("mq_last_state", JSON.stringify(data)); } catch {}
+    if (import.meta.env.PROD && "serviceWorker" in navigator) {
+      const images = ["/bear/items/mushroom.png", ...Object.values(data.catalog.places).map((p) => p.image),
+        ...data.catalog.cosmetics.map((c) => c.kind === "background" ? null : `/bear/items/${c.value}.png`),
+        ...["front", "side", "back", "three_quarter"].map((pose) => `/bear/poses/bear_${pose}.png`)].filter(Boolean);
+      navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage({ type: "mq:cache-art", images })).catch(() => {});
+    }
+  }
   if (body !== undefined) window.dispatchEvent(new Event("mq:changed"));
   return data;
+}
+
+export const OFFLINE_MESSAGE = "You're offline — Maple's postcards are still here!";
+
+// A ref closes the double-click gap before React paints disabled controls.
+export function useAction(toast, offline = false) {
+  const [busy, setBusy] = useState(false);
+  const inflight = useRef(false);
+  const run = async (path, body, ok) => {
+    if (offline) { toast(OFFLINE_MESSAGE); return null; }
+    if (inflight.current) return null;
+    inflight.current = true;
+    setBusy(true);
+    try {
+      const result = await (typeof path === "function" ? path() : api(path, body));
+      if (ok) toast(typeof ok === "function" ? ok(result) : ok);
+      return result;
+    } catch (e) {
+      toast(e.message, "error");
+      return null;
+    } finally {
+      inflight.current = false;
+      setBusy(false);
+    }
+  };
+  return [run, busy];
+}
+
+function cachedChildState() {
+  try {
+    const cached = JSON.parse(localStorage.getItem("mq_last_state"));
+    return cached?.child && cached?.catalog && Array.isArray(cached.goals) ? cached : null;
+  } catch { return null; }
 }
 
 export function useLiveState(role) {
@@ -41,6 +88,7 @@ export function useLiveState(role) {
       setError(null);
     } catch (e) {
       setError(e);
+      if (role === "child") setState((current) => current || cachedChildState());
     } finally {
       inflight.current = false;
       if (again.current) { again.current = false; refresh(); }
@@ -59,15 +107,17 @@ export function useLiveState(role) {
     window.addEventListener("mq:changed", onChange);
     document.addEventListener("visibilitychange", onVisible);
     const poll = setInterval(() => document.visibilityState === "visible" && refresh(), 5000);
+    window.addEventListener("online", onChange);
     return () => {
       es?.close();
       clearInterval(poll);
       window.removeEventListener("mq:changed", onChange);
+      window.removeEventListener("online", onChange);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);
 
-  return { state, error, refresh };
+  return { state, error, refresh, offline: Boolean(error) };
 }
 
 export const money = (c) => `$${(c / 100).toFixed(2)}`;

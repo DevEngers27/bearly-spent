@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, money, moneyShort } from "./api.js";
+import { money, moneyShort, useAction } from "./api.js";
 import { BearFigure, SceneBackdrop, bearScale } from "./Bear.jsx";
 import { PostcardTile, FlipPostcard, Stamp, RARITY_LABEL, storyFor } from "./Postcard.jsx";
 import MapView from "./MapView.jsx";
@@ -27,25 +27,21 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
 };
 
-export default function Child({ state, toast, onGrownUps }) {
-  const [tab, setTabRaw] = useState(() => store.get("mq_tab", "home"));
+export default function Child({ state, toast, onGrownUps, offline }) {
+  const [tab, setTabRaw] = useState(() => { const saved = store.get("mq_tab", "home"); return TABS.some((t) => t.id === saved) ? saved : "home"; });
   const [sheet, setSheet] = useState(null); // { type, ...props }
   const [mapFocus, setMapFocus] = useState(null);
   const setTab = (t) => { setTabRaw(t); store.set("mq_tab", t); window.scrollTo({ top: 0 }); };
-  const run = async (path, body, okMsg) => {
-    try {
-      const r = await api(path, body);
-      if (okMsg) toast(typeof okMsg === "function" ? okMsg(r) : okMsg);
-      return r;
-    } catch (e) {
-      toast(e.message, "error");
-      return null;
-    }
-  };
+  const [run, pending] = useAction(toast, offline);
+  const busy = pending || offline;
   const open = (type, props = {}) => setSheet({ type, ...props });
   const close = () => setSheet(null);
   const goMap = (placeId) => { setMapFocus(placeId || null); setTab("map"); close(); };
-  const ctx = { state, run, toast, setTab, open, close, goMap };
+  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap };
+  const [seen, setSeen] = useState(() => store.get("mq_seen_adv", ""));
+  const latest = state.adventures.find((a) => a.status === "returned");
+  const reveal = latest && latest.id !== seen && Date.now() - latest.returnedAt < 10 * 60000;
+  useEffect(() => { if (reveal) setSheet(null); }, [reveal]);
   const unread = state.notifications.filter((n) => !n.read).length;
 
   return (
@@ -63,7 +59,8 @@ export default function Child({ state, toast, onGrownUps }) {
           </div>
         </div>
         <div className="head-actions">
-          <button className="round-btn" onClick={() => { open("news"); run("child/notifications/read", {}); }} aria-label={`News${unread ? `, ${unread} new` : ""}`}>
+          {offline && <span className="offline-pill" role="status">Offline</span>}
+          <button className="round-btn" disabled={pending} onClick={() => { open("news"); if (!offline) run("child/notifications/read", {}); }} aria-label={`News${unread ? `, ${unread} new` : ""}`}>
             <Icon name="bell" size={22} />{unread > 0 && <span className="dot" />}
           </button>
           <button className="round-btn" onClick={onGrownUps} aria-label="Grown-ups">
@@ -89,8 +86,8 @@ export default function Child({ state, toast, onGrownUps }) {
         ))}
       </nav>
 
-      {sheet && <SheetRouter sheet={sheet} {...ctx} />}
-      <ReturnReveal state={state} onDone={() => setTab("album")} />
+      {sheet && !reveal && <SheetRouter sheet={sheet} {...ctx} />}
+      {reveal && <ReturnReveal state={state} latest={latest} onSeen={() => { store.set("mq_seen_adv", latest.id); setSeen(latest.id); }} onDone={() => setTab("album")} />}
     </div>
   );
 }
@@ -98,10 +95,21 @@ export default function Child({ state, toast, onGrownUps }) {
 // ------------------------------------------------------------------ sheets
 function Sheet({ title, onClose, children, tall }) {
   const ref = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     const prev = document.activeElement;
     ref.current?.focus();
-    const onKey = (e) => e.key === "Escape" && onClose();
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); closeRef.current(); }
+      if (e.key !== "Tab") return;
+      const nodes = [...ref.current.querySelectorAll('button, input, select, textarea, a[href], [tabindex]')]
+        .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length);
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (!first) { e.preventDefault(); ref.current.focus(); }
+      else if (e.shiftKey && (document.activeElement === first || !nodes.includes(document.activeElement))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (document.activeElement === last || !nodes.includes(document.activeElement))) { e.preventDefault(); first.focus(); }
+    };
     window.addEventListener("keydown", onKey);
     document.body.classList.add("sheet-open");
     return () => {
@@ -109,7 +117,7 @@ function Sheet({ title, onClose, children, tall }) {
       document.body.classList.remove("sheet-open");
       prev?.focus?.();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div className="sheet-bg" onClick={onClose}>
       <section className={`sheet ${tall ? "tall" : ""}`} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} ref={ref} tabIndex="-1">
@@ -190,8 +198,8 @@ function Home({ state, setTab, open }) {
   const away = state.adventures.find((a) => a.status === "away");
   const dest = away && state.catalog.places[away.destId];
   const mood = moodFor(state, now);
-  const scale = bearScale(state.balances.savings, goal.target);
-  const pct = Math.min(100, (state.balances.savings / goal.target) * 100);
+  const scale = bearScale(state.balances.savings, goal?.target || 10000);
+  const pct = goal ? Math.min(100, (state.balances.savings / goal.target) * 100) : 0;
   const stage = [...state.catalog.milestones].reverse().find((m) => state.child.milestonesUnlocked.includes(m.at));
   const nextMilestone = state.catalog.milestones.find((m) => !state.child.milestonesUnlocked.includes(m.at));
   const todo = nextUp(state, now);
@@ -225,7 +233,7 @@ function Home({ state, setTab, open }) {
         {!away && <span className="tap-hint">Tap to dress up</span>}
       </section>
 
-      <section className="paper-card jar-card">
+      {goal ? <section className="paper-card jar-card">
         <div className="jar-row">
           <Jar pct={pct} />
           <div className="jar-text">
@@ -245,7 +253,14 @@ function Home({ state, setTab, open }) {
           <button className="btn honey" onClick={() => open("money", { start: "save" })}>Save money</button>
           <button className="btn sage" onClick={() => open("money", { start: "spend" })}>Spent money</button>
         </div>
-      </section>
+      </section> : <section className="paper-card jar-card">
+        <h2 className="hand">Set a savings goal</h2>
+        <p>Ask your grown-up to help pick something to save for.</p>
+        <div className="btn-row">
+          <button className="btn honey" onClick={() => open("money", { start: "save" })}>Save money</button>
+          <button className="btn sage" onClick={() => open("money", { start: "spend" })}>Spent money</button>
+        </div>
+      </section>}
 
       {todo.length > 0 && (
         <section className="paper-card next-card">
@@ -289,7 +304,7 @@ function Jar({ pct }) {
 }
 
 // ------------------------------------------------------------------ money sheet
-function MoneySheet({ state, run, close, start }) {
+function MoneySheet({ state, run, close, start, busy }) {
   const [mode, setMode] = useState(start || "save");
   const [amount, setAmount] = useState(mode === "save" ? "2" : "");
   const [memo, setMemo] = useState("");
@@ -302,7 +317,7 @@ function MoneySheet({ state, run, close, start }) {
     if (mode === "spend") r = await run("child/spend", { amount: a, memo }, (x) => (x.held ? "That's a big buy. We asked your grown-up first." : "Recorded. Nice tracking!"));
     if (mode === "log") r = await run("child/journal", { direction, amount: a || 0, note: memo }, "Added to your money diary.");
     if (mode === "ask") r = await run("child/extra", { amount: a, reason: memo }, "Sent to your grown-up!");
-    if (r) { setAmount(""); setMemo(""); if (mode !== "save") close(); }
+    if (r) { setMemo(""); if (mode !== "save") close(); }
   };
   const modes = [["save", "Save"], ["spend", "Spent"], ["log", "Cash diary"], ["ask", "Ask for extra"]];
   return (
@@ -326,9 +341,8 @@ function MoneySheet({ state, run, close, start }) {
             </select>
           </label>
         )}
-        <label>How much?
-          <div className="money-input"><span>$</span><input type="number" min="0" step="0.25" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required={mode !== "log"} /></div>
-        </label>
+        <label htmlFor="money-amount">How much?</label>
+        <div className="money-input"><span>$</span><input id="money-amount" type="number" min="0" step="0.25" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required={mode !== "log"} /></div>
         {mode === "save" && (
           <div className="chips">{[1, 2, 5].map((v) => <button type="button" key={v} className="chip" onClick={() => setAmount(String(v))}>${v}</button>)}</div>
         )}
@@ -344,7 +358,7 @@ function MoneySheet({ state, run, close, start }) {
           {mode === "log" && "For cash that isn't in the app. It goes in your diary."}
           {mode === "ask" && "Your grown-up decides. Money Buddy can't move money."}
         </p>
-        <button className="btn honey wide" type="submit">{{ save: "Save it", spend: "Record it", log: "Add to diary", ask: "Send request" }[mode]}</button>
+        <button className="btn honey wide" type="submit" disabled={busy}>{{ save: "Save it", spend: "Record it", log: "Add to diary", ask: "Send request" }[mode]}</button>
       </form>
       <h3 className="hand">Recent</h3>
       <ul className="ledger">
@@ -366,7 +380,7 @@ const WARDROBE = [
 ];
 const SCENE_SWATCH = { forest: "#A8B894", meadow: "#E5EEF0", stars: "#4E5F7A" };
 
-function DressSheet({ state, run, close }) {
+function DressSheet({ state, run, close, busy }) {
   const [name, setName] = useState(state.child.bear.name);
   const [slot, setSlot] = useState("hat");
   const bear = state.child.bear;
@@ -376,7 +390,7 @@ function DressSheet({ state, run, close }) {
       <div className="dress-preview"><BearFigure bear={bear} size={170} /></div>
       <form className="rename" onSubmit={(e) => { e.preventDefault(); run("child/bear/name", { name }, "Name saved!"); }}>
         <label className="grow">Bear's name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={16} /></label>
-        <button className="btn small sage">Rename</button>
+        <button className="btn small sage" disabled={busy}>Rename</button>
       </form>
       <div className="wardrobe-tabs" role="tablist" aria-label="Wardrobe">
         {WARDROBE.map(([k, label]) => (
@@ -385,7 +399,7 @@ function DressSheet({ state, run, close }) {
       </div>
       <div className="swatches">
         {slot !== "background" && (
-          <button className={`swatch none ${!bear[slot] ? "on" : ""}`} onClick={() => run("child/cosmetic/equip", { kind: slot, value: null })}>
+          <button disabled={busy} className={`swatch none ${!bear[slot] ? "on" : ""}`} onClick={() => run("child/cosmetic/equip", { kind: slot, value: null })}>
             <span className="swatch-art empty" aria-hidden="true">—</span>
             <span>None</span>
           </button>
@@ -394,7 +408,7 @@ function DressSheet({ state, run, close }) {
           const on = bear[slot] === c.value;
           const locked = !c.unlocked;
           return (
-            <button key={c.id} className={`swatch ${on ? "on" : ""} ${locked ? "locked" : ""}`} aria-disabled={locked && c.cost == null}
+            <button key={c.id} disabled={busy || (locked && c.cost == null)} className={`swatch ${on ? "on" : ""} ${locked ? "locked" : ""}`} aria-disabled={locked && c.cost == null}
               onClick={() => (!locked ? run("child/cosmetic/equip", { kind: slot, value: c.value }) : c.cost != null ? run("child/cosmetic/buy", { id: c.id }, `Unlocked ${c.label}!`) : null)}>
               {slot === "background"
                 ? <span className="swatch-art scene" style={{ background: SCENE_SWATCH[c.value] }} aria-hidden="true" />
@@ -411,14 +425,14 @@ function DressSheet({ state, run, close }) {
 }
 
 // ------------------------------------------------------------------ missions
-function Missions({ state, run, open }) {
+function Missions({ state, run, open, busy }) {
   const today = new Date().toISOString().slice(0, 10);
   const P = state.catalog.points;
   const goals = state.parentGoals.filter((g) => g.status === "active" || g.status === "awaiting_approval");
   const daily = [
     { id: "track", title: "Record today's money", pts: P.track, done: state.child.lastTrackedDay === today, action: () => open("money", { start: "spend" }) },
     { id: "save", title: "Save toward your goal", pts: P.save, done: state.child.lastSaveDay === today, action: () => open("money", { start: "save" }) },
-    { id: "budget", title: "Weekly budget challenge", pts: P.budget, done: false, action: () => open("budget") },
+    { id: "budget", title: "Weekly budget challenge", pts: P.budget, done: state.budgetDoneThisWeek, action: () => open("budget") },
   ];
   return (
     <div className="page">
@@ -443,7 +457,7 @@ function Missions({ state, run, open }) {
               <button onClick={m.action} disabled={m.done}>
                 <span className="box" aria-hidden="true">{m.done && <Icon name="check" size={18} />}</span>
                 <span className="grow">{m.title}</span>
-                <span className="pts">+{m.pts}</span>
+                {!m.done && <span className="pts">+{m.pts}</span>}
               </button>
             </li>
           ))}
@@ -456,7 +470,7 @@ function Missions({ state, run, open }) {
           <ul className="checklist">
             {state.missions.slice().reverse().map((m) => (
               <li key={m.id} className={m.status === "done" ? "done" : m.status === "pending_review" ? "waiting" : ""}>
-                <button disabled={m.status !== "open"} onClick={() => run(`child/mission/${m.id}/done`, {}, "Sent to your grown-up to check!")}>
+                <button disabled={busy || m.status !== "open"} onClick={() => run(`child/mission/${m.id}/done`, {}, "Sent to your grown-up to check!")}>
                   <span className="box" aria-hidden="true">{m.status === "done" ? <Icon name="check" size={18} /> : m.status === "pending_review" ? <Icon name="hourglass" size={18} /> : null}</span>
                   <span className="grow">{m.title}<small>{m.status === "pending_review" ? "Waiting for a grown-up to check" : m.status === "done" ? "Confirmed!" : m.createdBy.includes("buddy") ? "Idea from Money Buddy · tap when done" : "Tap when you're done"}</small></span>
                   <span className="pts">+{m.points}</span>
@@ -487,14 +501,14 @@ function Missions({ state, run, open }) {
   );
 }
 
-function LessonSheet({ lesson, run, close }) {
+function LessonSheet({ lesson, run, close, busy }) {
   const [i, setI] = useState(0);
   const [answers, setAnswers] = useState([]);
   const [result, setResult] = useState(null);
   const pick = async (idx) => {
+    if (busy) return;
     const next = [...answers, idx];
-    setAnswers(next);
-    if (next.length < lesson.questions.length) return setI(i + 1);
+    if (next.length < lesson.questions.length) { setAnswers(next); return setI(i + 1); }
     setResult(await run("child/lesson", { lessonId: lesson.id, answers: next }));
   };
   const q = lesson.questions[i];
@@ -505,13 +519,13 @@ function LessonSheet({ lesson, run, close }) {
           <div className="quiz-progress" aria-hidden="true">{lesson.questions.map((_, k) => <span key={k} className={k < i ? "on" : k === i ? "now" : ""} />)}</div>
           <p className="fine">Question {i + 1} of {lesson.questions.length}</p>
           <p className="quiz-q hand">{q.q}</p>
-          <div className="quiz-opts">{q.options.map((o, idx) => <button key={o} className="btn sage" onClick={() => pick(idx)}>{o}</button>)}</div>
+          <div className="quiz-opts">{q.options.map((o, idx) => <button key={o} disabled={busy} className="btn sage" onClick={() => pick(idx)}>{o}</button>)}</div>
         </div>
       ) : (
         <div className="quiz-result">
           <p className="big"><Icon name={result.passed ? "medal" : "heart"} size={64} /></p>
           <p className="hand big-text">{result.correct} of {result.total} right!</p>
-          <p>{result.passed ? `Lesson complete. +20 adventure points!` : "So close! Try again to earn your points."}</p>
+          <p>{result.firstTime === false ? "Nice review! No extra points for repeats." : result.passed ? `Lesson complete. +20 adventure points!` : "So close! Try again to earn your points."}</p>
           <div className="btn-row center">
             {!result.passed && <button className="btn sage" onClick={() => { setI(0); setAnswers([]); setResult(null); }}>Try again</button>}
             <button className="btn honey" onClick={close}>Done</button>
@@ -522,7 +536,7 @@ function LessonSheet({ lesson, run, close }) {
   );
 }
 
-function BudgetSheet({ run, close }) {
+function BudgetSheet({ run, close, busy }) {
   const [a, setA] = useState({ save: 5, needs: 8, fun: 5, give: 2 });
   const total = Object.values(a).reduce((s, v) => s + v, 0);
   const rows = [["save", "Save", "honey"], ["needs", "Needs", "basket"], ["fun", "Fun", "balloon"], ["give", "Give", "heart"]];
@@ -537,7 +551,7 @@ function BudgetSheet({ run, close }) {
           </label>
         ))}
         <p className={`fine ${total === 20 ? "ok" : "warn"}`}>Total ${total}: {total === 20 ? "perfect!" : total > 20 ? `$${total - 20} too much` : `$${20 - total} left to plan`}</p>
-        <button className="btn honey wide" type="submit" disabled={total !== 20}>Finish my budget</button>
+        <button className="btn honey wide" type="submit" disabled={busy || total !== 20}>Finish my budget</button>
       </form>
     </Sheet>
   );
@@ -549,17 +563,35 @@ function MapScreen({ state, open, focus, clearFocus }) {
   const owned = useMemo(() => new Set(state.postcards.map((p) => p.defId)), [state.postcards]);
   const away = state.adventures.find((a) => a.status === "away");
   const frameRef = useRef(null);
+  const interacting = useRef({ pointer: false, touch: false });
+  const lastAutoScroll = useRef(0);
+  const lastInteraction = useRef(0);
   useEffect(() => {
     if (focus) { open("place", { id: focus }); clearFocus(); }
   }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const release = () => { interacting.current.pointer = false; lastInteraction.current = Date.now(); };
+    const blur = () => { interacting.current.touch = false; release(); };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
   // On narrow screens the map scrolls sideways: keep the walking bear in view.
   useEffect(() => {
     const frame = frameRef.current;
     const walker = frame?.querySelector(".walker");
-    if (!frame || !walker || frame.scrollWidth <= frame.clientWidth) return;
+    if (!frame || !walker || frame.scrollWidth <= frame.clientWidth || interacting.current.pointer || interacting.current.touch || now - lastInteraction.current < 2000 || now - lastAutoScroll.current < 2000) return;
     const f = frame.getBoundingClientRect(), w = walker.getBoundingClientRect();
     const x = w.left + w.width / 2 - f.left;
-    if (x < f.width * 0.2 || x > f.width * 0.8) frame.scrollTo({ left: frame.scrollLeft + x - f.width / 2, behavior: "smooth" });
+    if (x < f.width * 0.2 || x > f.width * 0.8) {
+      lastAutoScroll.current = now;
+      frame.scrollTo({ left: frame.scrollLeft + x - f.width / 2, behavior: "smooth" });
+    }
   }, [now, away]);
   const places = state.catalog.places;
   return (
@@ -575,7 +607,14 @@ function MapScreen({ state, open, focus, clearFocus }) {
         </div>
       )}
       <p className="fine map-hint">Drag the map sideways to explore.</p>
-      <div className="map-frame" ref={frameRef}>
+      <div className="map-frame" ref={frameRef}
+        onPointerDown={() => { interacting.current.pointer = true; }}
+        onPointerUp={() => { interacting.current.pointer = false; lastInteraction.current = Date.now(); }}
+        onPointerCancel={() => { interacting.current.pointer = false; lastInteraction.current = Date.now(); }}
+        onTouchStart={() => { interacting.current.touch = true; }}
+        onTouchEnd={(e) => { interacting.current.touch = e.touches.length > 0; lastInteraction.current = Date.now(); }}
+        onTouchCancel={() => { interacting.current.touch = false; lastInteraction.current = Date.now(); }}
+        onWheel={() => { lastInteraction.current = Date.now(); }}>
         <MapView places={places} home={state.catalog.home} owned={owned} away={away} now={now} bear={state.child.bear} onSelect={(id) => open("place", { id })} />
       </div>
       <div className="legend">
@@ -588,7 +627,7 @@ function MapScreen({ state, open, focus, clearFocus }) {
   );
 }
 
-function PlaceSheet({ id, state, run, close, open }) {
+function PlaceSheet({ id, state, run, close, open, busy }) {
   const p = state.catalog.places[id];
   const owned = state.postcards.some((c) => c.defId === id);
   const away = state.adventures.find((a) => a.status === "away");
@@ -619,7 +658,7 @@ function PlaceSheet({ id, state, run, close, open }) {
       {owned && <p className="story">{storyFor(p, state.child.bear.name)}</p>}
       {!p.open && <p className="lock-note"><Icon name="lock" size={20} /> {p.lockReason}{p.progress ? ` (${p.progress})` : ""}</p>}
       {p.open && (
-        <button className="btn honey wide" disabled={Boolean(away) || short > 0} onClick={send}>
+        <button className="btn honey wide" disabled={busy || Boolean(away) || short > 0} onClick={send}>
           {away ? `${state.child.bear.name} is already traveling` : short > 0 ? `Earn ${short} more points` : <>Send {state.child.bear.name} · <Icon name="sparkle" size={16} /> {p.cost}</>}
         </button>
       )}
@@ -630,15 +669,10 @@ function PlaceSheet({ id, state, run, close, open }) {
 }
 
 // ------------------------------------------------------------------ return reveal
-function ReturnReveal({ state, onDone }) {
-  const latest = state.adventures.find((a) => a.status === "returned");
-  const [seen, setSeen] = useState(() => store.get("mq_seen_adv", ""));
-  const fresh = latest && latest.id !== seen && Date.now() - latest.returnedAt < 10 * 60000;
-  if (!fresh) return null;
+function ReturnReveal({ state, latest, onSeen, onDone }) {
   const cards = state.postcards.filter((p) => latest.postcardIds.includes(p.id));
   const finish = (go) => {
-    store.set("mq_seen_adv", latest.id);
-    setSeen(latest.id);
+    onSeen();
     if (go) onDone();
   };
   return (
@@ -662,7 +696,7 @@ function ReturnReveal({ state, onDone }) {
 // ------------------------------------------------------------------ album
 const GROUPS = [["common", "Cities & parks"], ["rare", "Rare finds"], ["seasonal", "Seasonal"], ["secret", "Secret places"]];
 
-function Album({ state, open, goMap, run }) {
+function Album({ state, open, goMap, run, busy }) {
   const [view, setView] = useState("mine");
   const counts = useMemo(() => {
     const m = {};
@@ -708,7 +742,7 @@ function Album({ state, open, goMap, run }) {
           })}
         </>
       ) : (
-        <Friends state={state} run={run} />
+        <Friends state={state} run={run} busy={busy} />
       )}
     </div>
   );
@@ -727,7 +761,7 @@ function PostcardSheet({ id, state, close }) {
 }
 
 // ------------------------------------------------------------------ friends
-function Friends({ state, run }) {
+function Friends({ state, run, busy }) {
   const approved = state.friends.filter((f) => f.status === "approved");
   const pending = state.friends.filter((f) => f.status === "pending_parent");
   const [sel, setSel] = useState(approved[0]?.id);
@@ -790,12 +824,12 @@ function Friends({ state, run }) {
                   {[...new Set(friend.postcards)].map((d) => <option key={d} value={d}>{nameOf(d)}</option>)}
                 </select>
               </label>
-              <button className="btn honey">Propose swap</button>
+              <button className="btn honey" disabled={busy}>Propose swap</button>
             </form>
           )}
           <h3 className="hand">Send a note</h3>
           <div className="chips">
-            {state.catalog.greetings.map((g, i) => <button key={i} className="chip" onClick={() => run("child/greet", { friendId: friend.id, index: i }, `Sent to ${friend.name}!`)}>{g}</button>)}
+            {state.catalog.greetings.map((g, i) => <button key={i} className="chip" disabled={busy} onClick={() => run("child/greet", { friendId: friend.id, index: i }, `Sent to ${friend.name}!`)}>{g}</button>)}
           </div>
         </section>
       )}
@@ -803,7 +837,7 @@ function Friends({ state, run }) {
         <h3 className="hand">Add a friend</h3>
         <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Request sent to your grown-up!")) setCode(""); }}>
           <label className="grow">Invitation code<input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. SAM-12" /></label>
-          <button className="btn small sage">Send</button>
+          <button className="btn small sage" disabled={busy}>Send</button>
         </form>
         {pending.length > 0 && <p className="fine">Waiting for a grown-up: {pending.map((f) => f.name).join(", ")}</p>}
       </section>
@@ -855,9 +889,8 @@ async function speak(text, mode) {
   speakBrowser(clean);
 }
 
-function Buddy({ state, run }) {
+function Buddy({ state, run, busy, offline }) {
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
   const [voice, setVoice] = useState(false);
   const chatRef = useRef(null);
   const chat = state.chat;
@@ -869,30 +902,29 @@ function Buddy({ state, run }) {
   const goal = state.goals[0];
   const send = async (msg) => {
     if (!msg.trim() || busy) return;
-    setBusy(true);
     setText("");
     const r = await run("buddy/chat", { text: msg });
-    setBusy(false);
-    if (r && voice) speak(r.reply, state.integrations.voice);
+    if (r && voice) run(() => speak(r.reply, state.integrations.voice));
   };
-  const suggestions = [`Can I buy a $50 game?`, `When will I get my ${goal.title.toLowerCase()}?`, "Make me a saving plan", "What's a need vs. a want?"];
+  const suggestions = [`Can I buy a $50 game?`, goal ? `When will I get my ${goal.title.toLowerCase()}?` : "Help me choose a savings goal", "Make me a saving plan", "What's a need vs. a want?"];
   return (
     <div className="page buddy">
       <div className="row">
         <h1 className="page-title">Money Buddy</h1>
         <label className="toggle"><input type="checkbox" checked={voice} onChange={(e) => setVoice(e.target.checked)} /> Read aloud</label>
       </div>
+      {!goal && <section className="paper-card"><h2 className="hand">Set a savings goal</h2><p>Ask your grown-up to help choose one.</p></section>}
       {!state.settings.buddyEnabled && <p className="lock-note">Your grown-up turned Money Buddy off for now.</p>}
       <div className="chat" aria-live="polite" ref={chatRef}>
-        {chat.length === 0 && <div className="msg assistant">Hi {state.child.name}! I'm Money Buddy. Ask me about saving, spending, or your {goal.title.toLowerCase()}.</div>}
+        {chat.length === 0 && <div className="msg assistant">Hi {state.child.name}! I'm Money Buddy. Ask me about saving, spending, or {goal ? `your ${goal.title.toLowerCase()}` : "a new savings goal"}.</div>}
         {chat.map((m) => (
           <div key={m.id} className={`msg ${m.role} ${m.auto ? "auto" : ""}`}>
             {m.auto && <small className="auto-tag">Plan update</small>}
             {m.text.split("\n").filter(Boolean).map((line, i) => <p key={i}>{line}</p>)}
-            {m.role === "assistant" && <button className="speak" onClick={() => speak(m.text, state.integrations.voice)} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
+            {m.role === "assistant" && <button className="speak" disabled={busy} onClick={() => run(() => speak(m.text, state.integrations.voice))} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
           </div>
         ))}
-        {busy && <div className="msg assistant typing" aria-label="Money Buddy is thinking"><span /><span /><span /></div>}
+        {busy && !offline && <div className="msg assistant typing" aria-label="Money Buddy is thinking"><span /><span /><span /></div>}
       </div>
       <div className="chips scroll">
         {suggestions.map((s) => <button key={s} className="chip" onClick={() => send(s)} disabled={busy}>{s}</button>)}

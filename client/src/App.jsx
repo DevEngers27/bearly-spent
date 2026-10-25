@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, hasParentToken, setParentToken, useLiveState } from "./api.js";
+import { api, hasParentToken, OFFLINE_MESSAGE, setParentToken, useAction, useLiveState } from "./api.js";
 import Child from "./Child.jsx";
 import Parent from "./Parent.jsx";
 import { SketchDefs } from "./Bear.jsx";
@@ -13,6 +13,8 @@ function initialRole() {
 export default function App() {
   const [role, setRole] = useState(initialRole);
   const [toasts, setToasts] = useState([]);
+  const [updated, setUpdated] = useState(false);
+  const [parentOffline, setParentOffline] = useState(false);
   const toast = useCallback((text, tone = "ok") => {
     const id = Math.random();
     setToasts((t) => [...t, { id, text, tone }]);
@@ -20,10 +22,21 @@ export default function App() {
   }, []);
   useEffect(() => {
     const url = new URL(location.href);
-    if (role === "parent") url.searchParams.set("role", "parent");
+    if (role === "parent" || role === "pin") url.searchParams.set("role", "parent");
     else url.searchParams.delete("role");
     history.replaceState(null, "", url);
   }, [role]);
+  const lock = useCallback(() => { setParentToken(null); setRole("pin"); }, []);
+  const kidView = () => { setParentToken(null); setRole("child"); };
+  useEffect(() => {
+    window.addEventListener("mq:unauthorized", lock);
+    const onUpdate = () => setUpdated(true);
+    navigator.serviceWorker?.addEventListener("controllerchange", onUpdate);
+    return () => {
+      window.removeEventListener("mq:unauthorized", lock);
+      navigator.serviceWorker?.removeEventListener("controllerchange", onUpdate);
+    };
+  }, [lock]);
 
   return (
     <div className={`app role-${role}`}>
@@ -36,13 +49,16 @@ export default function App() {
             <span>MoneyQuest</span>
             <span className="brand-sub">for grown-ups</span>
           </div>
-          <button className="pbtn" onClick={() => setRole("child")}>Back to kid view</button>
+          {role === "parent" && parentOffline && <span className="offline-pill" role="status">Offline</span>}
+          {role === "parent" && <button className="pbtn" onClick={lock}>Lock</button>}
+          <button className="pbtn" onClick={kidView}>Back to kid view</button>
         </header>
       )}
-      {role === "child" && <ChildRoot toast={toast} onGrownUps={() => setRole(hasParentToken() ? "parent" : "pin")} />}
-      {role === "parent" && <ParentRoot toast={toast} onLocked={() => setRole("pin")} />}
-      {role === "pin" && <PinGate onOk={() => setRole("parent")} onCancel={() => setRole("child")} />}
+      {role === "child" && <ChildRoot toast={toast} onGrownUps={lock} />}
+      {role === "parent" && <ParentRoot toast={toast} onConnection={setParentOffline} />}
+      {role === "pin" && <PinGate onOk={() => setRole("parent")} onCancel={kidView} />}
       <div className="toasts" aria-live="polite">
+        {updated && <button className="toast ok" onClick={() => location.reload()}>Updated! Tap to reload</button>}
         {toasts.map((t) => <div key={t.id} className={`toast ${t.tone}`}>{t.tone === "ok" && <Icon name="sparkle" size={18} />}{t.text}</div>)}
       </div>
     </div>
@@ -50,23 +66,24 @@ export default function App() {
 }
 
 function Loading({ error }) {
-  return <div className="loading"><img className="loading-bear" src="/bear/poses/bear_front.png" alt="" />{error ? `Can't reach the MoneyQuest server. Check that it's running on port 8787. (${error.message})` : "Packing the backpack…"}</div>;
+  return <div className="loading"><img className="loading-bear" src="/bear/poses/bear_front.png" alt="" />{error ? "Can't reach MoneyQuest right now. Check your connection and try again." : "Packing the backpack…"}</div>;
 }
 
 function ChildRoot({ toast, onGrownUps }) {
-  const { state, error } = useLiveState("child");
+  const { state, error, offline } = useLiveState("child");
+  const hasState = Boolean(state);
+  useEffect(() => {
+    if (offline && hasState) toast(OFFLINE_MESSAGE);
+  }, [offline, hasState, toast]);
   if (!state) return <Loading error={error} />;
-  return <Child state={state} toast={toast} onGrownUps={onGrownUps} />;
+  return <Child state={state} toast={toast} offline={offline} onGrownUps={onGrownUps} />;
 }
 
-function ParentRoot({ toast, onLocked }) {
-  const { state, error } = useLiveState("parent");
+function ParentRoot({ toast, onConnection }) {
+  const { state, error, offline } = useLiveState("parent");
   useEffect(() => {
-    if (error?.status === 401) {
-      setParentToken(null);
-      onLocked();
-    }
-  }, [error, onLocked]);
+    onConnection(offline);
+  }, [offline, onConnection]);
   if (!state) return <Loading error={error?.status === 401 ? null : error} />;
   return <Parent state={state} toast={toast} />;
 }
@@ -74,15 +91,14 @@ function ParentRoot({ toast, onLocked }) {
 function PinGate({ onOk, onCancel }) {
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
-  const submit = async (e) => {
+  const [run, busy] = useAction((message) => setErr(message === "Wrong PIN" ? "That PIN doesn't match. The demo PIN is 1234." : message));
+  const submit = (e) => {
     e.preventDefault();
-    try {
+    run(async () => {
       const { token } = await api("parent/login", { pin });
       setParentToken(token);
       onOk();
-    } catch (e2) {
-      setErr(e2.message === "Wrong PIN" ? "That PIN doesn't match. The demo PIN is 1234." : e2.message);
-    }
+    });
   };
   return (
     <main className="pin-page" id="main">
@@ -93,7 +109,7 @@ function PinGate({ onOk, onCancel }) {
         {err && <p className="err">{err}</p>}
         <div className="row">
           <button type="button" className="pbtn" onClick={onCancel}>Back to kid view</button>
-          <button className="pbtn primary">Unlock</button>
+          <button className="pbtn primary" disabled={busy}>Unlock</button>
         </div>
         <small>Demo PIN: 1234</small>
       </form>

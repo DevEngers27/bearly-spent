@@ -624,3 +624,7 @@ button.pc-tile:hover { transform: rotate(0deg) translateY(-3px); }
 .speak .icon { display: block; }
 .big .icon { display: inline-block; }
 .walking-away .paws { display: block; opacity: .7; }
+
+.offline-pill { border: 1px solid var(--ink); border-radius: 999px; padding: 4px 9px; background: #F7DDD7; font-size: 13px; font-weight: 800; }
+button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
+.pbtn:disabled, .chip:disabled, .swatch:disabled, .speak:disabled { opacity: 0.5; cursor: not-allowed; }
