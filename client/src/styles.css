@@ -696,8 +696,10 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .thought-dots i:nth-child(2) { animation-delay: .15s; }
 .thought-dots i:nth-child(3) { animation-delay: .3s; }
 @keyframes thought-hop { 50% { transform: translateY(-4px); } }
-.kid-app:has(.talk-bar) { padding-bottom: 220px; }
-.talk-bar { position: fixed; z-index: 19; bottom: calc(78px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(520px, 100%); padding: 10px 14px 16px; background: var(--paper-card) var(--grain); border: 2px solid var(--ink); border-radius: 22px 24px 0 0; box-shadow: 0 -4px 18px #51473820; }
+/* The talk bar sits in the page under the scene (never fixed): a focused input in a fixed bar made iOS scroll the whole page to the bottom. */
+.talk-bar { position: relative; z-index: 5; margin: -14px 6px 14px; padding: 12px 14px 14px; background: var(--paper-card) var(--grain); border: 2px solid var(--ink); border-radius: 18px 22px 20px 18px; box-shadow: var(--shadow); animation: fade 0.2s ease-out; }
+.talk-bar + .home-tools { margin-top: 0; }
+.talk-bar input { scroll-margin-block: 12px 140px; }
 .talk-links { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .talk-links > .link { margin-right: auto; }
 .talk-bar .chips { margin-bottom: 10px; }

@@ -1222,6 +1222,7 @@ test("F3: Add to album flies toward nav and finishes once after animation", () =
 
 test("F6: talk input keeps focus through polls, Escape restores opener and failed send keeps draft", async () => {
   const h = harness("Child.jsx"), state = stateFixture();
+  h.window.matchMedia = (query) => ({ matches: query.includes("pointer: fine") });
   let focused = 0, closed = 0;
   const opener = { focus: () => focused++ };
   h.document.activeElement = opener;
