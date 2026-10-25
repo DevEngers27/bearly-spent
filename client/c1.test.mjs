@@ -2066,7 +2066,7 @@ test("W3.2: a 12-line reply stays in a bordered bubble with a separate inner scr
   assert.match(outer, /border-radius:/);
   assert.match(outer, /padding: 15px 18px/);
   assert.doesNotMatch(outer, /(?:^|;)\s*(?:max-)?height:|overflow-y:/, "border grows with the content box");
-  assert.match(inner, /max-height: 176px/);
+  assert.match(inner, /max-height: 96px/);
   assert.match(inner, /overflow-y: auto/);
   assert.match(inner, /white-space: pre-wrap/);
   assert.match(css, /\.bear-bubble::after\s*\{[^}]*bottom: -11px/);

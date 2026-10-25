@@ -177,6 +177,15 @@ export function createLink(context, childId, now = Date.now()) {
   });
 }
 
+export function linkStatus(context, childId, code, now = Date.now()) {
+  childForDevices(context, childId);
+  code = str(code, { max: 6 }).toUpperCase();
+  const link = database().prepare("SELECT used_at, expires_at FROM kid_links WHERE code = ? AND family_id = ? AND child_id = ?")
+    .get(code, context.family.id, childId);
+  if (!link) throw new GameError("Code not found", 404);
+  return { status: link.used_at !== null ? "linked" : now >= link.expires_at ? "expired" : "pending" };
+}
+
 export function redeemLink(body, { ua, ip = "unknown", now = Date.now() } = {}) {
   // Protect the short pairing code from online guessing too.
   takeLimit("loginIp", `link:${ip}`, now);
