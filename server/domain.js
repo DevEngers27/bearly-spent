@@ -32,6 +32,17 @@ export function audit(db, actor, action, detail, data = {}) {
   if (db.audit.length > 2000) db.audit.splice(0, db.audit.length - 2000);
 }
 
+export function recordFunding(db, amount, note) {
+  const txn = {
+    id: uid("txn"), ts: Date.now(), from: "external", to: "parent", amount,
+    kind: "funding_in", memo: note || `Added by ${db.family.parentName}`,
+    idempotencyKey: null, status: "posted",
+  };
+  db.accounts.parent.balance += amount;
+  db.transactions.push(txn);
+  audit(db, "parent", "funding_added", `Recorded ${dollars(amount)} added to ${db.child.name}'s funding — real money stays with you`, { txnId: txn.id, amount });
+}
+
 export function notify(db, to, text, kind = "info", ref = null) {
   if (ref && db.notifications.some((n) => n.to === to && n.ref === ref)) return;
   db.notifications.push({ id: uid("ntf"), ts: Date.now(), to, text, kind, ref, read: false });

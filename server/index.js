@@ -83,7 +83,7 @@ export function childView(db, now = Date.now()) {
     allowance: { amount: db.allowance.amount, savePct: db.allowance.savePct, nextRun: db.allowance.nextRun, spendLimit: db.allowance.spendLimit },
     parentGoals: db.parentGoals,
     missions: db.missions,
-    transactions: db.transactions.filter((t) => t.from !== "parent" || t.to !== "parent").slice(-30).reverse(),
+    transactions: db.transactions.filter((t) => t.kind !== "funding_in" && (t.from !== "parent" || t.to !== "parent")).slice(-30).reverse(),
     notifications: db.notifications.filter((n) => n.to === "child").slice(-20).reverse(),
     adventures: db.adventures.slice(-10).reverse().map(({ destId, ...adventure }) => adventure.status === "away" ? adventure : { ...adventure, destId }),
     postcards: db.postcards,
@@ -250,8 +250,8 @@ register("POST", "/api/voice/token", "child", async (req, ctx, res, now) => {
   if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
   return { token: await mintAccessToken(), version: CARTESIA_VERSION, request: voiceConfig() };
 });
-for (const action of ["approval", "goal", "mission", "allowance", "settings", "savingsGoal"]) {
-  const path = action === "savingsGoal" ? "savings-goal" : action === "approval" ? "approval/:id" : action;
+for (const action of ["approval", "goal", "mission", "allowance", "settings", "savingsGoal", "fundingAdd"]) {
+  const path = action === "fundingAdd" ? "funding/add" : action === "savingsGoal" ? "savings-goal" : action === "approval" ? "approval/:id" : action;
   register("POST", `/api/parent/${path}`, "parent", (req, ctx, res, now) => {
     const out = runChildAction(ctx.childId, (db) => actions[action](db, req.body, req.params.id), action, now);
     if (action === "settings" && !readChild(ctx.childId).settings.buddyEnabled) cancelReplan(ctx.childId);

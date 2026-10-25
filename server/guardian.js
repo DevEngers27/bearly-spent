@@ -152,8 +152,8 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
       if (db.allowance.escalatedPeriod !== period) {
         db.allowance.escalatedPeriod = period;
         escalate(db, "topup", `Allowance of ${dollars(amount)} is due but the funding account only has ${dollars(db.accounts.parent.balance)}.`,
-          "Top up the funding account; the allowance will pay automatically on the next check.");
-        log("allowance_blocked", "Allowance is waiting for more funding. Asked you to top up.", { policy: "G1", period });
+          "Choose Add money in Allowance; the allowance will pay automatically on the next check.");
+        log("allowance_blocked", "Allowance is waiting for more funding. Asked you to choose Add money.", { policy: "G1", period });
       }
       break;
     }
@@ -207,7 +207,7 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
         if (a.kind === "spend") {
           escalate(db, "child_funds", `${db.child.name}'s spending money is short by ${dollars(a.amount - db.accounts.spending.balance)} for '${a.memo}'`, "Your child needs to save less or earn more, or you can decline the purchase.", { approvalId: a.id }, now);
         } else {
-          escalate(db, "topup", `Couldn't complete "${a.title}": ${e.message}.`, "Add funds or decline the request.", { approvalId: a.id }, now);
+          escalate(db, "topup", `Couldn't complete "${a.title}": ${e.message}.`, "Choose Add money in Allowance or decline the request.", { approvalId: a.id }, now);
         }
       }
       log("obligation_blocked", `G2: Could not execute ${a.kind} (${e.code}). Escalated to parent; no partial transfer made.`, { policy: "G2", approvalId: a.id });

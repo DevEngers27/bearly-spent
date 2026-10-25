@@ -9,6 +9,14 @@ import { money, integer, str, bool, id, oneOf, object } from "./validate.js";
 const action = (fn) => (db, body, ...args) => fn(db, object(body), ...args);
 const optionalNote = (body) => Object.hasOwn(body, "note") ? str(body.note, { required: false }) : "";
 
+function clearFundingEscalations(db) {
+  // A parent deposit can unblock parent-funded payouts, not child spending.
+  db.approvals.forEach((a) => {
+    if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
+    if (a.kind === "topup" && a.status === "pending") game.resolveEscalation(db, a, "approved");
+  });
+}
+
 export const actions = {
   save: action((db, body) => game.childSave(db, money(body.amount, { min: 100 }))),
   spend: action((db, body) => game.childSpend(db, {
@@ -72,14 +80,16 @@ export const actions = {
     const a = Object.assign(db.allowance, update);
     game.audit(db, "parent", "allowance_updated", `Allowance ${(a.amount / 100).toFixed(2)}/wk, ${a.savePct}% saved, purchase limit $${(a.spendLimit / 100).toFixed(2)}`);
   }),
+  fundingAdd: action((db, body) => {
+    const amount = money(body.amount, { min: 100, max: 100000 });
+    const note = optionalNote(body);
+    game.recordFunding(db, amount, note);
+    clearFundingEscalations(db);
+  }),
   topup: action((db, body) => {
     const amount = money(body.amount, { min: 1, max: 100000 });
     db.accounts.parent.balance += amount;
-    // A parent deposit can unblock parent-funded payouts, not child spending.
-    db.approvals.forEach((a) => {
-      if (a.escalatedAt && !a.paidTxnId && ["reward", "extra"].includes(a.kind)) delete a.escalatedAt;
-      if (a.kind === "topup" && a.status === "pending") game.resolveEscalation(db, a, "approved");
-    });
+    clearFundingEscalations(db);
     game.notify(db, "parent", `Funding topped up: $${(amount / 100).toFixed(2)}`, "money");
     game.audit(db, "parent", "topup", `Added $${(amount / 100).toFixed(2)} to the funding account (simulated deposit)`);
   }),

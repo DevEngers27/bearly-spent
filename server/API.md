@@ -156,6 +156,7 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | `POST /api/parent/goal/:id/cancel` | No fields | Cancelled active goal; kindly notifies the child and writes audit. |
 | `POST /api/parent/mission` | `{title,points?}` | Mission `{id,title,points,status,createdBy,createdAt}`; integer 5–100 points (default catalog parent points). |
 | `POST /api/parent/allowance` | Partial `{amount?,savePct?,spendLimit?,rewardDestination?}` | `{ok:true}`; amount $0–$100, savePct integer 0–100, spendLimit $0–$10,000, destination `spending` or `savings`. |
+| `POST /api/parent/funding/add` | `{amount,note?:string}` | `{ok:true}`; $1–$1,000, optional trimmed note up to 120 characters. Any family; PIN unlock required when set. Records a `funding_in` transaction (`external` → `parent`) for the selected child's funding account, with memo from note or `Added by <parentName>`. Audits `Recorded $X added to <childName>'s funding — real money stays with you`. No child notification; funding entries/notes stay in parent state. Clears parent-funded escalations so allowance/rewards can pay on the next Guardian pass (including the post-action pass). No route-specific rate limit; normal body limits apply. |
 | `POST /api/parent/settings` | Partial `{requireTradeApproval?,buddyEnabled?,coopChallenge?}` | `{ok:true}`; strict booleans. Disabling Buddy cancels this child's queued/in-flight replans. |
 | `POST /api/parent/savings-goal` | Partial `{title?,target?}` | `{ok:true}`; updates first savings goal, target $1–$10,000. |
 
@@ -169,7 +170,7 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 | `POST /api/parent/reset` | Parent, demo enabled, demo family only | No fields | `{ok:true}`; resets only the selected demo child, cancels its replans, adds a starting plan and `demo_reset` audit. |
 | `POST /api/parent/inject-fault` | Parent, demo enabled, demo family only | No fields | `{injected:transactionId}`; duplicate in selected child's ledger, corrected by next Guardian tick; `demo_fault` audit. |
 | `POST /api/parent/allowance/run-now` | Parent, demo enabled, demo family only | No fields | `{ok:true}`; fast-forward selected child's allowance while preserving overdue periods; rejects an already-paid current day; `demo_allowance_run` audit. |
-| `POST /api/parent/topup` | Parent, demo enabled, demo family only | `{amount}` | `{ok:true}`; $0.01–$1,000 to selected child's simulated parent funding account; `demo_topup` audit. |
+| `POST /api/parent/topup` | Parent, demo enabled, demo family only | `{amount}` | **Demo-only**; `{ok:true}`; $0.01–$1,000 to selected child's simulated parent funding account; `demo_topup` audit. Real families receive 404; use `POST /api/parent/funding/add` to record money set aside. |
 
 All four demo controls require demo mode and the demo family; real families receive 404 even when demo mode is enabled. These controls are not real bank deposits. `npm run reset` explicitly enables demo mode for that command and resets only the demo child in SQLite; it does not delete any family's database.
 

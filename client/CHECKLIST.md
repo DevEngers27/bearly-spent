@@ -101,3 +101,12 @@ Automated socket-free checks: `node --test server/*.test.js` and `node --test cl
 - [ ] **W2.9 — Demo scope:** Check Approvals, Allowance, Guardian and Friends & privacy for a real family on a demo-enabled server: Add $50, Fast-forward, Post a duplicate and Reset demo are absent. Demo family sees them; real-family direct requests return 404.
 - [ ] **W2.10 — Code copy:** Unknown code says “That code doesn't match — check the letters and try again”. Used, expired or cancelled known code asks for a new one.
 - [ ] **W2.11 — Phone parent layout:** At 390px, visit all parent sections with long names, notes and transaction rows. The page has no horizontal scroll; section navigation can scroll inside its container. Devices wrap and forms/tables remain within the page.
+
+## W2c funding record
+
+Automated socket-free coverage: `node --test server/*.test.js` and `node --test client/*.test.mjs`. Browser checks remain pending.
+
+- [ ] Register a real family, set a positive allowance and open Overview with zero funding: the Add money nudge names the bear. Its button opens Allowance and focuses Amount. A funding escalation's Add money button opens the same form.
+- [ ] Enter $25.50 and an optional note; Add money sends one `parent/funding/add` request for the selected child. Inputs/button disable while pending. A failed request preserves the draft; success clears it and refreshes funding, Transactions and Guardian log. No money moves outside the ledger. The child sees no funding note/notification; a due allowance may generate its normal payout notification.
+- [ ] Check $1/$1,000 boundaries, cent precision, required amount and 120-character note. Funding copy explains that MoneyQuest never moves real money. After funding is positive, the Overview nudge disappears. With allowance zero it is absent.
+- [ ] With a PIN, lock parent mode: direct funding requests fail until unlock. A paired kid gets 403. Real families retain Add money but have no Add $50 or Fast-forward; demo keeps both one-tap controls alongside the form.

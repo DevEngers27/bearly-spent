@@ -1790,6 +1790,103 @@ test("W2.9: demo controls render only when me.demo is strictly true", () => {
   }
 });
 
+test("W2c.2: every family has the funding form, with validated fields, ledger copy and demo-only shortcuts", async () => {
+  for (const demo of [false, true]) {
+    const h = harness("Parent.jsx"), state = stateFixture(), requests = [];
+    let succeeds = false;
+    const props = { state, demo, busy: false, run: async (path, body) => { requests.push([path, { ...body }]); return succeeds ? { ok: true } : null; } };
+    const render = () => h.render(h.exports.Allowance, props);
+    let tree = render();
+    assert.ok(text(tree).includes("This is a record of money you have set aside; MoneyQuest never moves real money."));
+    assert.equal(Boolean(byText(tree, "Add $50")), demo);
+    assert.equal(Boolean(byText(tree, "Fast-forward")), demo);
+    const form = () => nodes(render(), (n) => n.type === "form" && n.props["aria-label"] === "Add money")[0];
+    const inputs = nodes(form(), (n) => n.type === "input");
+    assert.equal(inputs[0].props.required, true);
+    assert.equal(inputs[0].props.min, "1");
+    assert.equal(inputs[0].props.max, "1000");
+    assert.equal(inputs[0].props.step, "0.01");
+    assert.equal(inputs[1].props.maxLength, 120);
+    changeField(tree, "Amount ($)", "25.50");
+    changeField(render(), "Note (optional)", "Birthday envelope");
+    await form().props.onSubmit(submit);
+    assert.equal(nodes(form(), (n) => n.type === "input")[0].props.value, "25.50", "failed submission preserves draft");
+    succeeds = true;
+    await form().props.onSubmit(submit);
+    assert.deepEqual(requests, [["parent/funding/add", { amount: "25.50", note: "Birthday envelope" }], ["parent/funding/add", { amount: "25.50", note: "Birthday envelope" }]]);
+    assert.ok(nodes(form(), (n) => n.type === "input").every((n) => n.props.value === ""), "successful submission clears draft");
+    props.busy = true;
+    assert.ok(nodes(form(), (n) => n.type === "input" || n.type === "button").every((n) => n.props.disabled));
+    if (demo) {
+      props.busy = false;
+      await byText(render(), "Add $50").props.onClick();
+      assert.deepEqual(requests.at(-1), ["parent/topup", { amount: 50 }]);
+    }
+  }
+});
+
+test("W2c.3: zero-funding Overview and escalation buttons open Allowance and focus Add money", () => {
+  const state = stateFixture();
+  const overview = harness("Parent.jsx");
+  for (const [balance, amount, visible] of [[0, 1000, true], [100, 1000, false], [0, 0, false]]) {
+    state.accounts.parent.balance = balance;
+    state.allowance.amount = amount;
+    const tree = overview.render(overview.exports.Overview, { state });
+    assert.equal(Boolean(byText(tree, "Add money")), visible);
+    if (visible) assert.ok(text(tree).includes("Add money to the funding record so Maple's allowance can be paid"));
+  }
+  state.accounts.parent.balance = 0;
+  state.allowance.amount = 1000;
+  const h = harness("Parent.jsx");
+  const props = { state, me: meFixture(), toast: noop };
+  const render = () => h.render(h.exports.default, props);
+  byText(render(), "Overview").props.onClick();
+  const overviewProps = nodes(render(), (n) => n.type?.name === "Overview")[0].props;
+  byText(overview.render(overview.exports.Overview, overviewProps), "Add money").props.onClick();
+  const allowanceProps = () => nodes(render(), (n) => n.type?.name === "Allowance")[0].props;
+  assert.equal(allowanceProps().fundingFocus, 1);
+  assert.equal(byText(render(), "Allowance").props["aria-current"], "page");
+  const allowance = harness("Parent.jsx");
+  const form = allowance.render(allowance.exports.Allowance, allowanceProps());
+  let focused = 0;
+  nodes(form, (n) => n.type === "input" && n.props.ref)[0].props.ref.current = { focus: () => focused++ };
+  allowance.flush();
+  assert.equal(focused, 1);
+  const inbox = harness("Parent.jsx");
+  const tree = inbox.render(inbox.exports.Inbox, { ...overviewProps, pending: [{ id: "funding", kind: "topup", title: "Funding needed" }] });
+  byText(tree, "Add money").props.onClick();
+  assert.equal(allowanceProps().fundingFocus, 2);
+  allowance.render(allowance.exports.Allowance, allowanceProps());
+  allowance.flush();
+  assert.equal(focused, 2);
+});
+
+test("W2c.2: funding form uses the selected-child API, refreshes on success and guards duplicate submissions", async () => {
+  const h = harness("api.js"), state = stateFixture(), requests = [];
+  h.exports.setSelectedChild("child-funding");
+  let resolve, changed = 0;
+  h.window.addEventListener("mq:changed", () => changed++);
+  h.fetch = (url, options) => { requests.push([url, JSON.parse(options.body)]); return new Promise((done) => { resolve = done; }); };
+  const formHarness = harness("Parent.jsx");
+  const render = () => {
+    const [run, busy] = h.render(() => h.exports.useAction(h.toast));
+    return formHarness.render(formHarness.exports.Allowance, { state, run, busy });
+  };
+  changeField(render(), "Amount ($)", "10");
+  const form = () => nodes(render(), (n) => n.type === "form" && n.props["aria-label"] === "Add money")[0];
+  const first = form().props.onSubmit(submit);
+  await form().props.onSubmit(submit);
+  assert.equal(requests.length, 1);
+  assert.equal(new URL(requests[0][0], h.location).pathname, "/api/parent/funding/add");
+  assert.equal(new URL(requests[0][0], h.location).searchParams.get("child"), "child-funding");
+  assert.deepEqual(requests[0][1], { amount: "10", note: "" });
+  assert.equal(byText(form(), "Add money").props.disabled, true);
+  resolve(new Response('{"ok":true}'));
+  await first;
+  assert.equal(changed, 1);
+  assert.equal(byText(form(), "Add money").props.disabled, false);
+});
+
 test("W2.10: kid code errors map reason into distinct warm copy", async () => {
   for (const [reason, message] of [["unknown", "That code doesn't match — check the letters and try again"], ["used_or_expired", "That code was already used or expired. Ask for a new one."]]) {
     const h = harness("App.jsx");

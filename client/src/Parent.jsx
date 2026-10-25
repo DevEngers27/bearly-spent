@@ -23,6 +23,8 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
   const [sec, setSec] = useState("inbox");
   const [opened, setOpened] = useState(["inbox"]);
   const selectSection = (id) => { setSec(id); setOpened((previous) => previous.includes(id) ? previous : [...previous, id]); };
+  const [fundingFocus, setFundingFocus] = useState(0);
+  const onAddMoney = () => { selectSection("allowance"); setFundingFocus((current) => current + 1); };
   const [run, pendingAction] = useAction(toast, offline);
   const busy = pendingAction || offline;
   const timezoneAttempted = useRef(false);
@@ -36,7 +38,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
     run("parent/settings", { timezone: BROWSER_TIMEZONE });
   }, [state.settings.timezone, run]);
   const pending = state.approvals.filter((a) => a.status === "pending");
-  const ctx = { state, run, busy, demo: me?.demo === true };
+  const ctx = { state, run, busy, demo: me?.demo === true, onAddMoney };
   return (
     <div className="parent">
       <aside className="p-nav">
@@ -58,7 +60,7 @@ export default function Parent({ state, toast, me, refreshMe, onSignOut, onSignO
         {sec === "inbox" && <Inbox {...ctx} pending={pending} />}
         {sec === "overview" && <Overview {...ctx} />}
         {opened.includes("goals") && <div hidden={sec !== "goals"}><Goals {...ctx} /></div>}
-        {opened.includes("allowance") && <div hidden={sec !== "allowance"}><Allowance key={JSON.stringify([state.allowance.amount, state.allowance.savePct, state.allowance.spendLimit, state.allowance.rewardDestination])} {...ctx} /></div>}
+        {opened.includes("allowance") && <div hidden={sec !== "allowance"}><Allowance key={JSON.stringify([state.allowance.amount, state.allowance.savePct, state.allowance.spendLimit, state.allowance.rewardDestination])} {...ctx} fundingFocus={fundingFocus} /></div>}
         {sec === "activity" && <Activity {...ctx} />}
         {sec === "guardian" && <Guardian {...ctx} />}
         {sec === "buddy" && <BuddyLog {...ctx} />}
@@ -81,7 +83,7 @@ function Integrations({ state }) {
   );
 }
 
-function Inbox({ state, run, demo, pending, busy }) {
+function Inbox({ state, run, demo, pending, busy, onAddMoney }) {
   const notifications = state.notifications.filter((n) => !n.read);
   const decided = state.approvals.filter((a) => a.status !== "pending").slice(0, 8);
   return (
@@ -100,6 +102,7 @@ function Inbox({ state, run, demo, pending, busy }) {
             <div className="approval-actions">
               {a.kind === "topup" || a.kind === "review" ? (
                 <>
+                  {a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>}
                   {demo && a.kind === "topup" && <button disabled={busy} className="pbtn primary" onClick={() => run("parent/topup", { amount: 50 }, "Added $50 to funding")}>Add $50</button>}
                   <button disabled={busy} className="pbtn" onClick={() => run(`parent/approval/${a.id}`, { approve: true }, "Marked as handled")}>Mark handled</button>
                 </>
@@ -142,7 +145,7 @@ function Inbox({ state, run, demo, pending, busy }) {
   );
 }
 
-function Overview({ state }) {
+function Overview({ state, onAddMoney, busy }) {
   const goal = state.goals[0];
   const learned = state.child.stats;
   return (
@@ -151,9 +154,13 @@ function Overview({ state }) {
       <div className="p-figures">
         <Figure label={`${state.child.name}'s savings`} value={money(state.accounts.savings.balance)} sub={goal ? `${Math.round((state.accounts.savings.balance / goal.target) * 100)}% of ${goal.title}` : "Set a savings goal"} />
         <Figure label="Spending money" value={money(state.accounts.spending.balance)} />
-        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Simulated" />
+        <Figure label="Funding account" value={money(state.accounts.parent.balance)} sub="Money set aside" />
         <Figure label="Adventure points" value={state.child.points} sub="Game points, not money" />
       </div>
+      {state.accounts.parent.balance === 0 && state.allowance.amount > 0 && <section className="p-card">
+        <p>{`Add money to the funding record so ${state.child.bear.name}'s allowance can be paid`}</p>
+        <button disabled={busy} className="pbtn primary" onClick={onAddMoney}>Add money</button>
+      </section>}
       {!goal && <section className="p-card"><h2>Set a savings goal</h2><p>Choose something to save for in Goals & tasks.</p></section>}
       <div className="p-two">
         <section>
@@ -258,9 +265,19 @@ function SavingsGoal({ state, run, busy }) {
   );
 }
 
-function Allowance({ state, run, demo, busy }) {
+function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
   const a = state.allowance;
   const [f, setF] = useState({ amount: a.amount / 100, savePct: a.savePct, spendLimit: a.spendLimit / 100, rewardDestination: a.rewardDestination });
+  const [funding, setFunding] = useState({ amount: "", note: "" });
+  const fundingAmount = useRef(null);
+  useEffect(() => {
+    if (fundingFocus > 0) fundingAmount.current?.focus();
+  }, [fundingFocus]);
+  const addMoney = async (event) => {
+    event.preventDefault();
+    const result = await run("parent/funding/add", funding, "Money recorded — real money stays with you");
+    if (result) setFunding({ amount: "", note: "" });
+  };
   return (
     <div className="p-stack">
       <h1>Allowance & limits</h1>
@@ -276,21 +293,27 @@ function Allowance({ state, run, demo, busy }) {
         </div>
         <button disabled={busy} className="pbtn primary">Save rules</button>
       </form>
-      {demo && <section className="p-card">
+      <section className="p-card">
         <h2>Funding account</h2>
-        <p>{money(state.accounts.parent.balance)} available (simulated)</p>
-        <div className="row">
+        <p>{money(state.accounts.parent.balance)} recorded as set aside</p>
+        <p className="p-muted" id="funding-explanation">This is a record of money you have set aside; MoneyQuest never moves real money.</p>
+        <form className="pform" onSubmit={addMoney} aria-label="Add money" aria-describedby="funding-explanation">
+          <label>Amount ($)<input ref={fundingAmount} type="number" required min="1" max="1000" step="0.01" disabled={busy} value={funding.amount} onChange={(e) => setFunding({ ...funding, amount: e.target.value })} /></label>
+          <label>Note (optional)<input maxLength={120} disabled={busy} value={funding.note} onChange={(e) => setFunding({ ...funding, note: e.target.value })} /></label>
+          <button disabled={busy} className="pbtn primary">Add money</button>
+        </form>
+        {demo && <div className="row">
           <button disabled={busy} className="pbtn" onClick={() => run("parent/topup", { amount: 50 }, "Added $50")}>Add $50</button>
           <button disabled={busy} className="pbtn" onClick={() => run("parent/allowance/run-now", {}, "Fast-forwarded to payday")}>Fast-forward to payday</button>
-        </div>
-        <p className="p-muted">Fast-forward is a demo control: it moves the schedule to now so you can watch the Guardian pay.</p>
-      </section>}
+        </div>}
+        {demo && <p className="p-muted">Fast-forward is a demo control: it moves the schedule to now so you can watch the Guardian pay.</p>}
+      </section>
     </div>
   );
 }
 
 function Activity({ state }) {
-  const label = { parent: "Funding", savings: "Savings", spending: "Spending", merchant: "Store" };
+  const label = { external: "Set aside", parent: "Funding", savings: "Savings", spending: "Spending", merchant: "Store" };
   return (
     <div className="p-stack">
       <h1>Transactions</h1>
