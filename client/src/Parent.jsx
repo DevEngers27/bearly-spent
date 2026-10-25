@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, money, moneyShort, plural, formatTime, formatDateTime, postcardMetrics, useAction, GOAL_ICONS, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
+import { api, money, moneyShort, plural, formatTime, formatDateTime, postcardMetrics, useAction, GOAL_ICONS, goalIconName, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 import ChildProfileForm from "./ChildProfileForm.jsx";
 import Account from "./Account.jsx";
@@ -137,7 +137,7 @@ function Inbox({ state, run, demo, pending, busy, onAddMoney, mobile }) {
             <span className="kind-tag">{KIND_LABEL[a.kind] || a.kind}</span>
             <div className="approval-body">
               <strong>{a.title}</strong>
-              {a.detail && <p>{a.detail}</p>}
+              {a.kind === "friend_request" && state.friends.some((f) => f.id === a.socialId && !f.incoming) ? <p>Approving sends the request to the other family; they also have to agree</p> : a.detail && <p>{a.detail}</p>}
               {a.amount != null && <p className="amt">{money(a.amount)}</p>}
             </div>
             <div className="approval-actions">
@@ -299,6 +299,7 @@ function SavingsGoal({ state, goal, create = false, run, busy }) {
   const selected = create ? null : goal || currentSavingsGoal(state);
   const [sg, setSg] = useState({ title: selected?.title || "", target: selected ? selected.target / 100 : 50, icon: selected?.icon || "bike" });
   const live = !selected?.status || ["active", "reached"].includes(selected.status);
+  const editable = live || selected?.status === "archived";
   const current = selected && selected.id === (state.currentGoalId ?? state.child.currentGoalId);
   const waiting = selected && state.approvals.some((a) => a.kind === "goal_purchase" && a.goalId === selected.id && ["pending", "approved"].includes(a.status) && !a.paidTxnId);
   return (
@@ -307,12 +308,13 @@ function SavingsGoal({ state, goal, create = false, run, busy }) {
       {selected && <p>{goalStatusLabel(selected.status)}{current ? " · Current goal" : ""}</p>}
       {!selected && <p>Pick something your child would love to save for.</p>}
       <form className="pform pform-row" onSubmit={async (e) => { e.preventDefault(); if (await run(`parent/goals${selected ? `/${selected.id}` : ""}`, sg, selected ? "Savings goal updated" : "Savings goal created")) { if (!selected) setSg({ title: "", target: 50, icon: "bike" }); } }}>
-        <label>Saving for<input required maxLength={40} disabled={busy || !live || waiting} value={sg.title} onChange={(e) => setSg({ ...sg, title: e.target.value })} /></label>
-        <label>Target ($)<input required type="number" inputMode="decimal" min="1" max="1000" step="0.01" disabled={busy || !live || waiting} value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
-        <label>Picture<select disabled={busy || !live || waiting} value={sg.icon} onChange={(e) => setSg({ ...sg, icon: e.target.value })}>{GOAL_ICONS.map((icon) => <option key={icon} value={icon}>{goalLabel(icon)}</option>)}</select></label>
-        <button disabled={busy || !live || waiting} className="pbtn">{selected ? "Update" : "Create savings goal"}</button>
+        <label>Saving for<input required maxLength={40} disabled={busy || !editable || waiting} value={sg.title} onChange={(e) => setSg({ ...sg, title: e.target.value })} /></label>
+        <label>Target ($)<input required type="number" inputMode="decimal" min="1" max="1000" step="0.01" disabled={busy || !editable || waiting} value={sg.target} onChange={(e) => setSg({ ...sg, target: e.target.value })} /></label>
+        <fieldset className="goal-pictures" disabled={busy || !editable || waiting}><legend>Picture</legend><div className="goal-picture-row">{GOAL_ICONS.map((icon) => <button type="button" key={icon} aria-pressed={sg.icon === icon} onClick={() => setSg({ ...sg, icon })}><Icon name={goalIconName(icon)} size={26} /><span>{goalLabel(icon)}</span></button>)}</div></fieldset>
+        <button disabled={busy || !editable || waiting} className="pbtn">{selected ? "Update" : "Create savings goal"}</button>
       </form>
       {selected && <div className="btn-row">
+        {selected.status === "archived" && <button disabled={busy} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/restore`, {}, "Goal brought back")}>Bring back</button>}
         {live && !current && <button disabled={busy} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/current`, {}, "Current goal changed")}>Make current</button>}
         {live && <button disabled={busy || waiting} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/archive`, {}, "Goal archived")}>Archive</button>}
         <button disabled={busy || current || waiting || selected.status === "bought"} className="pbtn" onClick={() => setConfirmDelete(true)}>Delete</button>

@@ -899,3 +899,13 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .auth-child { display: grid; gap: 14px; margin: 0; padding: 14px; min-width: 0; border: 1px solid var(--line); border-radius: 14px; }
 .auth-child legend { font-weight: 800; padding: 0 6px; }
 .trip-countdown { font-variant-numeric: tabular-nums; }
+
+/* Goal pictures share accessible tap targets in child and parent forms. */
+.goal-pictures { border: 0; padding: 0; margin: 0; min-width: 0; }
+.goal-picture-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.goal-picture-row button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 44px; min-height: 44px; padding: 8px; border: 2px solid transparent; border-radius: 12px; background: var(--paper, #fffaf0); color: inherit; font: inherit; cursor: pointer; }
+.goal-picture-row button[aria-pressed="true"] { border-color: #776441; background: #f4dfaf; }
+.goal-picture-row button:focus-visible { outline: 2px solid #776441; outline-offset: 2px; }
+.goal-picture-row button:disabled { opacity: .5; cursor: default; }
+.goal-picture-row span { font-size: 12px; }
+.ask-again { display: block; margin-top: 8px; }

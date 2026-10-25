@@ -202,3 +202,21 @@ batch prohibits starting a listening server. No server or deployment was started
 - [ ] Each child's Apple Cash card has status/last ping, Generate or Rotate, Copy, Unlink and the help link. Rotation waits for a fresh ping. No instructions or JSON appear in the app; the help page has the correct HTTPS host and no private token. Test the actual iPhone Shortcut and compare a purchase with activity.
 - [ ] Create a family with one, two and four children; remove a middle row and refill it. Confirm the first saver is selected and siblings stay independent. Parent → Kids → Children opens Add a child in one tap at the top; failed saves preserve the draft.
 - [ ] Welcome describes where to get a kid code. Check long child/bear names, touch targets, keyboard focus, reduced motion and offline disabled actions on a phone.
+
+## H7 goals, weekly replanning, friend receipts and Buddy questions
+
+Socket-free coverage: `client/h7.test.mjs` and `server/h7.test.js` exercise both
+restore routes, parent PIN/child/family isolation, read-only bought goals, restoring
+through edits, current-goal selection, picture buttons, saved budget cents and
+zero repeat points, both approval stages and requester notification copy, identical
+initial valid/invalid code receipts, state-based suggestions, Claude retry timing,
+fallback metadata and Ask-again actions. Superseded expectations were updated in
+`client/c1.test.mjs`, `client/g1.test.mjs`, `client/g3.test.mjs`,
+`client/h2.test.mjs` and `client/h4.test.mjs`. Guardian and money paths are unchanged.
+
+Browser/device verification remains pending. No listening server was started.
+
+- [ ] At 360/390px and desktop widths, bring back an archived goal with and without another live current goal. Edit an archived goal, save it, then switch goals. Bought goals remain memories. Check the seven picture buttons in both forms wrap cleanly, show their labels, have 44px targets and visible keyboard focus, and never submit when picking a picture.
+- [ ] Finish the weekly budget, then open the checked item again. Verify “This week's plan”, the saved amount and four allocations, the free-change note and “Plan updated!” after saving. Points do not increase. Home Next up never suggests a completed budget. Start a new week and check allowance defaults.
+- [ ] With two real families, send a friend code: the child sees the waiting status, and the requester parent gets the Approvals instruction and explanatory card. Approve it and verify the sender sees “Sent to your friend's family”. The recipient flow stays unchanged. After both families agree the friend card replaces the waiting status. Repeat with an invalid code and compare the initial receipt/status; it must look the same. Reopen Friends in the same browser session.
+- [ ] Change the current goal and spending money; talk chips use that goal's name/target and a nearby price. With Claude configured, ask a chip question and inspect an answer using the child's numbers. Simulate one failure then success, then two failures: there is one 800ms retry, and the fallback has an “Ask <bear> again” button in the bubble and transcript. Use the button to resend the question. With no key, planner replies still work. Check off/offline/away states disable chatting.

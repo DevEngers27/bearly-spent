@@ -230,7 +230,9 @@ function GoalsSheet({ state, run, busy, close }) {
           <strong><Icon name={goalIconName(g.icon)} size={20} /> {g.title}</strong><p>{money(g.target)} · {goalStatusLabel(g.status)}{current?.id === g.id ? " · Current goal" : ""}</p>
           <div className="btn-row">
             {live && current?.id !== g.id && <button disabled={busy} className="btn small sage" onClick={() => run(`child/goals/${g.id}/current`, {}, "Let's save for this!")}>Save for this</button>}
-            {live && <button disabled={busy || waiting} className="btn small" onClick={() => edit(g)}>Edit</button>}
+            {g.status === "archived" && <button disabled={busy} className="btn small sage" onClick={() => run(`child/goals/${g.id}/restore`, {}, "Goal brought back!")}>Bring back</button>}
+            {(live || g.status === "archived") && <button disabled={busy || waiting} className="btn small" onClick={() => edit(g)}>Edit</button>}
+            {g.status === "bought" && <span className="fine">Bought — a memory</span>}
             {live && <button disabled={busy || waiting} className="btn small" onClick={async () => { if (await run(`child/goals/${g.id}/archive`, {}, "Goal put away")) reset(); }}>Put away</button>}
           </div>
         </li>;
@@ -241,7 +243,7 @@ function GoalsSheet({ state, run, busy, close }) {
       <fieldset disabled={busy}>
         <label>Saving for<input required maxLength={40} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label>
         <label>Target ($)<input required type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })} /></label>
-        <label>Picture<select value={draft.icon} onChange={(e) => setDraft({ ...draft, icon: e.target.value })}>{GOAL_ICONS.map((icon) => <option key={icon} value={icon}>{goalLabel(icon)}</option>)}</select></label>
+        <fieldset className="goal-pictures"><legend>Picture</legend><div className="goal-picture-row">{GOAL_ICONS.map((icon) => <button type="button" key={icon} aria-pressed={draft.icon === icon} onClick={() => setDraft({ ...draft, icon })}><Icon name={goalIconName(icon)} size={26} /><span>{goalLabel(icon)}</span></button>)}</div></fieldset>
         <div className="btn-row"><button className="btn honey">{editing ? "Update goal" : "Create goal"}</button>{editing && <button type="button" className="btn" onClick={reset}>New goal instead</button>}</div>
       </fieldset>
     </form>
@@ -392,7 +394,7 @@ function Home({ state, setTab, open, run, busy, talk }) {
             <BearFigure bear={state.child.bear} mood={mood} size={196} />
           </button>
         )}
-        {talk?.bubble && !overdue && (!talk.tripId || away?.id === talk.tripId) && <SpeechBubble key={talk.bubbleId} text={away ? `${state.child.bear.name} is on a trip!` : talk.bubble} countdownText={away ? countdown(away.returnsAt, now) : undefined} thinking={mood === "thinking"} staticText={Boolean(away)} onClose={talk.dismiss} />}
+        {talk?.bubble && !overdue && (!talk.tripId || away?.id === talk.tripId) && <SpeechBubble key={talk.bubbleId} text={away ? `${state.child.bear.name} is on a trip!` : talk.bubble} countdownText={away ? countdown(away.returnsAt, now) : undefined} thinking={mood === "thinking"} staticText={Boolean(away)} onClose={talk.dismiss} retry={talk.retryQuestion && !away ? () => talk.send(talk.retryQuestion) : undefined} bearName={state.child.bear.name} busy={busy} />}
         <div className="name-sticker">
           <strong>{state.child.bear.name}</strong>
           <span>{stage ? `${stage.label} bear` : "Little cub"}</span>
@@ -689,7 +691,7 @@ function Missions({ state, run, open, busy, goMap, setTab }) {
         <ul className="checklist" aria-live={label === "Today" ? "polite" : undefined}>
           {missions.map((m) => (
             <li key={m.id} className={m.done ? (label === "Today" ? "done mission-exit" : "done") : m.fresh ? "mission-enter" : ""}>
-              <button onClick={m.action} disabled={busy || m.done}>
+              <button onClick={m.action} disabled={busy || (m.done && m.id !== "budget")}>
                 <span className="box" aria-hidden="true">{m.done && <Icon name="check" size={18} />}</span>
                 <span className="grow">{m.title}{m.hint && <small>{m.hint}</small>}{m.fresh && <small className="mission-new">New!</small>}</span>
                 {!m.done && <span className="pts">+{m.pts}</span>}
@@ -772,22 +774,25 @@ function LessonSheet({ lesson, run, close, busy }) {
 }
 
 function BudgetSheet({ state, run, close, busy }) {
-  const [amount, setAmount] = useState(() => String(state?.allowance?.amount > 0 ? Math.min(200, Math.max(1, state.allowance.amount / 100)) : 20));
+  const repeat = Boolean(state.weekKey) && state.child.lastBudgetWeek === state.weekKey;
+  const saved = repeat ? state.child.lastBudget : null;
+  const [amount, setAmount] = useState(() => String(saved ? saved.total / 100 : state?.allowance?.amount > 0 ? Math.min(200, Math.max(1, state.allowance.amount / 100)) : 20));
   const split = (cents, weights = [25, 40, 25, 10]) => {
     const sum = weights.reduce((s, v) => s + v, 0) || 100;
     const values = weights.map((v) => Math.floor(cents * v / sum));
     values[3] += cents - values.reduce((s, v) => s + v, 0);
     return Object.fromEntries(["save", "needs", "fun", "give"].map((k, i) => [k, values[i]]));
   };
-  const [a, setA] = useState(() => split(Math.round(Number(amount) * 100)));
+  const [a, setA] = useState(() => saved ? { ...saved.allocations } : split(Math.round(Number(amount) * 100)));
   const total = Math.round(Number(amount) * 100);
   const valid = /^\d+(?:\.\d{0,2})?$/.test(amount) && total >= 100 && total <= 20000;
   const allocated = Object.values(a).reduce((s, v) => s + v, 0);
   const ready = valid && allocated === total && a.save >= Math.ceil(total * 0.2) && a.needs >= Math.ceil(total * 0.25);
   const rows = [["save", "Save", "honey"], ["needs", "Needs", "basket"], ["fun", "Fun", "balloon"], ["give", "Give", "heart"]];
   return (
-    <Sheet title={`Plan ${valid ? moneyShort(total) : "your money"} for the week`} onClose={close}>
-      <form className="form" onSubmit={async (e) => { e.preventDefault(); if (!ready || busy) return; if (await run("child/budget", { allocations: Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v / 100])), total: total / 100 }, (x) => (x.pointsAwarded ? `Great budget! +${x.pointsAwarded} points` : "Great budget! (Points already earned this week)"))) close(); }}>
+    <Sheet title={repeat ? "This week's plan" : `Plan ${valid ? moneyShort(total) : "your money"} for the week`} onClose={close}>
+      {repeat && <p className="fine">Already earned this week — changing your plan is free</p>}
+      <form className="form" onSubmit={async (e) => { e.preventDefault(); if (!ready || busy) return; if (await run("child/budget", { allocations: Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v / 100])), total: total / 100 }, (x) => (x.pointsAwarded ? `Great budget! +${x.pointsAwarded} points` : "Plan updated!"))) close(); }}>
         <label>Weekly amount ($)<input type="number" inputMode="decimal" min="1" max="200" step="0.01" required disabled={busy} value={amount} onChange={(e) => {
           const value = e.target.value, cents = Math.round(Number(value) * 100);
           setAmount(value);
@@ -802,7 +807,7 @@ function BudgetSheet({ state, run, close, busy }) {
         ))}
         <p className={`fine ${ready ? "ok" : "warn"}`}>{!valid ? "Choose $1 to $200 for your week." : `Total ${money(allocated)}: ${allocated === total ? "perfect!" : allocated > total ? `${money(allocated - total)} too much` : `${money(total - allocated)} left to plan`}`}</p>
         <p className="fine">Save at least 20% and plan at least 25% for needs.</p>
-        <button className="btn honey wide" type="submit" disabled={busy || !ready}>Finish my budget</button>
+        <button className="btn honey wide" type="submit" disabled={busy || !ready}>{repeat ? "Update my plan" : "Finish my budget"}</button>
       </form>
     </Sheet>
   );
@@ -1083,6 +1088,15 @@ function Friends({ state, run, busy }) {
   const [sel, setSel] = useState(approved[0]?.id);
   const sentKey = `mq_friend_sent:${encodeURIComponent(state.childId || state.child.id || state.child.name)}`;
   const [sent, setSent] = useState(() => { try { return sessionStorage.getItem(sentKey) === "true"; } catch { return false; } });
+  const [sentBefore, setSentBefore] = useState(() => { try { const ids = JSON.parse(sessionStorage.getItem(`${sentKey}:before`)); return Array.isArray(ids) ? ids : approved.map((f) => f.id); } catch { return approved.map((f) => f.id); } });
+  useEffect(() => {
+    if (sent && approved.some((f) => !sentBefore.includes(f.id))) {
+      setSent(false);
+      try { sessionStorage.removeItem(sentKey); } catch {}
+    }
+  }, [sent, approved.map((f) => f.id).join(","), sentBefore]);
+  const outgoing = pending.filter((f) => f.real && !f.incoming);
+  const requests = outgoing.length ? outgoing : sent ? [{ id: "local-receipt", status: "pending_parent_a" }] : [];
   const [code, setCode] = useState("");
   const [give, setGive] = useState("");
   const [get, setGet] = useState("");
@@ -1110,6 +1124,9 @@ function Friends({ state, run, busy }) {
         <p>{f.name} wants to be friends.</p>
         <button className="btn small sage" disabled={busy} onClick={() => run(`child/friend/${f.id}/respond`, { approve: true }, "You said yes! Your grown-ups will check too.")}>Accept friend</button>
         <button className="btn small" disabled={busy} onClick={() => run(`child/friend/${f.id}/respond`, { approve: false }, "Request closed")}>Decline friend</button>
+      </section>)}
+      {requests.map((f) => <section className="paper-card" key={f.id}>
+        <strong>Friend request</strong><p className="fine" role="status">{f.status === "pending_parent_b" ? "Sent to your friend's family" : "Waiting for your grown-up to say yes"}</p>
       </section>)}
       {incomingTrades.map((t) => <section className="paper-card" key={t.id}>
         <h3 className="hand">A postcard swap for you</h3>
@@ -1168,12 +1185,12 @@ function Friends({ state, run, busy }) {
       )}
       <section className="paper-card">
         <h3 className="hand">Add a friend</h3>
-        <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Request sent")) { setCode(""); setSent(true); try { sessionStorage.setItem(sentKey, "true"); } catch {} } }}>
+        <form className="rename" onSubmit={async (e) => { e.preventDefault(); if (await run("child/friend", { code }, "Sent! Your grown-up needs to say yes before it reaches your friend.")) { setCode(""); setSent(true); setSentBefore(approved.map((f) => f.id)); try { sessionStorage.setItem(sentKey, "true"); sessionStorage.setItem(`${sentKey}:before`, JSON.stringify(approved.map((f) => f.id))); } catch {} } }}>
           <label className="grow">Friend code<input required maxLength={state.demo === false ? 8 : 64} disabled={busy} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder={state.demo === false ? "8 letters and numbers" : "e.g. SAM-12"} /></label>
           <button className="btn small sage" disabled={busy}>Send</button>
         </form>
         {!sent && pending.length > 0 && <p className="fine">Both friends and their grown-ups need to say yes.</p>}
-        {sent && <p className="fine" role="status">Request sent. Both friends and their grown-ups need to say yes.</p>}
+        {sent && <p className="fine">Request sent.</p>}
       </section>
     </div>
   );
@@ -1236,10 +1253,14 @@ function Buddy({ state, run, busy, offline, startTalk, transcriptOnly, open }) {
       {!currentSavingsGoal(state) && <section className="paper-card"><h2 className="hand">Set a savings goal</h2><p>Ask your grown-up to help choose one.</p></section>}
       <div className="chat" ref={chatRef}>
         {chat.length === 0 && <p className="msg assistant">Our chats will be right here. What would you like to know?</p>}
-        {chat.map((m) => (
+        {chat.map((m, index) => (
           <div key={m.id} className={`msg ${m.role} ${m.auto ? "auto" : ""}`}>
             <small>{m.role === "user" ? "You" : state.child.bear.name}{m.auto ? " · Plan update" : ""}</small>
             {m.text.split("\n").filter(Boolean).map((line, i) => <p key={i}>{line}</p>)}
+            {m.fallback && <button className="chip ask-again" disabled={busy || offline || !state.settings.buddyEnabled} onClick={() => {
+              const question = chat.slice(0, index).reverse().find((message) => message.role === "user");
+              if (question) run("buddy/chat", { text: question.text });
+            }}>Ask {state.child.bear.name} again</button>}
             {m.role === "assistant" && <button className="speak" disabled={busy || offline} onClick={() => run(() => speak(m.text, state.integrations.voice))} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
           </div>
         ))}
@@ -1271,8 +1292,9 @@ function useMapleTalk({ state, run, busy, offline }) {
   const [isOpen, setOpen] = useState(false);
   const [bubble, setBubble] = useState("");
   const [bubbleId, setBubbleId] = useState(0);
+  const [retryQuestion, setRetryQuestion] = useState(null);
   const showBubble = (text) => { setBubble(text); setBubbleId((id) => id + 1); };
-  const dismiss = () => { setBubble(""); stopSpeaking(); };
+  const dismiss = () => { setBubble(""); setRetryQuestion(null); stopSpeaking(); };
   const [mood, setMood] = useState(null);
   const [muted, setMuted] = useState(() => store.get("mq_muted", "false") === "true");
   const turn = useRef(0);
@@ -1301,12 +1323,13 @@ function useMapleTalk({ state, run, busy, offline }) {
     if (!text.trim() || busy || inflight.current || !allowed()) return false;
     inflight.current = true;
     const id = ++turn.current;
-    stopSpeaking(); setMood("thinking"); showBubble("…");
+    stopSpeaking(); setRetryQuestion(null); setMood("thinking"); showBubble("…");
     try {
       const result = await run("buddy/chat", { text: text.trim() });
       if (id !== turn.current || !allowed()) return false;
       if (!result) { setMood("resting"); showBubble("Let's try that again in a moment."); return false; }
       showBubble(result.reply);
+      setRetryQuestion(result.fallback ? text.trim() : null);
       setMood(/Hmm|trusted grown-up|quick answer|ask.*again/i.test(result.reply) ? "resting" : "happy");
       const maySpeak = () => id === turn.current && allowed() && !latest.current.muted;
       if (maySpeak()) speak(result.reply, state.integrations.voice, maySpeak).catch(() => {});
@@ -1319,10 +1342,10 @@ function useMapleTalk({ state, run, busy, offline }) {
     setMuted(next); store.set("mq_muted", String(next));
     if (next) stopSpeaking();
   };
-  return { isOpen, bubble, bubbleId, tripId: away?.id || previousTrip.current, mood, muted, open, close, dismiss, send, toggleMute };
+  return { isOpen, bubble, bubbleId, retryQuestion, tripId: away?.id || previousTrip.current, mood, muted, open, close, dismiss, send, toggleMute };
 }
 
-function SpeechBubble({ text, thinking, staticText, countdownText, onClose }) {
+function SpeechBubble({ text, thinking, staticText, countdownText, onClose, retry, bearName, busy }) {
   const [shown, setShown] = useState("");
   useEffect(() => {
     if (staticText || thinking || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { setShown(text); return; }
@@ -1339,6 +1362,7 @@ function SpeechBubble({ text, thinking, staticText, countdownText, onClose }) {
     <div className="bear-bubble" aria-live="polite" aria-atomic="true">
       <button className="round-btn bubble-close" onClick={onClose} aria-label="Close speech bubble"><Icon name="close" size={18} /></button>
       <span className="sr-only">{text}</span><span className="bear-bubble-text" aria-hidden="true">{staticText ? text : shown || "\u00a0"}</span>{countdownText && <> <span className="trip-countdown">{countdownText}</span></>}
+      {retry && <button className="chip ask-again" disabled={busy} onClick={retry}>Ask {bearName} again</button>}
     </div>
   );
 }
@@ -1375,7 +1399,8 @@ function TalkBar({ state, talk, busy, open }) {
     try { session.start(); setListening(true); } catch { recognition.current = null; setListening(false); }
   };
   const goal = currentSavingsGoal(state);
-  const suggestions = ["Can I buy a $15 toy?", ...(goal ? [`When can I reach my ${goal.title} goal?`] : []), "Make me a saving plan"];
+  const price = Math.max(100, Math.round(state.balances.spending * 0.8 / 100) * 100);
+  const suggestions = [`Can I buy a toy for ${moneyShort(price)}?`, ...(goal ? [`When can I save ${moneyShort(goal.target)} for ${goal.title}?`] : []), "What should I do with my allowance?"];
   return (
     <section className="talk-bar" aria-label={`Talk to ${state.child.bear.name}`}>
       <div className="talk-links">

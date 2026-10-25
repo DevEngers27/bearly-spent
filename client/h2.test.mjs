@@ -78,7 +78,7 @@ test("H2 client cap, weekly budget and lesson Review label preserve their separa
   state.child.lastBudgetWeek = state.weekKey;
   const tree = h.render(h.exports.Missions, { state, open: noop });
   assert.match(text(tree), /All done for today — amazing!/);
-  assert.equal(button(tree, "Weekly budget challenge").props.disabled, true);
+  assert.equal(button(tree, "Weekly budget challenge").props.disabled, false);
   assert.doesNotMatch(text(button(tree, "Weekly budget challenge")), /\+50/);
   const lesson = button(tree, state.catalog.lessons[0].title);
   assert.match(text(lesson), /Review · no points/);

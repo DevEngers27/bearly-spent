@@ -264,9 +264,11 @@ Existing documents migrate the first goal to current, fill missing status with `
 | Method and route | Auth | JSON request / result |
 | --- | --- | --- |
 | `POST /api/child/goals` | Child | `{title,target,icon}` → goal. Title 1–40 trimmed characters, target $1–$1,000, icon bike/game/book/gift/trip/toy/other. Notifies the parent. |
-| `POST /api/child/goals/:id` | Child | Partial `{title?,target?,icon?}` → updated goal. Only active/reached goals. |
+| `POST /api/child/goals/:id` | Child | Partial `{title?,target?,icon?}` → updated goal. Active/reached or archived goals; saving an archived goal also brings it back. Bought goals are read-only. |
 | `POST /api/child/goals/:id/current` | Child | No fields → goal. Only active/reached goals. |
 | `POST /api/child/goals/:id/archive` | Child | No fields → archived goal; preserves history. |
+| `POST /api/child/goals/:id/restore` | Child | No fields → restored goal. Archived only; bought goals refused. Audits “Brought back goal: …”. Becomes current only when no live current goal exists. |
+| `POST /api/parent/goals/:id/restore` | Parent | Same restore contract, with parent authorization and selected-child tenancy. |
 | `POST /api/parent/goals` and `POST /api/parent/goals/:id` | Parent | Same create/edit contract. |
 | `POST /api/parent/goals/:id/current` and `POST /api/parent/goals/:id/archive` | Parent | Same switch/archive contract. |
 | `DELETE /api/parent/goals/:id` | Parent | No body → deleted goal. Choose another current goal first; bought goals cannot be deleted. |
@@ -348,10 +350,14 @@ friend-request approvals as `declined` when the friendship was declined, while
 stored approvals preserve each parent's original decision. Parent decided rows
 label these “didn't go through”. Decline reasons remain private.
 
-The child UI keeps an identical “Request sent” receipt for the browser session
-for valid and invalid codes. It never uses the presence of a pending record to
-choose that receipt. Children retains kid-code status in family-scoped session
-storage, including “Linked ✓”, when leaving and reopening the section.
+The child UI keeps an identical “Request sent” receipt for valid and invalid codes.
+Outgoing requests show “Waiting for your grown-up to say yes” at `pending_parent_a`,
+then “Sent to your friend's family” at `pending_parent_b`, then the approved friend.
+A local session receipt supplies the same first status for an invalid code, without
+revealing whether it matched. The requester parent is notified to approve in
+Approvals; approval sends the request to the other family, which must also agree.
+The Children section retains kid-code status in family-scoped session storage,
+including “Linked ✓”, when leaving and reopening the section.
 ### Daily missions (H2)
 
 Child and parent state include `missionsToday: {active, done, doneCount, cap:6}`. Each active item has `{key,assignedAt,title,pts,hint,kind}`; done items add `{doneAt,pts}`. `child.dailyMissions` persists `{dayKey,active:[{key,assignedAt}],done:[{key,doneAt,pts}]}`. First read/action rolls up to three eligible missions using the family time zone. The first mission is track or save while either is still eligible. Completed missions are replaced immediately, with no repeated key that day. Six completions clear the active list until the next family day. Eligibility is refreshed when lessons, friends, points, or travel status change.
@@ -381,3 +387,23 @@ POST rotation is the only response that exposes it. The parent card keeps
 status, Generate/Rotate, Copy, Unlink and the `/help/apple-cash` link; setup and
 connection-test instructions are on the guide. The help page never reads a
 credential or echoes query parameters.
+
+## H7 goal restoration, replanning and Buddy retries
+
+An archived goal can be restored or edited by either role; an existing live current
+goal keeps its selection. When no live goal remains, the restored goal becomes
+current. Normal goal-reached checks still apply. Bought goals remain memories.
+Both forms offer the seven existing goal picture buttons.
+
+The completed weekly budget stays checked and opens “This week's plan”, prefilled
+from `child.lastBudget` (`total` and `allocations` in cents). Repeat submissions
+update that plan and award zero points; the client says “Plan updated!”. A new week
+starts from allowance defaults. Completed budgets never appear in Home Next up.
+
+Talk suggestions use the current goal title/target and a price near spending money,
+and send ordinary `POST /api/buddy/chat` messages. With Claude configured, a failed
+call retries once after 800 ms, then returns the offline planner reply with
+`fallback:true` (also stored on the assistant chat message). The client shows
+“Ask <bear> again” to resend the original question. Successful Claude replies and
+no-key offline replies omit that flag. Disabling Buddy or changing/resetting the
+child document during the retry prevents stale replies from being saved.

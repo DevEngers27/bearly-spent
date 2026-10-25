@@ -300,7 +300,7 @@ for (const [path, action] of Object.entries(childActions)) {
 for (const role of ["child", "parent"]) {
   register("POST", `/api/${role}/goals`, role, (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.goalSave(db, req.body, null, role), "savings_goal_created", now));
   register("POST", `/api/${role}/goals/:id`, role, (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.goalSave(db, req.body, req.params.id, role), "savings_goal_edited", now));
-  for (const [suffix, action] of [["current", "goalCurrent"], ["archive", "goalArchive"]]) {
+  for (const [suffix, action] of [["current", "goalCurrent"], ["archive", "goalArchive"], ["restore", "goalRestore"]]) {
     register("POST", `/api/${role}/goals/:id/${suffix}`, role, (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.params.id, role), action, now));
   }
 }
