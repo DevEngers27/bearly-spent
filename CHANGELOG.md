@@ -11,6 +11,43 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.4] — 2026-10-25
+
+### Added
+- The bear knows the child's world: its snapshot now carries the wardrobe
+  (what is worn, what is owned, the whole shop with prices and what the
+  child can afford right now, the next unlock), postcards and whether the
+  bear is away, friends by first name with pending requests and swaps,
+  lessons finished and the next topics, the weekly budget, Apple Cash
+  receipts waiting for a parent, and the current goal. Answers like "Can I
+  buy the explorer jacket?" use real numbers; nothing private (codes,
+  emails, family labels, the surprise destination) ever reaches the model.
+- A help knowledge base in the app's own words (`docs/help/kid.md` and
+  `docs/help/parent.md`, every button name checked against the screens by
+  a test). The kid guide rides inside the bear's prompt, so asking the bear
+  "How do I add a friend?" or "How do I sign out?" gets the exact steps; a
+  `lookup_help` tool double-checks. Parents get an "Ask about MoneyQuest"
+  panel under More (20 questions an hour per family, nothing stored) and a
+  public `/help` page linked from Welcome and More. A "How do I…?" chip in
+  the talk bar.
+
+### Changed
+- The wardrobe layers were re-cut per region (hats, eyes, neck, outfits,
+  held props, friends) and re-registered against the base bear: halos,
+  doubled edges and stray fragments are gone. The art moved from
+  `/bear/w2` to `/bear/w3` and the service worker cache became `mq-v8`, so
+  an installed app can never mix old and new pieces; it reloads itself.
+- The kid-safety guard now lets plain app instructions through (friend
+  codes, trips, goals, missions, lessons, dressing the bear, signing out)
+  instead of replacing them with the fallback line.
+
+### Review trail
+- H11 (Buddy knowledge + help): Codex implemented, Gemini APPROVE (plus a
+  delta review of the guard/shop follow-up), live check with the real key.
+- Wardrobe re-cut: Sonnet per-region QA workflow, Gemini review of the
+  path move, browser check against a stale `mq-v7` cache before release.
+- 371 server tests and 222 client tests.
+
 ## [0.8.3] — 2026-10-25
 
 ### Added
