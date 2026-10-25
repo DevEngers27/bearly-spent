@@ -2173,3 +2173,32 @@ test("0.8.8: legible sound toggle in the talk bar", () => {
     button.props.onClick(); assert.equal(toggles, 1);
   }
 });
+
+test("0.8.8: closing the talk bar, dismissing the bubble or leaving Home drops the reply in flight and stops sound", async (t) => {
+  const h = harness("Child.jsx"), spoken = [], cancelled = [];
+  h.window.speechSynthesis = { cancel: () => cancelled.push(1), speak: (u) => spoken.push(u.text) };
+  let finish;
+  const props = { state: stateFixture(), run: () => new Promise((r) => { finish = r; }), tab: "home" };
+  let talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+  const pending = talk.send("Hi"); talk = h.render(h.exports.useMapleTalk, props);
+  assert.equal(talk.bubble, "…");
+  talk.close(); finish({ reply: "Too late!" }); assert.equal(await pending, false);
+  talk = h.render(h.exports.useMapleTalk, props);
+  assert.equal(talk.bubble, ""); assert.equal(talk.isOpen, false); assert.equal(spoken.length, 0);
+  talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+  const second = talk.send("Again"); talk = h.render(h.exports.useMapleTalk, props);
+  talk.dismiss(); finish({ reply: "Too late again!" }); assert.equal(await second, false);
+  talk = h.render(h.exports.useMapleTalk, props); assert.equal(talk.bubble, "");
+  talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+  const third = talk.send("Once more"); talk = h.render(h.exports.useMapleTalk, props);
+  talk = h.render(h.exports.useMapleTalk, { ...props, tab: "map" }); h.flush();
+  finish({ reply: "From another tab" }); assert.equal(await third, false);
+  talk = h.render(h.exports.useMapleTalk, { ...props, tab: "map" });
+  assert.equal(talk.isOpen, false); assert.equal(talk.bubble, ""); assert.equal(spoken.length, 0);
+  assert.ok(cancelled.length >= 3, "each close/dismiss/leave stops sound");
+  talk = h.render(h.exports.useMapleTalk, props); h.flush();
+  talk.open(); talk = h.render(h.exports.useMapleTalk, props);
+  const fourth = talk.send("Back home"); finish({ reply: "Hello again!" }); assert.equal(await fourth, true);
+  talk = h.render(h.exports.useMapleTalk, props); assert.equal(talk.bubble, "Hello again!");
+});

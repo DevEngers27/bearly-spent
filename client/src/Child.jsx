@@ -39,7 +39,7 @@ export default function Child({ state, toast, onGrownUps, onSignOut, offline }) 
   const open = (type, props = {}) => setSheet({ type, ...props });
   const close = () => setSheet(null);
   const goMap = (placeId) => { setMapFocus(placeId || null); setTab("map"); close(); };
-  const talk = useMapleTalk({ state, run, busy, offline });
+  const talk = useMapleTalk({ state, run, busy, offline, tab });
   const startTalk = () => { close(); setTab("home"); talk.open(); };
   const [seen, setSeen] = useState(() => {
     const ids = storedList("mq_seen_adv");
@@ -1244,7 +1244,7 @@ function Buddy({ state, run, busy, offline, startTalk, transcriptOnly, open }) {
               const question = chat.slice(0, index).reverse().find((message) => message.role === "user");
               if (question) run("buddy/chat", { text: question.text });
             }}>Ask {state.child.bear.name} again</button>}
-            {m.role === "assistant" && <button className="speak" disabled={busy || offline} onClick={() => run(() => speak(m.text, state.integrations?.voice))} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
+            {m.role === "assistant" && <button className="speak" disabled={busy || offline} onClick={() => { primeAudio(); run(() => speak(m.text, state.integrations?.voice)); }} aria-label="Read aloud"><Icon name="speaker" size={18} /></button>}
           </div>
         ))}
       </div>
@@ -1282,6 +1282,10 @@ function speakBrowser(text) {
 // silent clip on Send and every reply plays through that element.
 const SILENT_WAV = "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
 let audioEl = null;
+let audioUrl = null;
+function releaseAudioUrl() {
+  if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
+}
 function primeAudio() {
   if (typeof Audio === "undefined") return;
   audioEl ||= new Audio();
@@ -1290,12 +1294,13 @@ function primeAudio() {
 }
 async function playBlob(blob) {
   if (typeof Audio === "undefined") return;
-  const url = URL.createObjectURL(blob);
   audioEl ||= new Audio();
   audioEl.pause();
+  releaseAudioUrl();
+  audioUrl = URL.createObjectURL(blob);
   audioEl.muted = false;
-  audioEl.src = url;
-  audioEl.onended = () => URL.revokeObjectURL(url);
+  audioEl.src = audioUrl;
+  audioEl.onended = releaseAudioUrl;
   await audioEl.play();
 }
 
@@ -1324,16 +1329,18 @@ async function speak(text, mode, allowed = () => true) {
 
 function stopSpeaking() {
   audioEl?.pause();
+  releaseAudioUrl();
   window.speechSynthesis?.cancel();
 }
 
-function useMapleTalk({ state, run, busy, offline }) {
+function useMapleTalk({ state, run, busy, offline, tab = "home" }) {
   const [isOpen, setOpen] = useState(false);
   const [bubble, setBubble] = useState("");
   const [bubbleId, setBubbleId] = useState(0);
   const [retryQuestion, setRetryQuestion] = useState(null);
   const showBubble = (text) => { setBubble(text); setBubbleId((id) => id + 1); };
-  const dismiss = () => { setBubble(""); setRetryQuestion(null); stopSpeaking(); };
+  // Dismissing also retires the turn in flight, so a late reply cannot reopen the bubble or start talking.
+  const dismiss = () => { setBubble(""); setRetryQuestion(null); turn.current++; stopSpeaking(); };
   const [mood, setMood] = useState(null);
   const [muted, setMuted] = useState(() => store.get("mq_muted", "false") === "true");
   const turn = useRef(0);
@@ -1352,6 +1359,11 @@ function useMapleTalk({ state, run, busy, offline }) {
     setOpen(false); setBubble(""); setMood(null); turn.current++; stopSpeaking();
   }, [offline, away?.id, state.settings.buddyEnabled]);
   useEffect(() => () => { turn.current++; stopSpeaking(); }, []);
+  // The talk bar lives on Home: leaving Home closes it, stops any sound and drops the reply in flight.
+  useEffect(() => {
+    if (tab === "home") return;
+    setOpen(false); setBubble(""); setRetryQuestion(null); setMood(null); turn.current++; stopSpeaking();
+  }, [tab]);
   const open = () => {
     if (offline) { showBubble("I can't chat while we're offline, but your postcards are right here!"); setMood("resting"); return; }
     if (away) { showBubble(`${state.child.bear.name} is on a trip!`); return; }

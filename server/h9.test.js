@@ -189,6 +189,7 @@ test("H9.4 / 0.8.8 read-aloud routes are back for kids only and answer 404 until
     for (const [who, browser] of [["parent", a.browser], ["device", device()]]) { const status = (await browser.call("POST", path, { text: "Hi" })).status; assert.ok([401, 403, 404].includes(status), `${who} ${path} -> ${status}`); }
   }
   assert.equal((await kid.call("POST", "/api/buddy/speak", { text: "" })).status, 400);
+  for (let i = 0; i < 25; i++) assert.equal((await kid.call("POST", "/api/voice/token", {})).status, 404, "an unconfigured voice never eats the quota");
   assert.ok("voice" in policies); assert.ok("speak" in policies);
   assert.equal(typeof actions.speakText, "function");
   assert.deepEqual(Object.keys((await kid.call("GET", "/api/state")).body.integrations).sort(), ["bank", "buddy", "voice"]);

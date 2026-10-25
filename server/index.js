@@ -368,16 +368,16 @@ register("POST", "/api/child/notifications/read", "child", (req, ctx, res, now) 
 register("POST", "/api/buddy/speak", "child", async (req, ctx, res, now) => {
   if (!readChild(ctx.childId).settings.buddyEnabled) throw new GameError("Chatting is switched off by your grown-up", 403);
   const text = actions.speakText(null, req.body);
-  takeLimit("speak", ctx.childId, now);
   if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
+  takeLimit("speak", ctx.childId, now);
   const audio = await synthesize(text);
   res.set("Content-Type", "audio/mpeg").send(audio);
   return SENT;
 });
 register("POST", "/api/voice/token", "child", async (req, ctx, res, now) => {
   if (!readChild(ctx.childId).settings.buddyEnabled) throw new GameError("Chatting is switched off by your grown-up", 403);
-  takeLimit("voice", ctx.childId, now);
   if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
+  takeLimit("voice", ctx.childId, now);
   return { token: await mintAccessToken(), version: CARTESIA_VERSION, request: voiceConfig() };
 });
 register("POST", "/api/buddy/chat", "child", (req, ctx, res, now) => actions.chat(readChild(ctx.childId), req.body,
