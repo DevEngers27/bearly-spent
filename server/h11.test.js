@@ -69,6 +69,12 @@ test("H11.1 snapshot exposes real wardrobe, postcards, friends, lessons, budget,
     assert.ok(!snap.wardrobe.owned.includes(item.label));
     assert.ok(COSMETICS.some((c) => c.label === item.label && c.cost === item.cost));
   }
+  const unowned = COSMETICS.filter((c) => c.cost != null && !snap.wardrobe.owned.includes(c.label));
+  assert.equal(snap.wardrobe.shop.length, unowned.length);
+  assert.ok(snap.wardrobe.shop.length > 6, "the whole shop, not only the six cheapest");
+  assert.deepEqual(snap.wardrobe.shop.map((c) => c.cost), snap.wardrobe.shop.map((c) => c.cost).sort((a, b) => a - b));
+  assert.deepEqual(snap.wardrobe.shop.find((c) => c.label === "Explorer jacket"), { label: "Explorer jacket", cost: 80, slot: "outfit", affordable: false });
+  for (const item of snap.wardrobe.shop) { assert.equal(item.affordable, item.cost <= db.child.points); assert.ok(["hat", "eyes", "neck", "outfit", "bag", "held", "friend", "background"].includes(item.slot), item.slot); }
   assert.deepEqual(snap.wardrobe.next_unlock, { label: "Straw hat", cost: 50, points_short: 10 });
   assert.deepEqual(snap.postcards, { places_visited: 1, cards: 3, latest: { place: "Seattle", when: new Date().toISOString().slice(0, 10) }, bear_away: true, back_in_minutes: 2 });
   assert.deepEqual(snap.friends, { count: 1, names: ["Maya"], pending_requests: 1, pending_swaps: 12 });
@@ -77,7 +83,7 @@ test("H11.1 snapshot exposes real wardrobe, postcards, friends, lessons, budget,
   assert.deepEqual(snap.apple_cash_waiting, { count: 2, total: "$4.00" });
   assert.deepEqual(snap.current_goal, { title: "New bicycle", target: "$100.00", saved: "$20.00", weeks_left: 16 });
   assert.doesNotMatch(JSON.stringify(snap), /UNREVEALED_DESTINATION/);
-  assert.ok(Buffer.byteLength(JSON.stringify(snapshot(seed()))) < 2500, "normal snapshot stays around 2 KB");
+  assert.ok(Buffer.byteLength(JSON.stringify(snapshot(seed()))) < 4000, "normal snapshot stays under 4 KB (the whole shop rides along)");
 });
 
 test("H11.1 snapshot redacts data and excludes codes, tokens, family labels, parents and pending peer names", () => {

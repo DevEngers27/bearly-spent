@@ -102,6 +102,7 @@ export function snapshot(db) {
       adventure_points: db.child.points,
       wearing: Object.fromEntries(owned.filter((c) => db.child.bear[c.kind] === c.value).map((c) => [c.kind, c.label])),
       owned: owned.map((c) => c.label),
+      shop: shop.map((c) => ({ label: c.label, cost: c.cost, slot: c.kind, affordable: c.cost <= db.child.points })),
       affordable_now: shop.filter((c) => c.cost <= db.child.points).slice(0, 6).map(({ label, cost }) => ({ label, cost })),
       next_unlock: next ? { label: next.label, cost: next.cost, points_short: next.cost - db.child.points } : null,
     },
@@ -298,7 +299,7 @@ async function callClaude(params) {
 
 const textOf = (content) => content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 
-const GUARD_PROMPT = "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, real-money promises, or anything a careful parent would not want a 9-year-old to read. Otherwise OK.";
+const GUARD_PROMPT = "You check messages written to a child aged 7–12 inside a money-learning game. Answer with exactly OK or BLOCK. BLOCK if the message contains or alludes to: violence, horror, sexual/romantic content, drugs/alcohol/gambling, self-harm, hate or slurs, personal data requests, links, real-money promises, or anything a careful parent would not want a 9-year-old to read. Plain instructions for using the MoneyQuest app are always OK: friend codes and friend requests, postcard swaps, the bear's trips, savings goals, missions, lessons, the weekly budget, Apple Cash receipts, dressing the bear, the Me sheet, signing out, or what a parent sees. Otherwise OK.";
 const guardFallback = (bearName) => `Hmm, let's talk about your savings or ${bearName}'s next trip instead! Want to see how close you are to your goal?`;
 
 async function runGuard(reply) {
