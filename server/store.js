@@ -1,26 +1,28 @@
-// JSON-file persistence + demo seed. Every mutation goes through `mutate`, which
-// saves to disk and notifies subscribers (the SSE stream) so parent and child
-// screens stay in sync.
+// Per-child SQLite documents. Domain functions still operate on seed()'s shape.
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+import { database, transaction } from "./db.js";
+import { GameError, dueAdventures } from "./domain.js";
+import { hasDueWork } from "./guardian.js";
+import { str, integer, object } from "./validate.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.MQ_DATA_DIR || path.join(here, "..", "data");
-const DB_FILE = path.join(DATA_DIR, "db.json");
-
-let db = null;
-const listeners = new Set();
+const documents = new Map();
+const identities = new WeakMap();
+const listeners = new Map();
+let testDocument = null;
+export const DEMO_FAMILY_ID = "family_demo";
+export const DEMO_CHILD_ID = "child_demo";
 
 export const uid = (prefix = "id") =>
-  `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+  `${prefix}_${crypto.randomUUID()}`;
 
 const DAY = 24 * 60 * 60 * 1000;
 
 export function seed(now = Date.now()) {
   return {
     version: 1,
-    family: { parentName: "Jordan", parentPin: "1234" },
+    family: { parentName: "Jordan" },
     child: {
       name: "Mia",
       age: 9,
@@ -132,58 +134,182 @@ export function migrate(d) {
   return d;
 }
 
-function ensureLoaded() {
-  if (db) return;
-  try {
-    db = migrate(JSON.parse(fs.readFileSync(DB_FILE, "utf8")));
-  } catch {
-    db = seed();
-    persist();
+function retain(d) {
+  for (const [key, cap] of [["tracking", 500], ["audit", 2000], ["transactions", 5000]]) {
+    if (d[key].length > cap) d[key].splice(0, d[key].length - cap);
+  }
+  if (d.buddy.chat.length > 200) d.buddy.chat.splice(0, d.buddy.chat.length - 200);
+  const counts = new Map();
+  d.notifications = d.notifications.slice().reverse().filter((n) => {
+    const count = (counts.get(n.to) || 0) + 1;
+    counts.set(n.to, count);
+    return count <= 200;
+  }).reverse();
+}
+
+function remember(id, d) {
+  documents.set(id, d);
+  identities.set(d, id);
+  return d;
+}
+
+export function childIdFor(d) {
+  return identities.get(d);
+}
+
+export function childRecord(childId) {
+  return database().prepare("SELECT id, family_id, version, updated_at FROM children WHERE id = ?").get(childId) || null;
+}
+
+export function readChild(childId) {
+  // Compatibility for domain/Buddy unit tests only; production requires an ID.
+  if (childId === undefined && testDocument) return testDocument;
+  if (typeof childId !== "string") throw new GameError("Child not found", 404);
+  if (documents.has(childId)) return documents.get(childId);
+  const row = database().prepare("SELECT doc FROM children WHERE id = ?").get(childId);
+  if (!row) throw new GameError("Child not found", 404);
+  return remember(childId, migrate(JSON.parse(row.doc)));
+}
+
+export function listChildren(familyId) {
+  return database().prepare("SELECT id, doc, version FROM children WHERE family_id = ? ORDER BY rowid").all(familyId).map((row) => {
+    const d = JSON.parse(row.doc);
+    return { id: row.id, name: d.child.name, age: d.child.age, bearName: d.child.bear.name, version: row.version };
+  });
+}
+
+export function createChild(familyId, input) {
+  const body = object(input);
+  const name = str(body.name, { max: 24 });
+  const age = integer(body.age, { min: 7, max: 12 });
+  const bearName = str(body.bearName, { max: 24 });
+  if (!database().prepare("SELECT id FROM families WHERE id = ?").get(familyId)) throw new GameError("Family not found", 404);
+  const d = seed();
+  d.family = { parentName: database().prepare("SELECT name FROM families WHERE id = ?").get(familyId).name };
+  d.child.name = name;
+  d.child.age = age;
+  d.child.bear.name = bearName;
+  d.child.points = 0;
+  d.child.milestonesUnlocked = [];
+  for (const [key, account] of Object.entries(d.accounts)) {
+    account.id = uid("acct");
+    account.balance = 0;
+    if (key !== "parent") account.label = `${name}'s ${key}`;
+  }
+  for (const key of ["transactions", "postcards", "adventures", "friends", "approvals", "notifications"]) d[key] = [];
+  d.allowance.amount = 0;
+  for (const goal of d.savingsGoals) goal.createdAt = Date.now();
+  const id = uid("child");
+  database().prepare("INSERT INTO children (id, family_id, doc, version, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .run(id, familyId, JSON.stringify(d), d.version, Date.now());
+  return { id, name, age, bearName, version: d.version };
+}
+
+function publish(familyId, version, childId) {
+  for (const fn of listeners.get(familyId) || []) {
+    try { fn(version, childId); } catch (e) { console.error("[subscriber]", e.message); }
   }
 }
 
-function persist() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = DB_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, DB_FILE);
-}
-
-export function read() {
-  ensureLoaded();
-  return db;
-}
-
-/** Run `fn(db)` and persist. Returns whatever fn returns. */
-export function mutate(fn) {
-  ensureLoaded();
-  const snapshot = structuredClone(db);
+export function mutateChild(childId, fn) {
+  if (childId === undefined && testDocument) {
+    const snapshot = structuredClone(testDocument);
+    try {
+      const result = fn(testDocument);
+      retain(testDocument);
+      testDocument.version += 1;
+      publish(undefined, testDocument.version);
+      return result;
+    } catch (e) {
+      for (const key of Object.keys(testDocument)) delete testDocument[key];
+      Object.assign(testDocument, snapshot);
+      throw e;
+    }
+  }
+  const d = readChild(childId);
+  const snapshot = structuredClone(d);
+  let row;
   let result;
   try {
-    result = fn(db);
+    result = transaction((db) => {
+      row = db.prepare("SELECT family_id, version FROM children WHERE id = ?").get(childId);
+      result = fn(d);
+      if (result && typeof result.then === "function") throw new Error("Child mutations must be synchronous");
+      retain(d);
+      d.version = row.version + 1;
+      db.prepare("UPDATE children SET doc = ?, version = ?, updated_at = ? WHERE id = ?")
+        .run(JSON.stringify(d), d.version, Date.now(), childId);
+      return result;
+    });
   } catch (e) {
-    for (const key of Object.keys(db)) delete db[key];
-    Object.assign(db, snapshot);
+    for (const key of Object.keys(d)) delete d[key];
+    Object.assign(d, snapshot);
     throw e;
   }
-  db.version += 1;
-  persist();
-  for (const l of listeners) l(db.version);
+  publish(row.family_id, d.version, childId);
   return result;
 }
 
-export function reset() {
-  db = seed();
-  persist();
-  for (const l of listeners) l(db.version);
+export function childrenWithDueWork(now = Date.now()) {
+  return database().prepare("SELECT id FROM children").all().filter(({ id }) => {
+    const d = readChild(id);
+    return dueAdventures(d, now).length > 0 || hasDueWork(d, now);
+  }).map(({ id }) => id);
 }
 
-/** For tests: start from a fresh in-memory seed without touching disk listeners. */
-export function _setForTest(next) {
-  db = next;
+export function subscribe(familyId, fn) {
+  if (typeof familyId === "function") [familyId, fn] = [undefined, familyId];
+  if (!listeners.has(familyId)) listeners.set(familyId, new Set());
+  listeners.get(familyId).add(fn);
+  return () => unsubscribe(familyId, fn);
 }
 
-export function subscribe(fn) {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
+export function unsubscribe(familyId, fn) {
+  const group = listeners.get(familyId);
+  group?.delete(fn);
+  if (group?.size === 0) listeners.delete(familyId);
+}
+
+export function resetChild(childId) {
+  const row = childRecord(childId);
+  if (!row || row.family_id !== DEMO_FAMILY_ID || process.env.MQ_DEMO !== "1") throw new GameError("Demo control unavailable", 404);
+  // Replace the root identity too, invalidating any in-flight Buddy work.
+  const previous = documents.get(childId);
+  remember(childId, seed());
+  try {
+    mutateChild(childId, (d) => { delete d.family.parentPin; });
+  } catch (e) {
+    if (previous) remember(childId, previous);
+    else documents.delete(childId);
+    throw e;
+  }
+}
+
+export function importLegacy(filename) {
+  if (!fs.existsSync(filename)) return false;
+  if (database().prepare("SELECT id FROM families WHERE id = ?").get(DEMO_FAMILY_ID)) return false;
+  // Parse and validate before writing anything. A corrupt file stays untouched.
+  const d = migrate(JSON.parse(fs.readFileSync(filename, "utf8")));
+  if (!d.child?.bear || !d.accounts?.parent || !Array.isArray(d.transactions) || !d.buddy || !d.settings) throw new Error("Invalid legacy game document");
+  delete d.family.parentPin;
+  retain(d);
+  const now = Date.now();
+  transaction((db) => {
+    db.prepare("INSERT INTO families (id, name, created_at) VALUES (?, ?, ?)").run(DEMO_FAMILY_ID, d.family.parentName || "Demo", now);
+    db.prepare("INSERT INTO children (id, family_id, doc, version, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run(DEMO_CHILD_ID, DEMO_FAMILY_ID, JSON.stringify(d), d.version, now);
+  });
+  fs.renameSync(filename, filename + ".imported");
+  return true;
+}
+
+// The pre-accounts tests use these adapters, which never touch persistent data.
+export const read = () => readChild(undefined);
+export const mutate = (fn) => mutateChild(undefined, fn);
+export function reset() { testDocument = seed(); }
+export function _setForTest(next) { testDocument = next; }
+export function _clearStoreForTest() {
+  documents.clear();
+  listeners.clear();
+  testDocument = null;
 }

@@ -359,12 +359,9 @@ test("speech text is validated without coercing objects or arrays", () => {
   assert.equal(actions.speakText(db, { text: " Hello " }), "Hello");
 });
 
-test("login PIN array cannot authenticate", () => {
-  const db = fresh();
-  for (const pin of [["1234"], 1234, {}, null, undefined, "wrong"]) {
-    rejectsUnchanged(db, () => actions.login(db, { pin }), (error) => error instanceof game.GameError && [400, 401].includes(error.status));
-  }
-  assert.doesNotThrow(() => actions.login(db, { pin: "1234" }));
+test("legacy default-PIN login action is removed", () => {
+  assert.equal(actions.login, undefined);
+  assert.equal(seed(Date.now()).family.parentPin, undefined);
 });
 
 test("malformed request bodies produce GameError rather than TypeError", () => {

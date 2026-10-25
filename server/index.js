@@ -1,65 +1,57 @@
-// MoneyQuest API server.
+// MoneyQuest API. Importable without opening sockets or starting timers.
 import express from "express";
 import path from "node:path";
-import crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { read, mutate, reset, subscribe } from "./store.js";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { readChild, mutateChild, resetChild, subscribe, childIdFor, childrenWithDueWork, createChild, DEMO_FAMILY_ID } from "./store.js";
 import * as game from "./domain.js";
 import { GameError } from "./domain.js";
-import { runGuardian, hasDueWork, injectDuplicatePosting, reconcileNow } from "./guardian.js";
-import { replan, queueReplan, cancelReplan, buddyMode, offlinePlan } from "./buddy.js";
+import { runGuardian, injectDuplicatePosting, reconcileNow } from "./guardian.js";
+import { chat, queueReplan, cancelReplan, buddyMode, offlinePlan } from "./buddy.js";
 import { actions } from "./actions.js";
 import { dayKey, weekKey } from "./time.js";
+import * as auth from "./auth.js";
+import { takeLimit, withChat, openFamilyStream } from "./limits.js";
 import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
 import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, placeStatus } from "./catalog.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT || 8787);
-const app = express();
-app.use(express.json({ limit: "64kb" }));
-
-// ------------------------------------------------------------------ helpers
-setNessieAuditHook((action, detail, data) => mutate((db) => game.audit(db, "bank", action, detail, data)));
-
-// Re-plan (debounced) whenever real money moves — child actions or guardian payouts.
-game.onMoneyChanged(queueReplan);
-
+const SENT = Symbol("response sent");
 const PAYOUT = /Paid|Executed|reversed/i;
-function guardianPass(db, trigger) {
-  const actions = runGuardian(db, Date.now(), trigger);
-  const paid = actions.filter((a) => PAYOUT.test(a));
-  if (paid.length) queueReplan(paid.map((a) => a.replace(/^G\d:\s*/, "").split(" (")[0]).join("; "));
-  return actions;
-}
 
-/** Run a mutation, then let the guardian react to the new state. */
-function act(fn, trigger) {
-  return mutate((db) => {
-    const repairs = reconcileNow(db, Date.now(), trigger);
-    const out = fn(db);
-    if (repairs.some((action) => /reversed/i.test(action))) queueReplan("Guardian reversed a duplicate posting");
-    guardianPass(db, trigger);
-    return out;
+// The hooks carry the document identity so async work never uses a global child.
+game.onMoneyChanged((reason, db) => {
+  const id = childIdFor(db);
+  if (id) queueReplan(id, reason);
+});
+setNessieAuditHook((action, detail, data, document) => {
+  const id = childIdFor(document);
+  if (!id || readChild(id) !== document) return;
+  mutateChild(id, (db) => {
+    if (document.nessie) db.nessie = document.nessie;
+    game.audit(db, "bank", action, detail, data);
   });
+});
+
+export function applyAction(db, fn, trigger, { now = Date.now(), onReplan = () => {} } = {}) {
+  const repairs = reconcileNow(db, now, trigger);
+  const out = fn(db);
+  if (repairs.some((action) => /reversed/i.test(action))) onReplan("Guardian reversed a duplicate posting");
+  const paid = runGuardian(db, now, trigger).filter((a) => PAYOUT.test(a));
+  if (paid.length) onReplan(paid.map((a) => a.replace(/^G\d:\s*/, "").split(" (")[0]).join("; "));
+  return out;
 }
 
-const route = (handler) => async (req, res) => {
-  try {
-    res.json((await handler(req, res)) ?? { ok: true });
-  } catch (e) {
-    if (e instanceof GameError) return res.status(e.status).json({ error: e.message });
-    console.error(e);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-};
+export function runChildAction(childId, fn, trigger, now = Date.now()) {
+  return mutateChild(childId, (db) => applyAction(db, fn, trigger, { now, onReplan: (reason) => queueReplan(childId, reason) }));
+}
 
-// Parent session: PIN → bearer token (in-memory, demo-grade).
-const parentTokens = new Set();
-function requireParent(req, res, next) {
-  const tok = req.get("x-parent-token");
-  if (!tok || !parentTokens.has(tok)) return res.status(401).json({ error: "Parent PIN required" });
-  next();
+export function tick(now = Date.now()) {
+  const due = childrenWithDueWork(now);
+  for (const childId of due) {
+    runChildAction(childId, (db) => game.finalizeAdventures(db, now), "tick", now);
+  }
+  return due;
 }
 
 // ------------------------------------------------------------------ views
@@ -75,7 +67,7 @@ function placesView(db, now = Date.now()) {
   }));
 }
 
-function childView(db, now = Date.now()) {
+export function childView(db, now = Date.now()) {
   const day = dayKey(now, db.settings.timezone);
   const week = weekKey(now, db.settings.timezone);
   return {
@@ -116,10 +108,19 @@ function childView(db, now = Date.now()) {
   };
 }
 
-function parentView(db) {
+export function parentView(db, before) {
+  let end = db.buddy.chat.length;
+  if (before !== undefined) {
+    if (typeof before !== "string" || before.length > 64) throw new GameError("Pick a chat message");
+    end = db.buddy.chat.findIndex((m) => m.id === before);
+    if (end < 0) throw new GameError("That chat message is no longer available");
+  }
+  const chat = db.buddy.chat.slice(Math.max(0, end - 200), end);
   return {
     ...childView(db),
     family: { parentName: db.family.parentName },
+    chat,
+    chatNextBefore: end > chat.length ? chat[0]?.id : null,
     accounts: db.accounts,
     allowance: db.allowance,
     approvals: db.approvals.slice().reverse(),
@@ -131,121 +132,219 @@ function parentView(db) {
   };
 }
 
-// ------------------------------------------------------------------ routes: shared
-app.get("/api/state", (req, res) => res.json(childView(read())));
-app.get("/api/parent/state", requireParent, (req, res) => res.json(parentView(read())));
+// These are the actual HTTP actions, also exercised directly by socket-free tests.
+export const routeActions = [];
+function register(method, path, access, handler) {
+  routeActions.push({ method, path, access, handler });
+}
+function options(req, now) {
+  return { ip: req.ip || "unknown", ua: req.get?.("user-agent") || req.headers?.["user-agent"], now };
+}
+function signedIn(req, res, result, now) {
+  res.set("Set-Cookie", auth.cookieHeader(req, result.session, result.token, now));
+  return auth.me(auth.resolveContext({ headers: { authorization: `Bearer ${result.token}` } }, {}, now));
+}
+register("POST", "/api/auth/register", "public", (req, ctx, res, now) => signedIn(req, res, auth.register(req.body, options(req, now)), now));
+register("POST", "/api/auth/login", "public", (req, ctx, res, now) => signedIn(req, res, auth.login(req.body, options(req, now)), now));
+register("POST", "/api/auth/link", "public", (req, ctx, res, now) => signedIn(req, res, auth.redeemLink(req.body, options(req, now)), now));
+register("POST", "/api/auth/logout", "session", (req, ctx, res, now) => {
+  auth.logout(ctx.session);
+  res.set("Set-Cookie", auth.cookieHeader(req, ctx.session, null, now));
+  return { ok: true };
+});
+register("GET", "/api/auth/me", "session", (req, ctx) => auth.me(ctx));
+register("POST", "/api/demo/login", "public", (req, ctx, res, now) => signedIn(req, res, auth.demoLogin(options(req, now)), now));
+register("POST", "/api/parent/pin", "parent", (req, ctx, res, now) => auth.setPin(ctx, req.body, now));
+register("POST", "/api/parent/unlock", "lockedParent", (req, ctx, res, now) => auth.unlock(ctx, req.body, now));
+register("POST", "/api/parent/children", "parent", (req, ctx) => createChild(ctx.family.id, req.body));
+register("POST", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.createLink(ctx, req.params.id, now));
+register("GET", "/api/state", "child", (req, ctx) => ({ childId: ctx.childId, ...childView(readChild(ctx.childId)) }));
+register("GET", "/api/parent/state", "parent", (req, ctx) => ({ childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before) }));
 
-app.get("/api/stream", (req, res) => {
-  // no-transform + X-Accel-Buffering ask proxies (tunnels, nginx) not to buffer.
-  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+export function stream(req, context, res) {
+  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-store, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
   res.flushHeaders();
-  res.write(`: ${" ".repeat(2048)}\n\n`); // padding pushes the first chunk through buffering proxies
-  res.write(`data: ${read().version}\n\n`);
-  const off = subscribe((v) => res.write(`data: ${v}\n\n`));
-  const ping = setInterval(() => res.write(": ping\n\n"), 25000);
-  req.on("close", () => {
+  let closed = false;
+  let off = () => {}, release = () => {}, ping;
+  const close = () => {
+    if (closed) return;
+    closed = true;
     off();
+    release();
     clearInterval(ping);
+    res.end();
+  };
+  const send = (version, childId) => {
+    if (closed || (context.role === "child" && childId !== context.childId)) return;
+    try { auth.authenticate(req); } catch { close(); return; }
+    if (res.write(`data: ${JSON.stringify({ childId, version })}\n\n`) === false) close();
+  };
+  release = openFamilyStream(context.family.id, close);
+  off = subscribe(context.family.id, send);
+  send(readChild(context.childId).version, context.childId);
+  if (!closed) {
+    ping = setInterval(() => {
+      // Long-lived streams must stop when a session expires or logs out too.
+      try { auth.authenticate(req); } catch { close(); return; }
+      if (res.write(": ping\n\n") === false) close();
+    }, 25000);
+    ping.unref?.();
+    req.on("close", close);
+    res.on?.("close", close);
+  }
+  return SENT;
+}
+register("GET", "/api/stream", "child", stream);
+
+const childActions = {
+  save: "save", spend: "spend", journal: "journal", extra: "extra", lesson: "lesson", budget: "budget",
+  adventure: "adventure", "cosmetic/buy": "buyCosmetic", "cosmetic/equip": "equip", "bear/name": "renameBear",
+  friend: "friend", trade: "trade", greet: "greet",
+};
+for (const [path, action] of Object.entries(childActions)) {
+  register("POST", `/api/child/${path}`, "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions[action](db, req.body), action, now));
+}
+register("POST", "/api/child/mission/:id/done", "child", (req, ctx, res, now) => runChildAction(ctx.childId, (db) => actions.missionDone(db, req.params.id), "mission_done", now));
+register("POST", "/api/child/notifications/read", "child", (req, ctx) => {
+  mutateChild(ctx.childId, (db) => { db.notifications.forEach((n) => { if (n.to === "child") n.read = true; }); });
+});
+register("POST", "/api/buddy/chat", "child", (req, ctx, res, now) => actions.chat(readChild(ctx.childId), req.body,
+  (text) => withChat(ctx.childId, () => chat(ctx.childId, text), now)));
+function buddyEnabled(childId) {
+  if (!readChild(childId).settings.buddyEnabled) throw new GameError("Money Buddy is turned off by your grown-up");
+}
+register("POST", "/api/buddy/speak", "child", async (req, ctx, res, now) => {
+  buddyEnabled(ctx.childId);
+  const text = actions.speakText(null, req.body);
+  takeLimit("speak", ctx.childId, now);
+  if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
+  const audio = await synthesize(text);
+  res.set("Content-Type", "audio/mpeg").send(audio);
+  return SENT;
+});
+register("POST", "/api/voice/token", "child", async (req, ctx, res, now) => {
+  buddyEnabled(ctx.childId);
+  takeLimit("voice", ctx.childId, now);
+  if (!voiceEnabled()) throw new GameError("Voice is not configured", 404);
+  return { token: await mintAccessToken(), version: CARTESIA_VERSION, request: voiceConfig() };
+});
+for (const action of ["approval", "goal", "mission", "allowance", "settings", "savingsGoal"]) {
+  const path = action === "savingsGoal" ? "savings-goal" : action === "approval" ? "approval/:id" : action;
+  register("POST", `/api/parent/${path}`, "parent", (req, ctx, res, now) => {
+    const out = runChildAction(ctx.childId, (db) => actions[action](db, req.body, req.params.id), action, now);
+    if (action === "settings" && !readChild(ctx.childId).settings.buddyEnabled) cancelReplan(ctx.childId);
+    return out;
+  });
+}
+export function demoRunNow(db, now = Date.now()) {
+  game.requestAllowanceRun(db, now);
+  game.audit(db, "parent", "demo_allowance_run", "Demo control: fast-forward allowance");
+}
+function demoControl() {
+  if (process.env.MQ_DEMO !== "1") throw new GameError("Demo control unavailable", 404);
+}
+register("POST", "/api/parent/allowance/run-now", "parent", (req, ctx, res, now) => {
+  demoControl();
+  return runChildAction(ctx.childId, (db) => demoRunNow(db, now), "demo_fast_forward", now);
+});
+register("POST", "/api/parent/topup", "parent", (req, ctx, res, now) => {
+  demoControl();
+  return runChildAction(ctx.childId, (db) => {
+    actions.topup(db, req.body);
+    game.audit(db, "parent", "demo_topup", "Demo control: simulated funding deposit");
+  }, "demo_topup", now);
+});
+register("POST", "/api/parent/inject-fault", "parent", (req, ctx) => {
+  demoControl();
+  return mutateChild(ctx.childId, (db) => {
+    const duplicate = injectDuplicatePosting(db);
+    if (!duplicate) throw new GameError("Nothing to duplicate yet — run an allowance first");
+    game.audit(db, "parent", "demo_fault", "Demo control: injected a duplicate posting");
+    return { injected: duplicate.id };
   });
 });
-
-app.post("/api/parent/login", route((req) => {
-  actions.login(read(), req.body);
-  const token = crypto.randomBytes(16).toString("hex");
-  parentTokens.add(token);
-  return { token };
-}));
-
-// ------------------------------------------------------------------ routes: child
-app.post("/api/child/save", route((req) => act((db) => actions.save(db, req.body), "child_save")));
-app.post("/api/child/spend", route((req) => act((db) => actions.spend(db, req.body), "child_spend")));
-app.post("/api/child/journal", route((req) => act((db) => actions.journal(db, req.body), "journal")));
-app.post("/api/child/extra", route((req) => act((db) => actions.extra(db, req.body), "extra_request")));
-app.post("/api/child/lesson", route((req) => act((db) => actions.lesson(db, req.body), "lesson")));
-app.post("/api/child/budget", route((req) => act((db) => actions.budget(db, req.body), "budget")));
-app.post("/api/child/mission/:id/done", route((req) => act((db) => actions.missionDone(db, req.params.id), "mission_done")));
-app.post("/api/child/adventure", route((req) => act((db) => actions.adventure(db, req.body), "adventure")));
-app.post("/api/child/cosmetic/buy", route((req) => act((db) => actions.buyCosmetic(db, req.body), "cosmetic")));
-app.post("/api/child/cosmetic/equip", route((req) => act((db) => actions.equip(db, req.body), "equip")));
-app.post("/api/child/bear/name", route((req) => act((db) => actions.renameBear(db, req.body), "rename")));
-app.post("/api/child/friend", route((req) => act((db) => actions.friend(db, req.body), "friend")));
-app.post("/api/child/trade", route((req) => act((db) => actions.trade(db, req.body), "trade")));
-app.post("/api/child/greet", route((req) => act((db) => actions.greet(db, req.body), "greet")));
-app.post("/api/child/notifications/read", route(() => mutate((db) => db.notifications.forEach((n) => n.to === "child" && (n.read = true)))));
-app.post("/api/buddy/chat", route((req) => actions.chat(read(), req.body)));
-// Cartesia voice: hand the browser a short-lived TTS-only token (the API key
-// stays here). Light rate limit, since anyone who can load the page can call it.
-let tokenWindow = { start: 0, count: 0 };
-app.post("/api/voice/token", async (req, res) => {
-  if (!voiceEnabled()) return res.status(404).json({ error: "voice not configured" });
-  const now = Date.now();
-  if (now - tokenWindow.start > 60000) tokenWindow = { start: now, count: 0 };
-  if (++tokenWindow.count > 20) return res.status(429).json({ error: "Too many voice requests, try again in a minute" });
-  try {
-    res.json({ token: await mintAccessToken(), version: CARTESIA_VERSION, request: voiceConfig() });
-  } catch (e) {
-    console.error("[voice]", e.message);
-    res.status(502).json({ error: "voice unavailable" });
-  }
+register("POST", "/api/parent/reset", "parent", (req, ctx) => {
+  demoControl();
+  if (ctx.family.id !== DEMO_FAMILY_ID) throw new GameError("Demo control unavailable", 404);
+  cancelReplan(ctx.childId);
+  resetChild(ctx.childId);
+  mutateChild(ctx.childId, (db) => {
+    db.buddy.plan = offlinePlan(db, "starting plan");
+    game.audit(db, "parent", "demo_reset", "Demo control: reset this child");
+  });
+  return { ok: true };
 });
-// Fallback proxy for clients that can't reach api.cartesia.ai directly.
-app.post("/api/buddy/speak", async (req, res) => {
-  if (!voiceEnabled()) return res.status(404).json({ error: "voice not configured" });
+
+export const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Permissions-Policy": "camera=(), microphone=(self)",
+  "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.cartesia.ai",
+};
+
+async function execute(entry, req, res, now) {
+  let context;
+  if (entry.access !== "public") {
+    context = auth.resolveContext(req, {
+      parent: ["parent", "lockedParent"].includes(entry.access), unlocked: entry.access === "parent",
+    }, now);
+    const token = auth.sessionToken(req);
+    res.set("Set-Cookie", auth.cookieHeader(req, context.session, token, now));
+  }
+  return entry.handler(req, context, res, now);
+}
+
+export async function dispatch(method, pathname, req, res, now = Date.now()) {
+  res.set({ ...SECURITY_HEADERS, "Cache-Control": "no-store" });
   try {
-    const audio = await synthesize(actions.speakText(null, req.body));
-    res.set("Content-Type", "audio/mpeg").send(audio);
+    if (pathname.startsWith("/api/demo") && process.env.MQ_DEMO !== "1") throw new GameError("Not found", 404);
+    for (const entry of routeActions) {
+      if (entry.method !== method) continue;
+      const names = [];
+      const pattern = entry.path.replace(/:([a-z]+)/g, (_, name) => { names.push(name); return "([^/]+)"; });
+      const match = new RegExp(`^${pattern}$`).exec(pathname);
+      if (!match) continue;
+      req.params = {};
+      names.forEach((name, i) => { req.params[name] = match[i + 1]; });
+      const result = await execute(entry, req, res, now);
+      if (result !== SENT) res.json(result ?? { ok: true });
+      return;
+    }
+    throw new GameError("Not found", 404);
   } catch (e) {
     if (e instanceof GameError) return res.status(e.status).json({ error: e.message });
-    console.error("[voice]", e.message);
-    res.status(502).json({ error: "voice unavailable" });
+    console.error(e);
+    res.status(500).json({ error: "Something went wrong" });
   }
-});
+}
 
-// ------------------------------------------------------------------ routes: parent
-app.use("/api/parent", requireParent);
-app.post("/api/parent/approval/:id", route((req) => act((db) => actions.approval(db, req.body, req.params.id), "parent_decision")));
-app.post("/api/parent/goal", route((req) => act((db) => actions.goal(db, req.body), "goal_created")));
-app.post("/api/parent/mission", route((req) => act((db) => actions.mission(db, req.body), "mission_created")));
-app.post("/api/parent/allowance", route((req) => act((db) => actions.allowance(db, req.body), "allowance_settings")));
-// Demo control: fast-forward the schedule so the guardian pays this week's allowance now.
-app.post("/api/parent/allowance/run-now", route(() => act((db) => {
-  game.requestAllowanceRun(db);
-}, "fast_forward")));
-app.post("/api/parent/topup", route((req) => act((db) => actions.topup(db, req.body), "topup")));
-app.post("/api/parent/settings", route((req) => act((db) => actions.settings(db, req.body), "settings")));
-app.post("/api/parent/savings-goal", route((req) => act((db) => actions.savingsGoal(db, req.body), "savings_goal")));
-app.post("/api/parent/inject-fault", route(() => mutate((db) => {
-  const dup = injectDuplicatePosting(db);
-  if (!dup) throw new GameError("Nothing to duplicate yet — approve a reward or run an allowance first");
-  return { injected: dup.id };
-  // No guardian run here on purpose: the next tick has to find it on its own.
-})));
-app.post("/api/parent/reset", route(() => {
-  cancelReplan();
-  reset();
-  mutate((d) => (d.buddy.plan = offlinePlan(d, "starting plan")));
-  return { ok: true };
-}));
-
-// ------------------------------------------------------------------ static (production)
-const dist = path.join(here, "..", "dist");
-app.use(express.static(dist));
-app.get(/^(?!\/api).*/, (req, res, next) => res.sendFile(path.join(dist, "index.html"), (err) => err && next()));
-
-// ------------------------------------------------------------------ autonomy loop
-setInterval(() => {
-  const db = read();
-  const now = Date.now();
-  const adventureDue = game.dueAdventures(db, now).length > 0;
-  if (!adventureDue && !hasDueWork(db, now)) return;
-  mutate((d) => {
-    game.finalizeAdventures(d, now);
-    guardianPass(d, "tick");
+export function createApp() {
+  const app = express();
+  app.use((req, res, next) => { res.set(SECURITY_HEADERS); next(); });
+  app.use("/api", (req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
+  app.use(express.json({ limit: "32kb" }));
+  app.use("/api", (req, res) => dispatch(req.method, `/api${req.path}`, req, res));
+  const dist = path.join(here, "..", "dist");
+  app.use(express.static(dist));
+  app.get(/^(?!\/api).*/, (req, res, next) => res.sendFile(path.join(dist, "index.html"), (err) => err && next()));
+  app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (err.type === "entity.too.large") return res.status(413).json({ error: "That message is too big. Keep it short!" });
+    if (err.type === "entity.parse.failed") return res.status(400).json({ error: "Send the form fields together" });
+    if (err.status >= 400 && err.status < 500) return res.status(err.status).json({ error: "Send a small JSON form, please" });
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong" });
   });
-}, 2000);
+  return app;
+}
 
-app.listen(PORT, () => {
-  const db = read();
-  if (!db.buddy.plan) mutate((d) => (d.buddy.plan = offlinePlan(d, "starting plan")));
-  console.log(`MoneyQuest API on http://localhost:${PORT}  (buddy: ${buddyMode()}, voice: ${voiceEnabled() ? "cartesia" : "browser"}, bank: ${nessieEnabled() ? "nessie mirror" : "simulated"}, child: ${db.child.name})`);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  nessieEnabled(); // Reject an insecure mirror configuration before listening.
+  auth.initializeAccounts();
+  setInterval(() => {
+    try { tick(); } catch (e) { console.error("[tick]", e.message); }
+  }, 2000);
+  createApp().listen(Number(process.env.PORT || 8787), () => {
+    console.log(`MoneyQuest API ready (buddy: ${buddyMode()}, bank: ${nessieEnabled() ? "nessie" : "simulated"})`);
+  });
+}
