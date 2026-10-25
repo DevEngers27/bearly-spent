@@ -625,9 +625,10 @@ function Devices({ childId, busy, onUnlink }) {
     return () => { active = false; clearInterval(timer); };
   }, [url]);
   const unlink = (id) => run(async () => {
+    const target = devices.find((device) => device.id === id);
     await api(`parent/children/${encodeURIComponent(childId)}/devices/${encodeURIComponent(id)}?child=${encodeURIComponent(childId)}`, undefined, { method: "DELETE" });
     setDevices((current) => current.filter((device) => device.id !== id));
-    onUnlink?.(devices.find((device) => device.id === id));
+    if (target) onUnlink?.(target);
     return { ok: true };
   });
   return <div className="p-stack">
