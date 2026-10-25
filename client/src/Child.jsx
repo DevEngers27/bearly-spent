@@ -1244,7 +1244,7 @@ function useMapleTalk({ state, run, busy, offline }) {
   useEffect(() => () => { turn.current++; stopSpeaking(); }, []);
   const open = () => {
     if (offline) { showBubble("I can't chat while we're offline, but your postcards are right here!"); setMood("resting"); return; }
-    if (away) { showBubble(`${state.child.bear.name} is on a trip — back soon!`); return; }
+    if (away) { showBubble(`${state.child.bear.name} is on a trip!`); return; }
     if (!state.settings.buddyEnabled) { showBubble("My grown-up switched chatting off for now."); setMood("resting"); return; }
     setOpen(true);
   };

@@ -41,7 +41,9 @@ export function renderMarkdown(markdown) {
 
 export function appleCashHelp(req) {
   const protocol = process.env.NODE_ENV === "production" || req.secure || req.protocol === "https" ? "https" : "http";
-  const host = req.get("host") || "localhost";
+  // Only a plain hostname[:port] may appear in the guide; anything odd falls back to the request-less default.
+  const rawHost = req.get("host") || "localhost";
+  const host = /^[a-zA-Z0-9.-]+(:\d+)?$/.test(rawHost) ? rawHost : "localhost";
   // Host is inserted only into escaped text, never executable markup or a link.
   const markdown = readFileSync(guide, "utf8").replaceAll("https://YOUR_MONEYQUEST_SITE", `${protocol}://${host}`);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Apple Cash tracking · MoneyQuest</title><style>
