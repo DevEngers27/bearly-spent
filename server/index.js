@@ -126,7 +126,7 @@ export function childView(db, now = Date.now()) {
       milestones: MILESTONES,
       points: POINTS,
       trip: TRIP,
-      greetings: game.GREETINGS,
+      greetings: game.isDemoChild(db) ? game.GREETINGS : game.GREETINGS.filter((g) => !/team challenge/i.test(g)),
     },
     integrations: { buddy: buddyMode(), voice: voiceEnabled() ? "cartesia" : "browser", bank: nessieEnabled() ? "nessie" : "simulated" },
   };

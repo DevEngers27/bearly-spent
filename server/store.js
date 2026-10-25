@@ -306,7 +306,7 @@ export function friendCode(childId, regenerate = false) {
 /** How a family introduces itself to another family: its display name, else "<parent>'s family". */
 export function familyLabel(childId) {
   const row = database().prepare("SELECT f.display_name AS displayName, f.name AS name FROM families f JOIN children c ON c.family_id = f.id WHERE c.id = ?").get(childId);
-  return row?.displayName?.trim() || `${row?.name || "their grown-up"}'s family`;
+  return row?.displayName?.trim() || `${(row?.name || "their grown-up").trim().split(/\s+/)[0]}'s family`;
 }
 
 export function childForFriendCode(code) {

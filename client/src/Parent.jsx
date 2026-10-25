@@ -304,6 +304,7 @@ function SavingsGoal({ state, goal, create = false, run, busy }) {
         {live && !current && <button disabled={busy} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/current`, {}, "Current goal changed")}>Make current</button>}
         {live && <button disabled={busy || waiting} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/archive`, {}, "Goal archived")}>Archive</button>}
         <button disabled={busy || current || waiting || selected.status === "bought"} className="pbtn" onClick={() => run(`parent/goals/${selected.id}`, undefined, "Goal deleted", { method: "DELETE" })}>Delete</button>
+        {(current || waiting || selected.status === "bought") && <small className="p-muted" role="note">{selected.status === "bought" ? "Bought goals stay as a memory; they can't be changed or deleted." : waiting ? "Waiting for the purchase decision first." : "Choose another current goal before deleting this one."}</small>}
       </div>}
     </section>
   );

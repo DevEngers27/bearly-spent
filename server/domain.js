@@ -912,6 +912,7 @@ export function runSocialAction(childId, action, input, recordId, now = Date.now
       const other = peer.friends.find((f) => f.id === record.id);
       if (!activeFriend(record) || !activeFriend(other)) throw unavailable();
       const text = GREETINGS[integer(body.index, { min: 0, max: GREETINGS.length - 1 })];
+      if (/team challenge/i.test(text)) throw new GameError("Pick another greeting");
       // Shared rolling window: both directions together have 20 messages/day.
       const recent = (record.greetingTimes || []).filter((ts) => ts > now - 86400000);
       if (recent.length >= 20) throw new GameError("Let's send more notes tomorrow!", 429);

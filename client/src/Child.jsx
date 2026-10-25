@@ -973,7 +973,7 @@ function Friends({ state, run, busy }) {
             <BearFigure bear={friend.bear} size={96} />
             <div>
               <h2 className="hand">{friend.name}'s bear, {friend.bear.name}</h2>
-              <p className="fine">{friend.postcards.length} postcards</p>
+              <p className="fine">{friend.postcards.length} {plural(friend.postcards.length, "postcard")}</p>
             </div>
           </div>
           <div className="mini-album">
