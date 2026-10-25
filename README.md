@@ -1,8 +1,8 @@
-# MoneyQuest
+# Bearly Spent
 
 Save money. Grow Maple. Explore the world.
 
-MoneyQuest is a money-learning game for kids aged 7–12 and their parents, built for Cal Hacks. Kids learn, save simulated dollars, grow their bear **Maple**, and spend game points on surprise trips to collect **15 illustrated postcards** from U.S. cities and national parks. Parents manage each child's allowance, goals and approvals; the **Ledger Guardian** handles scheduled payouts and ledger checks, while **Money Buddy** uses Claude with a kid-safety guard to explain money choices through Maple.
+Bearly Spent is a money-learning game for kids aged 7–12 and their parents, built for Cal Hacks. Kids learn, save simulated dollars, grow their bear **Maple**, and spend game points on surprise trips to collect **15 illustrated postcards** from U.S. cities and national parks. Parents manage each child's allowance, goals and approvals; the **Ledger Guardian** handles scheduled payouts and ledger checks, while **Money Buddy** uses Claude with a kid-safety guard to explain money choices through Maple.
 
 This README describes the **v0.4.0 release candidate**. See the [changelog](CHANGELOG.md), [API contract](server/API.md), and [original hackathon spec](#product-spec).
 
@@ -132,7 +132,7 @@ The UI uses hand-drawn SVGs in `client/src/Icons.jsx` plus illustrated PNGs. Cus
 - Spending outside Apple Cash is manually recorded, and the cash diary does not change balances. Savings cannot yet be withdrawn or used for an actual purchase; Buddy's savings-purchase simulation is hypothetical.
 - Friends and their team contributions are simulated. Team progress has no completion reward, and some aspirational milestone effects in the catalog are not rendered.
 - External integration badges reflect configuration, not a successful live connection.
-- [Apple Cash tracking](docs/apple-cash-shortcut.md) deducts purchases logged manually or by an iPhone Shortcut from the same funding account that covers allowance. Add money in Allowance; short-funded receipts wait in Inbox for Record now or Dismiss. MoneyQuest cannot send Apple Cash or read the actual Wallet balance. Check Wallet and avoid logging a purchase twice.
+- [Apple Cash tracking](docs/apple-cash-shortcut.md) deducts purchases logged manually or by an iPhone Shortcut from the same funding account that covers allowance. Add money in Allowance; short-funded receipts wait in Inbox for Record now or Dismiss. Bearly Spent cannot send Apple Cash or read the actual Wallet balance. Check Wallet and avoid logging a purchase twice.
 
 ## Testing and review
 
@@ -159,11 +159,11 @@ This is the original Cal Hacks product vision, including ideas and examples that
 
 ## 1. Project Overview
 
-**MoneyQuest** is a gamified financial education platform designed to help children learn how to earn, save, spend, and manage real money through a fun and interactive experience.
+**Bearly Spent** is a gamified financial education platform designed to help children learn how to earn, save, spend, and manage real money through a fun and interactive experience.
 
-Instead of making financial education feel like homework, MoneyQuest turns saving money into an adventure. Each child has a cute virtual companion called **Maple**, which grows as their savings increase. By completing financial missions, tracking their money, and practicing responsible spending, children earn points they can use to send Maple on virtual adventures, collect postcards, and interact with friends.
+Instead of making financial education feel like homework, Bearly Spent turns saving money into an adventure. Each child has a cute virtual companion called **Maple**, which grows as their savings increase. By completing financial missions, tracking their money, and practicing responsible spending, children earn points they can use to send Maple on virtual adventures, collect postcards, and interact with friends.
 
-MoneyQuest also connects children and parents through a shared financial management system. Parents can assign tasks, set allowances, review progress, and approve financial rewards. Children learn to make financial decisions while gaining more independence within boundaries set by their parents.
+Bearly Spent also connects children and parents through a shared financial management system. Parents can assign tasks, set allowances, review progress, and approve financial rewards. Children learn to make financial decisions while gaining more independence within boundaries set by their parents.
 
 The goal is to make financial literacy something children **want to participate in**, while helping parents teach responsible money habits without adding extra work to their daily routines.
 
@@ -175,13 +175,13 @@ Most children do not learn how to manage money until they are older. Financial c
 
 Existing children's financial applications often focus on chores, allowances, and debit cards. While useful, they may not give children a strong reason to return to the app regularly.
 
-MoneyQuest aims to solve three problems:
+Bearly Spent aims to solve three problems:
 
 - **Lack of engagement:** Financial education can feel boring or disconnected from children's interests.
 - **Limited understanding of real money:** Children may receive allowances without understanding the long-term impact of their financial choices.
 - **Difficulty for parents:** Parents need an easy way to encourage good financial habits, assign goals, and reward progress.
 
-MoneyQuest combines real-world financial management with virtual pet mechanics, collectible rewards, and social interaction.
+Bearly Spent combines real-world financial management with virtual pet mechanics, collectible rewards, and social interaction.
 
 ---
 
@@ -230,7 +230,7 @@ Points are **virtual rewards, not real money**, and cannot be cashed out.
 
 ### Feature 3: Maple Adventures and Postcard Collection
 
-One of MoneyQuest's main engagement features is the ability to send bears on virtual adventures.
+One of Bearly Spent's main engagement features is the ability to send bears on virtual adventures.
 
 Children can use points earned from missions and financial tracking to send Maple to different destinations.
 
@@ -252,7 +252,7 @@ Children can store these postcards in a personal digital collection album.
 
 ### Feature 4: Hidden and Rare Postcards
 
-To make exploration more exciting, MoneyQuest includes secret postcards that children can discover through different missions and adventure combinations.
+To make exploration more exciting, Bearly Spent includes secret postcards that children can discover through different missions and adventure combinations.
 
 Postcards are divided into different collection categories:
 
@@ -271,7 +271,7 @@ Hidden postcards should be unlocked through discoverable achievements rather tha
 
 ### Feature 5: Friends and Postcard Exchange
 
-MoneyQuest includes a social feature where children can connect with approved friends and share their postcard collections.
+Bearly Spent includes a social feature where children can connect with approved friends and share their postcard collections.
 
 Children can:
 
@@ -307,17 +307,17 @@ Parents can:
 **Example parent-child workflow:**
 
 1. A parent creates a goal: "Complete five financial literacy challenges to earn $5."
-2. The child completes the challenges through MoneyQuest.
+2. The child completes the challenges through Bearly Spent.
 3. The system verifies completion and notifies the parent.
 4. The parent receives a notification: "Your child completed their goal! Would you like to approve the $5 reward?"
 5. The parent approves the reward.
-6. The reward is recorded in MoneyQuest and, if a supported payment integration is available, transferred through an authorized financial service.
+6. The reward is recorded in Bearly Spent and, if a supported payment integration is available, transferred through an authorized financial service.
 
 This connects in-game achievements with real financial learning while keeping parents in control.
 
 ### Feature 7: Real Money and Spending Integration
 
-MoneyQuest is designed to help children understand and manage actual money, rather than relying entirely on a fictional currency.
+Bearly Spent is designed to help children understand and manage actual money, rather than relying entirely on a fictional currency.
 
 Potential future integrations include:
 
@@ -325,11 +325,11 @@ Potential future integrations include:
 - **Parent-approved transfers:** Rewards can eventually be deposited into a child's eligible financial account through an authorized provider.
 - **Real savings goals:** Children can save toward actual items, such as bicycles, toys, school trips, or gifts.
 
-For the hackathon prototype, MoneyQuest will use simulated financial transactions and accounts to demonstrate the complete experience without moving real funds.
+For the hackathon prototype, Bearly Spent will use simulated financial transactions and accounts to demonstrate the complete experience without moving real funds.
 
 ### Feature 8: AI Financial Buddy
 
-MoneyQuest includes an AI-powered financial assistant that helps children understand financial concepts through simple, age-appropriate explanations.
+Bearly Spent includes an AI-powered financial assistant that helps children understand financial concepts through simple, age-appropriate explanations.
 
 Instead of simply answering questions, the assistant responds to the child's actual goals and activities.
 
@@ -354,7 +354,7 @@ The AI cannot independently move real money. Financial transfers always require 
 
 ## 4. Two Connected Reward Systems
 
-MoneyQuest separates real-world savings from virtual game rewards.
+Bearly Spent separates real-world savings from virtual game rewards.
 
 | System | How it works | Purpose |
 |---|---|---|
@@ -396,7 +396,7 @@ Children who have less money should still be able to enjoy the game, unlock adve
 
 ## 6. Potential Cal Hacks Sponsor Tracks
 
-| Sponsor track | MoneyQuest integration |
+| Sponsor track | Bearly Spent integration |
 |---|---|
 | **Hyphenate — Autonomous Systems for Finance** | An AI financial agent monitors simulated allowance transactions, reconciles reward obligations, adjusts savings plans, and escalates transfers for parental approval with an audit trail |
 | **Capital One — Best Use of Nessie** | Simulated bank accounts, deposits, spending, and allowance transfers |
@@ -449,9 +449,9 @@ This demonstrates the connection between real financial habits, parental involve
 
 ## 8. Long-Term Vision
 
-MoneyQuest aims to become more than a children's banking companion or financial literacy game.
+Bearly Spent aims to become more than a children's banking companion or financial literacy game.
 
-By combining a personal virtual character, real financial progress, missions, exploration, and collectible postcards, MoneyQuest gives children a reason to return to financial learning voluntarily.
+By combining a personal virtual character, real financial progress, missions, exploration, and collectible postcards, Bearly Spent gives children a reason to return to financial learning voluntarily.
 
 For children, it is a game about raising Maple, exploring destinations, and collecting memories.
 

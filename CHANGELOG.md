@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to MoneyQuest are recorded here. The format follows
+All notable changes to Bearly Spent (formerly MoneyQuest) are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/). Each entry names the review trail:
 every batch was implemented by Codex, reviewed by Gemini, and verified and
@@ -70,7 +70,7 @@ merged by Claude (see `docs/VERSIONING.md`).
   `docs/help/parent.md`, every button name checked against the screens by
   a test). The kid guide rides inside the bear's prompt, so asking the bear
   "How do I add a friend?" or "How do I sign out?" gets the exact steps; a
-  `lookup_help` tool double-checks. Parents get an "Ask about MoneyQuest"
+  `lookup_help` tool double-checks. Parents get an "Ask about Bearly Spent"
   panel under More (20 questions an hour per family, nothing stored) and a
   public `/help` page linked from Welcome and More. A "How do I…?" chip in
   the talk bar.

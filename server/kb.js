@@ -17,7 +17,7 @@ const synonyms = {
   signin: "sign", signing: "sign", login: "sign", logout: "out",
   talk: "chat", talking: "chat", profile: "profiles",
 };
-const tokens = (value) => new Set((String(value).toLowerCase().match(/[a-z0-9]+/g) || [])
+const tokens = (value) => new Set((String(value).toLowerCase().replace(/\bbearly\s+spent\b/g, "").match(/[a-z0-9]+/g) || [])
   .filter((token) => !stop.has(token)).map((token) => synonyms[token] || token));
 
 // Deliberately stem-free and local: only audience-approved guide excerpts leave here.
@@ -39,11 +39,11 @@ export function helpAnswer(question, audience, bearName) {
   const found = lookup_help(question, audience, bearName);
   return found.length ? found.map(({ title, text }) => `${title}\n\n${text}`).join("\n\n")
     : audience === "kid" ? "I couldn't find that in the guide. Please ask a grown-up to help."
-      : "I couldn't find that in the MoneyQuest guide. Try a question about a screen or feature, or open /help.";
+      : "I couldn't find that in the Bearly Spent guide. Try a question about a screen or feature, or open /help.";
 }
 
 export const HELP_TOOL = {
   name: "lookup_help",
-  description: "Find the best one or two MoneyQuest guide sections for an app-use question. Read-only.",
+  description: "Find the best one or two Bearly Spent guide sections for an app-use question. Read-only.",
   input_schema: { type: "object", properties: { question: { type: "string", maxLength: 500 } }, required: ["question"], additionalProperties: false },
 };

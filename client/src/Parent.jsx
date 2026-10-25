@@ -15,7 +15,7 @@ const SECTIONS = [
   ["activity", "Transactions"],
   ["guardian", "Guardian log"],
   ["buddy", "Buddy chats"],
-  ["help", "Ask about MoneyQuest"],
+  ["help", "Ask about Bearly Spent"],
   ["settings", "Friends & privacy"],
   ["children", "Children"],
   ["account", "Account"],
@@ -130,7 +130,7 @@ function ParentHelp({ offline }) {
     }
   };
   return <div className="p-stack parent-help">
-    <h1>Ask about MoneyQuest</h1>
+    <h1>Ask about Bearly Spent</h1>
     <p className="p-muted">Get steps for using the app. Questions and answers aren't saved. Keep passwords, codes and tokens private.</p>
     <form className="p-card pform" onSubmit={ask}>
       <label htmlFor="parent-help-question">Your question</label>
@@ -284,7 +284,7 @@ function Goals({ state, run, busy, mobile }) {
       <div className="p-two">
         <section className="p-card">
           <h2>Reward goal</h2>
-          <p className="p-muted">MoneyQuest verifies progress automatically and asks you before any money moves.</p>
+          <p className="p-muted">Bearly Spent verifies progress automatically and asks you before any money moves.</p>
           <form className="pform" onSubmit={async (e) => { e.preventDefault(); await run("parent/goal", g, "Goal created"); }}>
             <label>Goal<input value={g.title} onChange={(e) => setG({ ...g, title: e.target.value })} required /></label>
             <div className="pform-row">
@@ -397,7 +397,7 @@ function Allowance({ state, run, demo, busy, fundingFocus = 0 }) {
       <section className="p-card">
         <h2>Funding account</h2>
         <p>{money(state.accounts.parent.balance)} recorded as set aside</p>
-        <p className="p-muted" id="funding-explanation">This is a record of money you have set aside; MoneyQuest never moves real money.</p>
+        <p className="p-muted" id="funding-explanation">This is a record of money you have set aside; Bearly Spent never moves real money.</p>
         <form className="pform" onSubmit={addMoney} aria-label="Add money" aria-describedby="funding-explanation">
           <label>Amount ($)<input ref={fundingAmount} type="number" inputMode="decimal" required min="1" max="1000" step="0.01" disabled={busy} value={funding.amount} onChange={(e) => setFunding({ ...funding, amount: e.target.value })} /></label>
           <label>Note (optional)<input maxLength={120} disabled={busy} value={funding.note} onChange={(e) => setFunding({ ...funding, note: e.target.value })} /></label>
@@ -454,7 +454,7 @@ function Guardian({ state, run, demo, busy }) {
   return (
     <div className="p-stack">
       <h1>Ledger Guardian</h1>
-      <p className="p-muted">The Guardian is MoneyQuest's autonomous bookkeeper. It can pay only what your schedule or your approvals authorise, reverse only postings that exceed an obligation, and asks you about anything else.</p>
+      <p className="p-muted">The Guardian is Bearly Spent's autonomous bookkeeper. It can pay only what your schedule or your approvals authorise, reverse only postings that exceed an obligation, and asks you about anything else.</p>
       <div className="policy-list">
         <div><b>G1</b> Pays the allowance on schedule, never overdrawing</div>
         <div><b>G2</b> Pays approved rewards and requests exactly once</div>

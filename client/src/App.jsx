@@ -219,7 +219,7 @@ export default function App() {
       <a className="skip" href="#main">Skip to content</a>
       {me?.role === "parent" && view === "parent" && (
         <header className="appbar">
-          <div className="brand"><img className="brand-mark" src="/bear/w3/poses/bear_front.png" alt="" /><span>MoneyQuest</span><span className="brand-sub">for grown-ups</span><strong className="parent-account-label">{me.activeChild.name}'s account</strong></div>
+          <div className="brand"><img className="brand-mark" src="/bear/w3/poses/bear_front.png" alt="" /><span>Bearly Spent</span><span className="brand-sub">for grown-ups</span><strong className="parent-account-label">{me.activeChild.name}'s account</strong></div>
           <label className={`child-switcher${me.children.length === 1 ? " only-child" : ""}`}><span>Child</span><select aria-label="Child" value={me.activeChild.id} onChange={(e) => selectChild(e.target.value)}>{me.children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}</select></label>
           {parentOffline && <span className="offline-pill" role="status">Offline</span>}
           <div className="appbar-actions">
@@ -244,7 +244,7 @@ export default function App() {
 
 function Loading({ error, onRetry, onGrownUps }) {
   return <div className="loading"><img className="loading-bear" src="/bear/w3/poses/bear_front.png" alt="" />{error ? <>
-    <p role="alert">Can't reach MoneyQuest right now. Check your connection and try again.</p>
+    <p role="alert">Can't reach Bearly Spent right now. Check your connection and try again.</p>
     <button className="btn honey" onClick={onRetry || (() => location.reload())}>Try again</button>
     {onGrownUps && <button className="btn" onClick={onGrownUps}>Back to grown-ups</button>}
   </> : "Packing the backpack…"}</div>;
@@ -302,7 +302,7 @@ function AuthScreen({ screen, navigate, demo, onSession, error, welcomeHint }) {
     <main className="pin-page auth-page" id="main">
       <section className="pin-card auth-card">
         <img className="auth-bear" src="/bear/w3/poses/bear_front.png" alt="" />
-        <h1>{screen === "welcome" ? "Welcome to MoneyQuest" : screen === "create" ? "Create your family" : screen === "link" ? "Your adventure starts here" : "Welcome back"}</h1>
+        <h1>{screen === "welcome" ? "Welcome to Bearly Spent" : screen === "create" ? "Create your family" : screen === "link" ? "Your adventure starts here" : "Welcome back"}</h1>
         {screen === "welcome" ? <>
           <p>Save a little. Learn a lot. Grow together.</p>
           {welcomeHint && <p role="status">{welcomeHint}</p>}

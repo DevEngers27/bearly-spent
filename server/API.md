@@ -1,4 +1,4 @@
-# MoneyQuest server API
+# Bearly Spent server API
 
 This is the API contract for the v0.4.0 release candidate; the cookie-based client is implemented in `client/src`. The server requires Node >=22.9 (built-in `node:sqlite` and the existing env-file flags). Launch/reset scripts include `--experimental-sqlite` for early Node 22 compatibility. For direct test commands on Node 22.9–22.12, use `NODE_OPTIONS=--experimental-sqlite node --test server/*.test.js`; later supported versions can run `node --test server/*.test.js`. See [Node 22.9 SQLite docs](https://nodejs.org/download/release/v22.9.0/docs/api/sqlite.html) for the flag requirement. Run `npm run dev` or `npm start` with your environment; neither command enables demo mode automatically. `.env.example` sets `MQ_DEMO=1`. Storage is `MQ_DATA_DIR/moneyquest.sqlite`, default `data/moneyquest.sqlite`.
 
@@ -21,7 +21,7 @@ a parent-only `lookup_help` tool, and only children's first names, selected
 child's first name, whether a PIN is set, and the selected child's Shortcut
 connection status. No balances, parent names, family labels, codes, tokens,
 email, PIN value, or password are included in these family facts. Questions
-and answers are not stored in MoneyQuest. No game data is changed. With no
+and answers are not stored in Bearly Spent. No game data is changed. With no
 provider key, provider failure, or no completed answer, local guide lookup
 returns the best one or two parent sections directly.
 
@@ -222,7 +222,7 @@ All routes below require **Parent** auth and operate on the selected child (`?ch
 
 There is one funding account (`accounts.parent`, label `Funding account`), plus
 savings and spending. Allowance and Apple Cash purchases both draw from funding.
-These routes record money already paid outside MoneyQuest; no Apple payment or
+These routes record money already paid outside Bearly Spent; no Apple payment or
 Nessie instruction is made. No account may go negative.
 
 | Method and route | Auth | Request / response |

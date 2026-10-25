@@ -227,7 +227,7 @@ export function requestGoalPurchase(db, id) {
   if (g.id !== db.child.currentGoalId || g.status !== "reached") throw new GameError("Reach your current goal first — you can do it!");
   const a = { id: uid("apr"), kind: "goal_purchase", status: "pending", createdAt: Date.now(), goalId: id, amount: g.target,
     title: `${db.child.name} reached ${g.title} (${dollars(g.target)}) — buy it and take ${dollars(g.target)} out of savings?`,
-    detail: "Approve after buying it. MoneyQuest records the purchase; it does not buy or send real money.", memo: g.title };
+    detail: "Approve after buying it. Bearly Spent records the purchase; it does not buy or send real money.", memo: g.title };
   db.approvals.push(a);
   notify(db, "parent", a.title, "approval", a.id);
   audit(db, "child", "goal_purchase_requested", `Asked your grown-up about buying ${g.title}`, { goalId: id, approvalId: a.id });

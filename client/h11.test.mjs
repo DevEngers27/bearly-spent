@@ -85,14 +85,21 @@ function meFixture(role = "parent") {
   const child = { id: "child-one", name: "Mia", age: 9, bearName: "Maple" };
   return { role, family: { id: "family-one", pinSet: false }, activeChild: child, children: [child], unlockedUntil: 0 };
 }
-test("H11.7 More and desktop navigation open Ask about MoneyQuest and link the Help page", () => {
+test("H13.1 welcome screen introduces Bearly Spent", () => {
+  const h = harness("App.jsx");
+  const tree = h.render(h.exports.AuthScreen, { onSession: noop, toast: noop, demo: false, screen: "welcome", navigate: noop });
+  assert.equal(normalized(nodes(tree, (n) => n.type === "h1")[0]), "Welcome to Bearly Spent");
+  assert.doesNotMatch(normalized(tree), /MoneyQuest/);
+});
+
+test("H11.7 More and desktop navigation open Ask about Bearly Spent and link the Help page", () => {
   for (const mobile of [false, true]) {
     const h = harness("Parent.jsx"), state = stateFixture();
     h.window.matchMedia = () => ({ matches: mobile, addEventListener() {}, removeEventListener() {} });
     const props = { state, me: meFixture(), refreshMe: noop, toast: noop };
     const render = () => h.render(h.exports.default, props);
     if (mobile) byText(render(), "More").props.onClick();
-    const entry = byText(render(), "Ask about MoneyQuest");
+    const entry = byText(render(), "Ask about Bearly Spent");
     assert.ok(entry); entry.props.onClick();
     assert.ok(component(render(), "ParentHelp"));
     if (mobile) assert.ok(byText(render(), "Back to More"));
@@ -110,6 +117,7 @@ test("H11.7 Ask panel posts the selected child's question and renders Markdown w
   h.fetch = async (url, options) => { calls.push([url, options]); return new Response(JSON.stringify({ answer, mode: "offline" })); };
   const render = () => h.render(h.exports.ParentHelp, { offline: false });
   let tree = render(); h.flush();
+  assert.equal(normalized(nodes(tree, (n) => n.type === "h1")[0]), "Ask about Bearly Spent");
   const input = nodes(tree, (n) => n.type === "textarea")[0];
   assert.equal(input.props.maxLength, 500);
   assert.equal(byText(tree, "Ask").props.disabled, true);

@@ -152,7 +152,7 @@ test("G2.1: all existing section IDs map to the right mobile tab and Kids has bo
 test("G2.1: More lists Guardian, Buddy, Account, Security and integration status; browser Back closes pushes", () => {
   const h = parent();
   button(nav(h.tree(), "Parent tabs"), "More").props.onClick();
-  assert.deepEqual(nodes(nav(h.tree(), "More sections"), (n) => n.type === "button").map(text), ["Guardian log ›", "Buddy chats ›", "Ask about MoneyQuest ›", "Account ›", "Security ›"]);
+  assert.deepEqual(nodes(nav(h.tree(), "More sections"), (n) => n.type === "button").map(text), ["Guardian log ›", "Buddy chats ›", "Ask about Bearly Spent ›", "Account ›", "Security ›"]);
   assert.match(text(h.tree()), /Integrations & status/);
   assert.ok(component(h.tree(), "Integrations"));
   for (const [label, name] of [["Guardian log", "Guardian"], ["Buddy chats", "BuddyLog"], ["Account", "Account"], ["Security", "Security"]]) {
@@ -234,6 +234,7 @@ test("G2.2: the family header follows the selected child and keeps Lock separate
     h.render(h.exports.default);
     await new Promise(setImmediate);
     let tree = h.render(h.exports.default);
+    assert.match(text(nodes(tree, (n) => n.props.className === "brand")[0]), /Bearly Spent/);
     assert.equal(text(nodes(tree, (n) => n.props.className === "parent-account-label")[0]).replace(" '", "'"), `${me.activeChild.name}'s account`);
     const selector = nodes(tree, (n) => n.type === "select" && n.props["aria-label"] === "Child")[0];
     assert.equal(selector.props.value, me.activeChild.id);
