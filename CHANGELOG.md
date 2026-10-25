@@ -13,11 +13,30 @@ merged by Claude (see `docs/VERSIONING.md`).
   codes, PIN lockout, multi-child, per-family SSE, rate limits, security
   headers (`fix/b5a-accounts-server`, merged into `wave2`; client in
   `fix/b5b-accounts-client`).
-- `feat/f1-consistency` — parent/kid consistency fixes from the browser
-  smoke run (first-install update toast, impossible lesson goals, double
-  allowance after a time-zone change, shared postcard metrics, notification
-  lifecycle, en-US formatting, server-side reveal receipts).
 - `feat/f5-bear-fit` — accessory anchors tuned per pose.
+
+## [0.3.1] — 2026-10-24
+
+Parent and kid views agree; fixes from the wave-1 browser smoke run.
+170 server tests and 52 client tests.
+
+### Added
+- Parents can cancel an active goal; lesson goals cannot exceed the lessons
+  left to pass. Parents are notified when allowance is paid and when an
+  escalation is resolved. Reveal receipts are stored on the server so a
+  postcard reveal is shown once per child, not once per device.
+
+### Fixed
+- No false "Updated! Tap to reload" on first install; the toast is
+  dismissible and never covers the app bar.
+- Allowance cannot be paid twice within a cadence after a time-zone change.
+- Album, Map and Parent Overview show the same postcard counts; decided
+  approvals clear their reminders; duplicate notifications collapse.
+- Guardian log lines read as sentences (ids stay in audit data); dates and
+  money format as en-US regardless of the browser locale; reversed ledger
+  rows say "reversed"; milestone copy no longer claims unlocked items;
+  parent forms keep unrelated drafts; layout fixes at 390 px.
+- The offline helper saves a plan card after an affordability question.
 
 ## [0.3.0] — 2026-10-24
 
@@ -75,7 +94,8 @@ First hardening wave after the eight-way review. 148 server tests and
 
 Baseline: the Cal Hacks demo as reviewed. 11 rule tests.
 
-[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/DevEngers27/moneyquest/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/DevEngers27/moneyquest/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/DevEngers27/moneyquest/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/DevEngers27/moneyquest/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/DevEngers27/moneyquest/releases/tag/v0.1.0
