@@ -94,7 +94,7 @@ export const PLACES = {
 };
 
 // Where the bear lives: a little cabin in the middle of the map.
-export const HOME = { name: "Maple's cabin", lon: -100.5, lat: 39.2 };
+export const HOME = { name: "Home cabin", lon: -100.5, lat: 39.2 };
 
 const parksVisited = (visited) => [...visited].filter((id) => PLACES[id]?.kind === "park").length;
 
@@ -217,7 +217,7 @@ export const COSMETICS = [
 // Savings milestones (cents). Once unlocked they stay unlocked forever —
 // spending never takes a milestone away.
 export const MILESTONES = [
-  { at: 1000, label: "Cub", reward: "Maple's first sparkle" },
+  { at: 1000, label: "Cub", reward: "First sparkle" },
   { at: 2500, label: "Explorer", reward: "Bow tie unlocked" },
   { at: 5000, label: "Ranger", reward: "Flower crown unlocked" },
   { at: 10000, label: "Trailblazer", reward: "Starry camp unlocked" },
