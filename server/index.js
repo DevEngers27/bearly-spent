@@ -174,6 +174,7 @@ register("GET", "/api/parent/children/:id/devices", "parent", (req, ctx, res, no
 register("DELETE", "/api/parent/children/:id/devices/:sessionId", "parent", (req, ctx) => auth.unlinkDevice(ctx, req.params.id, req.params.sessionId));
 register("POST", "/api/parent/children", "parent", (req, ctx) => createChild(ctx.family.id, req.body));
 register("POST", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.createLink(ctx, req.params.id, now));
+register("GET", "/api/parent/children/:id/link", "parent", (req, ctx, res, now) => auth.linkStatus(ctx, req.params.id, req.query?.code, now));
 register("GET", "/api/state", "child", (req, ctx) => ({ childId: ctx.childId, ...childView(readChild(ctx.childId)) }));
 register("GET", "/api/parent/state", "parent", (req, ctx) => ({ childId: ctx.childId, ...parentView(readChild(ctx.childId), req.query?.before) }));
 register("GET", "/api/child/wallet/token", "parent", (req, ctx, res, now) => auth.walletToken(ctx, { now }));

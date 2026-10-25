@@ -196,6 +196,7 @@ function Goals({ state, run, busy }) {
   const remaining = state.catalog.lessons.filter((l) => !state.child.lessonsDone.includes(l.id)).length;
   const [g, setG] = useState({ title: "Complete money lessons", type: remaining ? "lessons" : "tasks", count: remaining || 1, reward: 5 });
   const [m, setM] = useState({ title: "", points: 40 });
+  const lessonCountError = g.type === "lessons" && (remaining === 0 ? "All money lessons are complete. Choose tasks or times saved instead." : Number(g.count) > remaining ? `Only ${remaining} ${plural(remaining, "lesson")} remaining. Choose ${remaining} or fewer.` : "");
   return (
     <div className="p-stack">
       <h1>Goals & tasks</h1>
@@ -211,10 +212,10 @@ function Goals({ state, run, busy }) {
                 <option value="tasks">Tasks you confirm</option>
                 <option value="save_actions">Times saved</option>
               </select></label>
-              <label>How many{g.type === "lessons" && <small>{remaining} lessons remaining</small>}<input type="number" min="1" max={g.type === "lessons" ? remaining : 50} value={g.count} onChange={(e) => setG({ ...g, count: e.target.value })} /></label>
+              <label>How many{g.type === "lessons" && <small>{remaining} lessons remaining</small>}<input type="number" min="1" max={g.type === "lessons" ? remaining : 50} value={g.count} aria-invalid={Boolean(lessonCountError)} aria-describedby={lessonCountError ? "lesson-count-error" : undefined} onChange={(e) => setG({ ...g, count: e.target.value })} />{lessonCountError && <small id="lesson-count-error" role="status">{lessonCountError}</small>}</label>
               <label>Reward ($)<input type="number" inputMode="decimal" min="0" max="100" step="0.5" value={g.reward} onChange={(e) => setG({ ...g, reward: e.target.value })} /></label>
             </div>
-            <button disabled={busy || (g.type === "lessons" && (remaining === 0 || Number(g.count) > remaining))} className="pbtn primary">Create goal</button>
+            <button disabled={busy || Boolean(lessonCountError)} className="pbtn primary">Create goal</button>
           </form>
         </section>
         <section className="p-card">
@@ -434,7 +435,7 @@ function Settings({ state, run, demo, busy }) {
       </section>
       <section className="p-card">
         <label className="switch"><input type="checkbox" disabled={busy} checked={s.requireTradeApproval} onChange={() => toggle("requireTradeApproval")} /> Ask me before postcard trades</label>
-        <label className="switch"><input type="checkbox" disabled={busy} checked={s.buddyEnabled} onChange={() => toggle("buddyEnabled")} /> Money Buddy is on</label>
+        <label className="switch"><input type="checkbox" disabled={busy} checked={s.buddyEnabled} onChange={() => toggle("buddyEnabled")} /> Money Buddy is {s.buddyEnabled ? "on" : "off"}</label>
         <label className="switch"><input type="checkbox" disabled={busy} checked={s.coopChallenge} onChange={() => toggle("coopChallenge")} /> Team challenges with friends</label>
         <p className="p-muted">Friends can only see {state.child.name}'s bear, postcards and prewritten greetings. Balances, transactions and allowance stay private. There's no open chat.</p>
       </section>
@@ -457,11 +458,33 @@ function Settings({ state, run, demo, busy }) {
 function Children({ state, me, refreshMe, run, busy }) {
   const [child, setChild] = useState({ name: "", age: "9", bearName: "" });
   const [links, setLinks] = useState({});
+  const [shortcutVersions, setShortcutVersions] = useState({});
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    const pending = Object.entries(links).filter(([, link]) => !link.status);
+    if (!pending.length) return;
+    let active = true, inflight = false;
+    const load = async () => {
+      if (inflight) return;
+      inflight = true;
+      await Promise.all(pending.map(async ([id, link]) => {
+        try {
+          const result = await api(`parent/children/${encodeURIComponent(id)}/link?child=${encodeURIComponent(id)}&code=${encodeURIComponent(link.code)}`);
+          if (active && ["linked", "expired"].includes(result.status)) setLinks((current) => current[id]?.code === link.code ? { ...current, [id]: { ...current[id], status: result.status } } : current);
+        } catch {
+          // A failed status read is not evidence that the code was used.
+        }
+      }));
+      inflight = false;
+    };
+    load();
+    const timer = setInterval(load, 2000);
+    return () => { active = false; clearInterval(timer); };
+  }, [links]);
   const add = async (event) => {
     event.preventDefault();
     const result = await run(async () => {
@@ -485,10 +508,12 @@ function Children({ state, me, refreshMe, run, busy }) {
       const seconds = link ? Math.max(0, Math.ceil((link.expiresAt - now) / 1000)) : 0;
       return <section className="p-card" key={summary.id}>
         <div className="row"><div><h2>{summary.name}</h2><p>Age {summary.age} · Bear: {summary.bearName}</p></div><button className="pbtn" disabled={busy} onClick={() => generate(summary.id)}>Generate kid code</button></div>
-        <Devices childId={summary.id} busy={busy} />
-        <AppleCashTracking childId={summary.id} pinSet={me.family.pinSet} busy={busy} />
+        <Devices childId={summary.id} busy={busy} onUnlink={(device) => {
+          if (device?.kind === "shortcut") setShortcutVersions((current) => ({ ...current, [summary.id]: (current[summary.id] || 0) + 1 }));
+        }} />
+        <AppleCashTracking key={`${summary.id}:${shortcutVersions[summary.id] || 0}`} childId={summary.id} pinSet={me.family.pinSet} busy={busy} />
         {link && <div className="p-stack">
-          {seconds > 0 ? <>
+          {link.status === "linked" ? <p role="status">Linked ✓</p> : seconds > 0 && link.status !== "expired" ? <>
             <label className="pform">Kid code<input className="kid-code" readOnly value={link.code} onFocus={(event) => event.target.select()} /></label>
             <p role="status">Expires in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}. Open “I have a kid code” on your child's device.</p>
             <button className="pbtn" disabled={busy || !navigator.clipboard?.writeText} onClick={() => run(() => navigator.clipboard.writeText(link.code), undefined, "Kid code copied")}>Copy code</button>
@@ -581,7 +606,7 @@ function AppleCashTracking({ childId, pinSet, busy }) {
   </div>;
 }
 
-function Devices({ childId, busy }) {
+function Devices({ childId, busy, onUnlink }) {
   const [devices, setDevices] = useState([]);
   const [error, setError] = useState("");
   const [run, pending] = useAction((message) => setError(message));
@@ -600,8 +625,10 @@ function Devices({ childId, busy }) {
     return () => { active = false; clearInterval(timer); };
   }, [url]);
   const unlink = (id) => run(async () => {
+    const target = devices.find((device) => device.id === id);
     await api(`parent/children/${encodeURIComponent(childId)}/devices/${encodeURIComponent(id)}?child=${encodeURIComponent(childId)}`, undefined, { method: "DELETE" });
     setDevices((current) => current.filter((device) => device.id !== id));
+    if (target) onUnlink?.(target);
     return { ok: true };
   });
   return <div className="p-stack">
