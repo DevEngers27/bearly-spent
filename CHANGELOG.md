@@ -11,6 +11,34 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.8] — 2026-10-25
+
+### Added
+- Read-aloud is back, on Cartesia: the bear reads each reply out loud. With
+  `CARTESIA_API_KEY` set the browser fetches a 60-second speech token from
+  `/api/voice/token` and calls Cartesia itself (falling back to the
+  `/api/buddy/speak` proxy, then to the browser's own voice); without a key
+  the browser voice reads. The talk bar has the sound button back (stored
+  per device), Our chat has "Read aloud" under every reply, and the Send
+  tap primes audio so iPhones play the reply without a second tap.
+  Speech-to-text stays out.
+
+### Fixed
+- The kid-safety guard swallowed good answers: it sometimes returned no
+  verdict at all for a plain allowance answer and anything but "OK" blocks.
+  An empty verdict is retried once, whitespace around OK is ignored, and
+  the guard prompt says the child's own allowance, savings, spending,
+  goals, prices, points and budgets are always fine, numbers included.
+- The Content Security Policy blocked every blob audio clip; `media-src`
+  now allows them.
+- Leaving Home, closing the talk bar or dismissing the bubble stops any
+  sound and drops the reply in flight.
+
+### Review trail
+- Restored from v0.8.1 on `feat/read-aloud`; Gemini REQUEST_CHANGES
+  (three in-flight/audio defects) then follow-up review; live checks with
+  the real Cartesia and Claude keys. 372 server tests and 232 client tests.
+
 ## [0.8.7] — 2026-10-25
 
 ### Fixed
