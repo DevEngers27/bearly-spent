@@ -232,7 +232,7 @@ test("M5 zero reward goals finish once without an approval or cash transfer", ()
   assert.ok(db.notifications.some((n) => n.to === "parent" && n.text === "Mia finished Try a lesson (no cash reward)"));
   game.completeLesson(db, "saving_math", [1, 0, 1]);
   runGuardian(db, Date.now());
-  assert.equal(db.approvals.length, 0);
+  assert.equal(db.approvals.filter((a) => a.kind === "reward").length, 0);
   assert.equal(db.transactions.length, transactions);
   assert.deepEqual(db.accounts, accounts);
   assert.equal(db.notifications.filter((n) => n.text === "You finished Try a lesson!").length, 1);

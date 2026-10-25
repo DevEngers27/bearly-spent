@@ -65,14 +65,17 @@ export function seed(now = Date.now()) {
     },
     missions: [],
     parentGoals: [],
-    approvals: [],
+    approvals: [
+      { id: uid("apr"), kind: "friend", status: "pending", createdAt: now, friendId: "fr_leo",
+        title: "Mia wants to add Leo as a friend", detail: "Invitation code LEO-77. Friends only see bears and postcards — never balances." },
+    ],
     notifications: [
       { id: uid("ntf"), ts: now, to: "child", text: "Welcome back, Mia! Maple missed you. Try a money lesson to earn points.", kind: "info", ref: null, read: false },
     ],
     adventures: [],
     postcards: [
-      { id: uid("pc"), defId: "chicago", collectedAt: now - 6 * DAY },
-      { id: uid("pc"), defId: "chicago", collectedAt: now - 2 * DAY },
+      { id: uid("pc"), defId: "chicago", source: "trip", collectedAt: now - 6 * DAY },
+      { id: uid("pc"), defId: "chicago", source: "trip", collectedAt: now - 2 * DAY },
     ],
     friends: [
       {
@@ -101,7 +104,7 @@ export function seed(now = Date.now()) {
 
 // Older saves used the first bear's slots (backpack color, hat, accessory).
 // Map them onto the illustrated wardrobe so existing progress keeps working.
-function migrate(d) {
+export function migrate(d) {
   const HATS = { beanie: "knit_beanie", ranger: "ranger_hat", flowers: "flower_crown" };
   const fix = (b) => {
     if (!b || !("color" in b || "accessory" in b)) return;
@@ -113,6 +116,9 @@ function migrate(d) {
     delete b.accessory;
   };
   fix(d.child?.bear);
+  for (const p of d.postcards || []) {
+    if (p.source === undefined) p.source = p.from ? "trade" : "trip";
+  }
   if (d.child && !d.child.bear.friend && !d.child.ownedCosmetics?.includes("friend:bee_friend")) d.child.bear.friend = "bee_friend";
   d.friends?.forEach((f) => fix(f.bear));
   if (d.child?.ownedCosmetics?.some((id) => id.startsWith("color:") || id.startsWith("bg:") || id.startsWith("acc:"))) {

@@ -47,9 +47,10 @@ test("topup converts dollars to cents and clears only parent-funded escalations"
   const before = db.accounts.parent.balance;
   actions.topup(db, { amount: " 50 " });
   assert.equal(db.accounts.parent.balance, before + 5000);
-  assert.equal(db.approvals[0].status, "approved");
-  assert.equal(Object.hasOwn(db.approvals[1], "escalatedAt"), false, "parent-funded reward escalation is cleared");
-  assert.equal(db.approvals[2].escalatedAt, 1, "child-funded spend escalation is left for the guardian to retry");
+  const byId = (id) => db.approvals.find((a) => a.id === id);
+  assert.equal(byId("a").status, "approved");
+  assert.equal(Object.hasOwn(byId("r"), "escalatedAt"), false, "parent-funded reward escalation is cleared");
+  assert.equal(byId("s").escalatedAt, 1, "child-funded spend escalation is left for the guardian to retry");
   actions.topup(db, { amount: 0.01 });
   actions.topup(db, { amount: 1000 });
   assert.equal(db.accounts.parent.balance, before + 105001);
