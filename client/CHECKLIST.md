@@ -152,3 +152,12 @@ The checks below remain pending; no listening server or browser session was star
 - [ ] Inbox pending receipt has Add money (focuses Allowance's existing funding input), Record now, and Dismiss. Record while still short shows the friendly error. Add funds then Record posts once; retrying Record or the original Shortcut does not debit again. Dismiss removes the card and audits it.
 - [ ] Children retains Shortcut setup and Apple Cash activity shows funding, weekly/monthly totals, purchase flags and receipts waiting for funding. No Send form remains. Recent and Transactions tag Apple Cash; legacy sends say “Sent via Apple Cash (before 0.7)”.
 - [ ] Check on an actual iPhone that 200 finishes, 409 preserves receipt/ID for funding retry, and 429 respects Retry-After. Token scope, PIN gating, expiry and revocation still work.
+## H2 daily missions
+- Open Missions: Today shows up to three server-assigned missions with hints and rewards; Home's Next up matches the first one.
+- Finish an active mission: it is checked and struck through briefly, then slides away; its replacement slides in with New! Polling must not restart or freeze this transition.
+- Enable reduced motion: completion and replacement have no animation.
+- Complete six missions: Today says “All done for today — amazing!”; This week and parent tasks remain usable.
+- Visit a place on Map, read a postcard story, and check goals: use the confirmation button in each screen. Buttons disappear after completion and are disabled offline/busy.
+- Price detective opens Cash diary; enter a note and two prices. One price or an invalid price cannot submit; both are stored with the diary entry.
+- Finish a lesson: its card says “Review · no points”; reviewing adds no points. First-time lesson, track and save mission rewards are not doubled.
+- Reopen after family-local midnight: missions roll once and persist across refresh/restart. Parent state and Buddy show the same current missions.

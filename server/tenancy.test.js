@@ -11,7 +11,7 @@ import { initializeAccounts } from "./auth.js";
 import { dispatch, createApp, tick, routeActions } from "./index.js";
 import { takeLimit, _clearLimitsForTest, MINUTE, HOUR } from "./limits.js";
 import { cancelReplan, replan, queueReplan, _internals } from "./buddy.js";
-import { audit, notify } from "./domain.js";
+import { audit, notify, ensureDailyMissions } from "./domain.js";
 
 const env = Object.fromEntries(["MQ_DATA_DIR", "MQ_DEMO", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"].map((k) => [k, process.env[k]]));
 const form = (name) => ({ email: `${name}@example.test`, password: "parent-password", parentName: name, childName: name, childAge: 9, bearName: "Pip" });
@@ -447,12 +447,16 @@ test("merged trips, reveal receipts and goal cancellation obey account roles and
   const sibling = (await a.browser.call("POST", "/api/parent/children", { name: "Sibling", age: 8, bearName: "Maple" })).body;
   const child = await pair(a.browser, sibling.id);
   const original = structuredClone(readChild(a.id));
-  mutateChild(sibling.id, (d) => { d.child.points = 60; });
+  mutateChild(sibling.id, (d) => {
+    d.child.points = 60;
+    ensureDailyMissions(d);
+    d.child.dailyMissions.active = [{ key: "trip", assignedAt: Date.now() }];
+  });
   const trip = await child.call("POST", "/api/child/trip", {});
   assert.equal(trip.status, 200);
   assert.equal(trip.body.status, "away");
   assert.equal(Object.hasOwn(trip.body, "destId"), false);
-  assert.equal(readChild(sibling.id).child.points, 30);
+  assert.equal(readChild(sibling.id).child.points, 45, "trip spends 30 and its active mission earns 15");
   const away = (await child.call("GET", "/api/state")).body;
   assert.equal(Object.hasOwn(away.adventures[0], "destId"), false);
   assert.equal(away.catalog.trip.cost, 30);

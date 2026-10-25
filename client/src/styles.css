@@ -866,3 +866,14 @@ button.toast { pointer-events: auto; cursor: pointer; font-family: inherit; }
 .balances-strip strong { font-family: var(--body); font-variant-numeric: tabular-nums; }
 .paid-with { min-width: 0; margin: 0; padding: 0; border: 0; }
 .paid-with legend { margin-bottom: 6px; }
+/* A completed daily mission makes room for the next little adventure. */
+.mission-new { color: var(--ink); background: var(--honey-soft); border-radius: 8px; padding: 2px 7px; width: fit-content; }
+.mission-exit { animation: mission-away 1.4s ease forwards; }
+.mission-enter { animation: mission-arrive .45s ease both; }
+@keyframes mission-away { 0%, 65% { opacity: 1; transform: translateX(0); } 100% { opacity: 0; transform: translateX(-24px); } }
+@keyframes mission-arrive { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+.diary-prices { display: flex; gap: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.diary-prices label { flex: 1; min-width: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .mission-exit, .mission-enter { animation: none; }
+}

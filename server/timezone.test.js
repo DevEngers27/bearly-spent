@@ -260,23 +260,20 @@ test("B5 parent time zone picker defaults to the browser and sends the selected 
   assert.equal(picker().props.value, LA);
 });
 
-test("B5/B6 child Today and This week progress use server keys despite a different device clock", () => {
+test("B5/B6 child Today and This week use server missions and keys despite a different device clock", () => {
   const db = fresh(LA);
-  db.child.points = 0;
   game.childSave(db, 100, afternoon[0]);
   game.completeBudget(db, budget, afternoon[0]);
-  const state = childView(db, afternoon[1]);
+  let state = childView(db, afternoon[1]);
   const h = clientHarness("Child");
   const render = () => h.exports.Missions({ state, run() {}, open() {}, busy: false });
   const lists = () => nodes(render(), (node) => node.type === "ul" && node.props.className === "checklist");
-  assert.ok(nodes(render(), (node) => node.type === "h2" && node.props.children.includes("Today")).length);
-  assert.ok(nodes(render(), (node) => node.type === "h2" && node.props.children.includes("This week")).length);
-  assert.equal(lists()[0].props.children.length, 2);
+  assert.equal(lists()[0].props.children.length, state.missionsToday.active.length);
   assert.equal(lists()[1].props.children.length, 1);
-  assert.equal(nodes(render(), (node) => node.type === "li" && node.props.className === "done").length, 3);
-  assert.equal(h.exports.nextUp(state, afternoon[1]).some((item) => item.id === "save"), false);
-  state.dayKey = "2026-10-25";
-  state.weekKey = "2026-W44";
-  assert.equal(nodes(render(), (node) => node.type === "li" && node.props.className === "done").length, 0);
-  assert.equal(h.exports.nextUp(state, afternoon[1]).some((item) => item.id === "save"), true);
+  assert.equal(nodes(render(), (node) => node.type === "li" && node.props.className === "done").length, 1, "weekly budget is complete");
+  assert.equal(h.exports.nextUp(state, afternoon[1])[0].id, state.missionsToday.active[0].key);
+  assert.equal(state.missionsToday.active.some((m) => m.key === "save"), false);
+  state = childView(db, Date.parse("2026-10-25T00:00:00-07:00"));
+  assert.equal(nodes(render(), (node) => node.type === "li" && node.props.className === "done").length, 1, "Sunday still belongs to the completed budget week");
+  assert.equal(h.exports.nextUp(state, afternoon[1])[0].id, "track");
 });

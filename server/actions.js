@@ -26,10 +26,10 @@ function renameProfileBear(db, name) {
 
 export const actions = {
   walletPing: action(() => ({ ok: true })),
-  save: action((db, body) => game.childSave(db, money(body.amount, { min: 100 }))),
-  spend: action((db, body) => game.childSpend(db, {
+  save: action((db, body, now) => game.childSave(db, money(body.amount, { min: 100 }), now)),
+  spend: action((db, body, now) => game.childSpend(db, {
     amount: money(body.amount, { min: 1 }), memo: str(body.memo),
-  }, spendPolicy)),
+  }, spendPolicy, now)),
   walletSpend: action((db, body, now) => game.childWalletSpend(db, {
     amount: money(body.amount, { min: 1 }), merchant: str(body.merchant),
     at: body.at, external_id: body.external_id,
@@ -40,9 +40,17 @@ export const actions = {
   extra: action((db, body) => game.requestExtraAllowance(db, {
     amount: money(body.amount, { min: 100, max: 5000 }), reason: str(body.reason),
   })),
-  journal: action((db, body) => game.journal(db, {
-    direction: oneOf(body.direction, ["received", "spent", "saved"]), amount: money(body.amount), note: str(body.note),
-  })),
+  journal: action((db, body, now) => {
+    let prices;
+    if (Object.hasOwn(body, "prices")) {
+      if (!Array.isArray(body.prices) || body.prices.length !== 2) throw new game.GameError("Add two prices to compare");
+      prices = body.prices.map((p) => money(p, { min: 1 }));
+    }
+    return game.journal(db, {
+      direction: oneOf(body.direction, ["received", "spent", "saved"]), amount: money(body.amount), note: str(body.note),
+      ...(prices ? { prices } : {}),
+    }, now);
+  }),
   budget: action((db, body) => {
     const allocations = object(body.allocations);
     const validated = Object.fromEntries(Object.entries(allocations).map(([k, v]) => [k, money(v)]));
@@ -52,18 +60,19 @@ export const actions = {
     const total = Object.hasOwn(body, "total") ? money(body.total, { min: 100, max: 20000 }) : 2000;
     return game.completeBudget(db, validated, undefined, total);
   }),
-  lesson: action((db, body) => {
+  lesson: action((db, body, now) => {
     const lessonId = id(body.lessonId);
     if (!Array.isArray(body.answers) || !body.answers.every((v) => Number.isInteger(v))) throw new game.GameError("Answer every question with a choice");
-    return game.completeLesson(db, lessonId, body.answers);
+    return game.completeLesson(db, lessonId, body.answers, now);
   }),
   adventureSeen: (db, adventureId) => game.markAdventureSeen(db, id(adventureId)),
   cancelGoal: (db, goalId) => game.cancelParentGoal(db, id(goalId)),
   missionDone: (db, missionId) => game.childMarkMissionDone(db, id(missionId)),
-  trip: action((db) => game.startTrip(db)),
+  missionSeen: action((db, body, now) => game.missionSeen(db, id(body.key), now)),
+  trip: action((db, body, now) => game.startTrip(db, now)),
   adventure: action((db, body) => game.startAdventure(db, id(body.destId))),
   buyCosmetic: action((db, body) => game.buyCosmetic(db, id(body.id))),
-  equip: action((db, body) => game.equip(db, id(body.kind), body.value === null ? null : id(body.value))),
+  equip: action((db, body, now) => game.equip(db, id(body.kind), body.value === null ? null : id(body.value), now)),
   renameBear: action((db, body) => renameProfileBear(db, body.name)),
   profile: action((db, body) => renameProfileBear(db, body.bearName)),
   friend: action((db, body) => game.friendView(game.addFriendByCode(db, id(body.code)))),
@@ -72,7 +81,7 @@ export const actions = {
     if (!Object.hasOwn(PLACES, give) || !Object.hasOwn(PLACES, get)) throw new game.GameError("Pick two postcards");
     return game.proposeTrade(db, friendId, give, get);
   }),
-  greet: action((db, body) => game.sendGreeting(db, id(body.friendId), integer(body.index, { max: game.GREETINGS.length - 1 }))),
+  greet: action((db, body, now) => game.sendGreeting(db, id(body.friendId), integer(body.index, { max: game.GREETINGS.length - 1 }), now)),
   chat: action((db, body, send = (text) => chat(childIdFor(db), text)) => {
     if (typeof body.text === "string" && !body.text.trim()) throw new game.GameError("Say something first!");
     const text = str(body.text, { max: 500 });
