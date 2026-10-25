@@ -64,7 +64,7 @@ export default function Child({ state, toast, onGrownUps, offline }) {
     store.set(openedKey, JSON.stringify(next)); setOpenedCards(next);
     open("postcard", { id });
   };
-  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard, onGrownUps };
+  const ctx = { state, run, busy, offline, toast, setTab, open, close, goMap, talk, startTalk, newCards, openCard, onGrownUps, seen };
   // Replay locally acknowledged receipts on reconnect (including older devices).
   useEffect(() => {
     if (offline) return;
@@ -809,10 +809,57 @@ function BudgetSheet({ state, run, close, busy }) {
 }
 
 // ------------------------------------------------------------------ map
-function MapScreen({ state, open, focus, clearFocus }) {
-  const now = useNow(250);
+function useMapClock() {
+  const [clock, setClock] = useState(() => ({ now: Date.now(), elapsed: 0, visible: document.visibilityState !== "hidden" }));
+  const [reducedMotion, setReducedMotion] = useState(() => Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches));
+  useEffect(() => {
+    let timer, last;
+    const visibility = () => {
+      clearInterval(timer);
+      last = Date.now();
+      const visible = document.visibilityState !== "hidden";
+      setClock((c) => ({ ...c, now: last, visible }));
+      if (visible) timer = setInterval(() => {
+        const now = Date.now();
+        setClock((c) => ({ ...c, now, elapsed: c.elapsed + now - last }));
+        last = now;
+      }, 250);
+    };
+    visibility();
+    document.addEventListener("visibilitychange", visibility);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
+  }, []);
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const change = () => setReducedMotion(Boolean(media?.matches));
+    media?.addEventListener?.("change", change);
+    return () => media?.removeEventListener?.("change", change);
+  }, []);
+  return { ...clock, reducedMotion };
+}
+
+function MapScreen({ state, open, focus, clearFocus, seen = [] }) {
+  const { now, elapsed, visible, reducedMotion } = useMapClock();
   const owned = useMemo(() => new Set(state.postcards.filter((p) => p.source === "trip" || (!p.source && !p.from)).map((p) => p.defId)), [state.postcards]);
   const away = state.adventures.find((a) => a.status === "away");
+  // Use exactly the Home reveal's local/server receipt gate, with newest first
+  // determined by timestamps rather than the order of an API or cached array.
+  const lastReturned = state.adventures.filter((a) => a.status === "returned")
+    .sort((a, b) => (b.returnedAt || b.returnsAt || b.startedAt || 0) - (a.returnedAt || a.returnsAt || a.startedAt || 0))[0];
+  const latest = lastReturned && (lastReturned.revealedAt || seen.includes(lastReturned.id)) ? lastReturned : undefined;
+  const walkKey = `mq_map_walk:${encodeURIComponent(state.child.id || state.child.name)}`;
+  const [replay, setReplay] = useState(null);
+  useEffect(() => {
+    if (away || !visible || !latest || state.catalog.places[latest.destId]?.hidden || !state.catalog.places[latest.destId]) return;
+    const played = storedList(walkKey);
+    if (played.includes(latest.id)) return;
+    // Claim before playback: leaving the tab or reloading must not replay it.
+    store.set(walkKey, JSON.stringify([...played, latest.id]));
+    setReplay({ id: latest.id, key: walkKey, started: elapsed });
+  }, [latest?.id, away?.id, Boolean(away), visible, walkKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const replayElapsed = replay?.id === latest?.id && replay?.key === walkKey ? elapsed - replay.started : Infinity;
+  const returnProgress = replayElapsed <= 2500 ? replayElapsed / 2500 : null;
+  const celebrate = replayElapsed >= 2500 && replayElapsed < 5000;
   const frameRef = useRef(null);
   const interacting = useRef({ pointer: false, touch: false });
   const lastAutoScroll = useRef(0);
@@ -836,14 +883,14 @@ function MapScreen({ state, open, focus, clearFocus }) {
   useEffect(() => {
     const frame = frameRef.current;
     const walker = frame?.querySelector(".walker");
-    if (!frame || !walker || frame.scrollWidth <= frame.clientWidth || interacting.current.pointer || interacting.current.touch || now - lastInteraction.current < 2000 || now - lastAutoScroll.current < 2000) return;
+    if (!visible || !frame || !walker || frame.scrollWidth <= frame.clientWidth || interacting.current.pointer || interacting.current.touch || now - lastInteraction.current < 2000 || now - lastAutoScroll.current < 2000) return;
     const f = frame.getBoundingClientRect(), w = walker.getBoundingClientRect();
     const x = w.left + w.width / 2 - f.left;
     if (x < f.width * 0.2 || x > f.width * 0.8) {
       lastAutoScroll.current = now;
-      frame.scrollTo({ left: frame.scrollLeft + x - f.width / 2, behavior: "smooth" });
+      frame.scrollTo({ left: frame.scrollLeft + x - f.width / 2, behavior: reducedMotion ? "auto" : "smooth" });
     }
-  }, [now, away]);
+  }, [now, away, visible, reducedMotion]);
   const places = state.catalog.places;
   return (
     <div className="page">
@@ -857,7 +904,7 @@ function MapScreen({ state, open, focus, clearFocus }) {
         </div>
       )}
       <p className="fine map-hint">Drag the map sideways to explore.</p>
-      <div className="map-frame" ref={frameRef}
+      <div className={`map-frame${visible ? "" : " map-paused"}`} ref={frameRef}
         onPointerDown={() => { interacting.current.pointer = true; }}
         onPointerUp={() => { interacting.current.pointer = false; lastInteraction.current = Date.now(); }}
         onPointerCancel={() => { interacting.current.pointer = false; lastInteraction.current = Date.now(); }}
@@ -865,12 +912,14 @@ function MapScreen({ state, open, focus, clearFocus }) {
         onTouchEnd={(e) => { interacting.current.touch = e.touches.length > 0; lastInteraction.current = Date.now(); }}
         onTouchCancel={() => { interacting.current.touch = false; lastInteraction.current = Date.now(); }}
         onWheel={() => { lastInteraction.current = Date.now(); }}>
-        <MapView places={places} home={state.catalog.home} owned={owned} away={away} now={now} bear={state.child.bear} onSelect={(id) => open("place", { id })} />
+        <MapView places={places} home={state.catalog.home} owned={owned} away={away} now={now} bear={state.child.bear} latest={latest} returnProgress={returnProgress} celebrate={celebrate} reducedMotion={reducedMotion} onSelect={(id) => open("place", { id })} />
       </div>
       <div className="legend">
         <span><i className="lg open" /> A future adventure</span>
         <span><i className="lg visited" /> Visited</span>
         <span><i className="lg locked" /> Locked</span>
+        {away && <span><img className="lg-bear" src="/bear/poses/bear_side.png" alt="" /> {state.child.bear.name} is out exploring</span>}
+        {!away && latest && <span><i className="lg latest" /> Latest trip</span>}
         <span>{postcardMetrics(state).places} of {postcardMetrics(state).total} {plural(postcardMetrics(state).total, "place")}</span>
       </div>
     </div>

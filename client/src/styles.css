@@ -375,9 +375,20 @@ button.stat-stamp { cursor: pointer; }
 .pin.target .pin-bg { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { transform: scale(1.22); } }
 .trail { fill: none; stroke: var(--rose); stroke-width: 4; stroke-dasharray: 2 10; stroke-linecap: round; animation: march 1s linear infinite; }
+.trail.mystery-trail { stroke: var(--ink-soft); opacity: .4; animation: none; }
+.trail.faint { opacity: .3; animation: none; }
 @keyframes march { to { stroke-dashoffset: -24; } }
 .walker { transition: transform 0.25s linear; }
-.walker > g { animation: bounce 0.5s ease-in-out infinite; }
+.walker-bounce { animation: bounce 0.5s ease-in-out infinite; }
+.walker, .walker-sparkles { pointer-events: none; }
+.walker.stepped { transition: none; }
+.mystery-cloud path { fill: var(--paper-card); stroke: var(--ink); stroke-width: 2; }
+.mystery-cloud text { font-family: var(--hand); font-size: 25px; font-weight: 700; fill: var(--ink); }
+.walker-sparkles { fill: var(--honey); stroke: var(--ink-soft); stroke-width: 1; }
+.postcard-callout { fill: var(--good); font-size: 18px; }
+.map-paused *, .map-paused *::before, .map-paused *::after { animation-play-state: paused !important; transition: none !important; }
+.lg-bear { width: 20px; height: 24px; object-fit: contain; }
+.lg.latest { height: 0; width: 22px; border: 0; border-top: 4px dotted var(--rose); border-radius: 0; opacity: .6; }
 .home-pin { pointer-events: none; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; font-weight: 700; color: var(--ink-soft); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }

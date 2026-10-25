@@ -162,6 +162,26 @@ The checks below remain pending; no listening server or browser session was star
 - Finish a lesson: its card says “Review · no points”; reviewing adds no points. First-time lesson, track and save mission rewards are not doubled.
 - Reopen after family-local midnight: missions roll once and persist across refresh/restart. Parent state and Buddy show the same current missions.
 
+## H5 mystery map walker
+
+Socket-free regression coverage: `client/h5.test.mjs` checks the fixed loop's
+40px clearance from all 15 destination pin centres, real-time/reload progress,
+travel direction, rendered SVG privacy (including a throwing away destination
+getter), local/server reveal receipts, latest-trip ordering, child-scoped one-time
+playback, home arrival, pin celebration, reduced-motion waypoints, visibility
+pause/resume, auto-scroll behavior, legend names and empty travel history.
+The older F3 no-walker assertion in `client/c1.test.mjs` now expects the mystery
+walker and excludes the real trail. No server behavior changed.
+
+Browser/device checks below remain pending; no listening server was started.
+
+- [ ] At 360/390px and desktop widths, send the bear on a surprise trip. It follows the same closed mystery loop for every destination, with a small ? cloud, sparkle tail and correct facing. Destination pin names/thumbnails are generic while away; normal names return afterward. Tap/keyboard pin exploration remains read-only.
+- [ ] Reload halfway through a trip: the bear stays at the same real-time position. Let the timer reach zero before the server return arrives: the bear waits at Home. Drag/touch-scroll the map and confirm auto-scroll waits until the interaction has ended for two seconds.
+- [ ] Complete Add to album, then open Map. The revealed trail marches while the bear walks from the destination to Home over about 2.5 seconds. The destination pulses “New postcard!” briefly, then only a faint dotted latest-trip trail remains. Polling, reopening Map and reloading never replay it; leaving halfway through consumes it too. Repeat with a new trip and a sibling.
+- [ ] With an unseen returned postcard, no real trip trail appears before the reveal receipt. Try both a local offline receipt and a server-revealed return from another device. A newer unseen return must not show an older seen trip as the latest trail.
+- [ ] Hide the browser tab during the walk: animations/tick stop and the remaining homeward time resumes on return. Leaving the Map section removes its clock; returning shows the faint trail. The one-time walk receipt is browser-local and scoped to the child.
+- [ ] Enable reduced motion, including changing it while Map is open. The bear hops between fixed waypoints, with no bounce, marching trail or smooth auto-scroll. Check the ? cloud and pin callout fit inside the map at every waypoint.
+
 
 ## H6 phone notes
 

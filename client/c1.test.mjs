@@ -1051,7 +1051,9 @@ test("F3: map handles masked adventures and place sheets are read-only with stor
   assert.doesNotMatch(text(tree), /walking to|heading home from|send Maple/);
   const map = harness("Child.jsx");
   tree = map.render(map.exports.MapView, { places: state.catalog.places, home: state.catalog.home, owned: new Set(), away: state.adventures[0], onSelect: noop });
-  assert.equal(nodes(tree, (n) => n.props.className === "trail" || n.props.className === "walker").length, 0);
+  assert.equal(nodes(tree, (n) => n.props.className?.split(" ").includes("walker")).length, 1);
+  assert.equal(nodes(tree, (n) => n.props["aria-label"] === "Mystery route").length, 1);
+  assert.equal(nodes(tree, (n) => n.props.className?.includes("latest-trail")).length, 0);
   const place = harness("Child.jsx");
   state.postcards = [{ defId: "seattle", source: "trip" }, { defId: "seattle", source: "trip" }];
   tree = place.render(place.exports.PlaceSheet, { state, id: "seattle", close: noop, openCard: noop });
