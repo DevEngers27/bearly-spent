@@ -119,6 +119,7 @@ test("the talk bar lives only in Home: the app no longer mounts it as a fixed ov
   const css = await readFile(new URL("src/styles.css", import.meta.url), "utf8");
   const rule = css.match(/^\.talk-bar \{[^}]*\}/m)[0];
   assert.doesNotMatch(rule, /position: fixed|bottom:/); assert.match(rule, /position: relative/);
+  assert.match(rule, /min-width: 0/, "a grid item must be allowed to shrink below the nowrap chips row, or the page widens to ~720px and scrolls sideways (seen on phones in 0.8.6–0.9.0)");
   assert.doesNotMatch(css, /:has\(\.talk-bar\)/);
   assert.match(css, /\.talk-bar input \{[^}]*scroll-margin-block/);
 });

@@ -266,3 +266,7 @@ Socket-free coverage: `client/c1.test.mjs` (speech chain, mute), `client/h9.test
 - [ ] On an iPhone with Cartesia configured: tap Send in the talk bar and hear the reply without a second tap (the Send tap primes audio). Tap the sound button: it reads "Sound off", the reply stops, and the choice survives a reload. Tap Read aloud under a reply in Our chat.
 - [ ] Without CARTESIA_API_KEY the browser's own voice reads the reply; /api/voice/token answers 404.
 - [ ] Switching tabs or closing the talk bar stops a reply that is playing.
+
+## 0.9.1 talk bar width
+
+- [ ] At 320px and 375px: open the talk bar (tap the bear). The page must not scroll sideways and nothing shifts; the suggestion chips scroll inside their own row.
