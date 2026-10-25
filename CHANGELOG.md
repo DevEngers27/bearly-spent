@@ -11,6 +11,40 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.7.0] — 2026-10-25
+
+One pot of real money, missions that keep coming, and the polish from the
+owner's first round of phone testing. 318 server tests and 173 client tests;
+browser smoke of the new flows at 390×844 and 1280×900.
+
+### Changed
+- Apple Cash is no longer a separate account. The parent's funding account is
+  the real money set aside for the child: the weekly allowance is paid from it
+  and every Apple Cash purchase (iPhone Shortcut or "Paid with: Apple Cash")
+  is deducted from it. Nothing can go negative: a purchase that funding cannot
+  cover is refused (the Shortcut gets 409 `funding_short`) and kept as a
+  pending receipt the parent records after Add money or dismisses. "Send via
+  Apple Cash" is gone; old tracked balances migrate into funding with an audit
+  line. Parent Overview shows four figures; the kid Home shows Savings ·
+  Spending · Apple Cash money; the spend sheet asks "Paid with".
+- Missions roll: three a day from a pool of eleven, a new one appears the
+  moment one is finished (six rewards a day at most); finished lessons read
+  "Review · no points".
+- The weekly budget plans the weekly allowance by default and the amount is
+  editable; the parent sees the plan.
+
+### Added
+- Speech bubble can be closed (×, tap outside, Esc); buying clothes with
+  points asks first; parents confirm goal deletion, unfriending and friend-code
+  replacement; the requesting parent hears when the other family declines.
+
+### Fixed
+- Talking to the bear during a trip no longer re-runs the bubble every second;
+  "Linked ✓" survives leaving the Children section; album stamp strip and
+  postcard counts are consistent; talk suggestions follow the current goal;
+  received greetings show on the friend card; the closet confirmation is
+  visible above the grid on a phone.
+
 ## [0.6.0] — 2026-10-25
 
 Goals the family can manage, real friends, profiles, and a parent app that
