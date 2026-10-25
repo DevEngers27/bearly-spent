@@ -174,7 +174,7 @@ function moodFor(state, now) {
 function nextUp(state, now) {
   const items = [];
   const goal = state.parentGoals.find((g) => g.status === "active");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = state.dayKey;
   if (goal) {
     const left = goal.count - goal.progress;
     const what = { lessons: "money lesson", tasks: "grown-up task", save_actions: "save" }[goal.type];
@@ -426,13 +426,15 @@ function DressSheet({ state, run, close, busy }) {
 
 // ------------------------------------------------------------------ missions
 function Missions({ state, run, open, busy }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = state.dayKey;
   const P = state.catalog.points;
   const goals = state.parentGoals.filter((g) => g.status === "active" || g.status === "awaiting_approval");
   const daily = [
-    { id: "track", title: "Record today's money", pts: P.track, done: state.child.lastTrackedDay === today, action: () => open("money", { start: "spend" }) },
-    { id: "save", title: "Save toward your goal", pts: P.save, done: state.child.lastSaveDay === today, action: () => open("money", { start: "save" }) },
-    { id: "budget", title: "Weekly budget challenge", pts: P.budget, done: state.budgetDoneThisWeek, action: () => open("budget") },
+    { id: "track", title: "Record today's money", pts: P.track, done: Boolean(today) && state.child.lastTrackedDay === today, action: () => open("money", { start: "spend" }) },
+    { id: "save", title: "Save toward your goal", pts: P.save, done: Boolean(today) && state.child.lastSaveDay === today, action: () => open("money", { start: "save" }) },
+  ];
+  const weekly = [
+    { id: "budget", title: "Weekly budget challenge", pts: P.budget, done: Boolean(state.weekKey) && state.child.lastBudgetWeek === state.weekKey, action: () => open("budget") },
   ];
   return (
     <div className="page">
@@ -449,10 +451,10 @@ function Missions({ state, run, open, busy }) {
         </section>
       ))}
 
-      <section>
-        <h2 className="hand section-title">Today</h2>
+      {[["Today", daily], ["This week", weekly]].map(([label, missions]) => <section key={label}>
+        <h2 className="hand section-title">{label}</h2>
         <ul className="checklist">
-          {daily.map((m) => (
+          {missions.map((m) => (
             <li key={m.id} className={m.done ? "done" : ""}>
               <button onClick={m.action} disabled={m.done}>
                 <span className="box" aria-hidden="true">{m.done && <Icon name="check" size={18} />}</span>
@@ -462,7 +464,7 @@ function Missions({ state, run, open, busy }) {
             </li>
           ))}
         </ul>
-      </section>
+      </section>)}
 
       {state.missions.length > 0 && (
         <section>

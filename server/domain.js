@@ -3,6 +3,7 @@
 // validation problems.
 import { uid } from "./store.js";
 import { transfer, BankError } from "./bank.js";
+import { dayKey, weekKey } from "./time.js";
 import {
   PLACES, LESSONS, COSMETICS, MILESTONES, POINTS, SLOTS, placeStatus, bonusDiscoveries,
 } from "./catalog.js";
@@ -16,7 +17,6 @@ export class GameError extends Error {
 
 export const ADVENTURE_MS = Number(process.env.ADVENTURE_SECONDS || 15) * 1000;
 const dollars = (c) => `$${(c / 100).toFixed(2)}`;
-const today = (now) => new Date(now).toISOString().slice(0, 10);
 
 // Side-effect hooks the server wires up (buddy re-planning). Kept out of the
 // db so domain logic stays pure and testable.
@@ -48,7 +48,7 @@ function moneyMoved(db, reason) {
 }
 
 function dailyTrackingBonus(db, now) {
-  const key = today(now);
+  const key = dayKey(now, db.settings.timezone);
   if (db.child.lastTrackedDay === key) return false;
   db.child.lastTrackedDay = key;
   db.child.stats.tracked += 1;
@@ -158,7 +158,7 @@ export function completeLesson(db, lessonId, answers) {
   return { passed, correct, total: lesson.questions.length, firstTime };
 }
 
-export function completeBudget(db, allocations) {
+export function completeBudget(db, allocations, now = Date.now()) {
   // allocations: { save, needs, fun, give } in cents, must total $20
   const vals = ["save", "needs", "fun", "give"].map((k) => Math.round(Number(allocations?.[k]) || 0));
   if (vals.some((v) => v < 0)) throw new GameError("No negative amounts");
@@ -166,19 +166,13 @@ export function completeBudget(db, allocations) {
   if (total !== 2000) throw new GameError(`Your budget adds up to ${dollars(total)} — it needs to be exactly $20.00`);
   if (vals[0] < 400) throw new GameError("Try saving at least $4 (20%) — future you will say thanks!");
   if (vals[1] < 500) throw new GameError("Don't forget needs! Put at least $5 there.");
-  const week = weekKey(Date.now());
+  const week = weekKey(now, db.settings.timezone);
   const repeat = db.child.lastBudgetWeek === week;
   db.child.lastBudgetWeek = week;
   db.child.stats.budgetsDone += 1;
   if (!repeat) addPoints(db, POINTS.budget, "weekly budgeting challenge");
   audit(db, "child", "budget_done", `Weekly budget: save ${dollars(vals[0])}, needs ${dollars(vals[1])}, fun ${dollars(vals[2])}, give ${dollars(vals[3])}`);
   return { pointsAwarded: repeat ? 0 : POINTS.budget };
-}
-
-function weekKey(ts) {
-  const d = new Date(ts);
-  const onejan = new Date(d.getFullYear(), 0, 1);
-  return `${d.getFullYear()}-w${Math.ceil(((d - onejan) / 86400000 + onejan.getDay() + 1) / 7)}`;
 }
 
 // ------------------------------------------------------------------ money actions
@@ -190,7 +184,7 @@ export function childSave(db, amountCents, now = Date.now()) {
     if (e instanceof BankError && e.code === "insufficient_funds") throw new GameError("You don't have that much in spending money");
     throw e;
   }
-  const key = today(now);
+  const key = dayKey(now, db.settings.timezone);
   db.child.stats.savingsActions += 1;
   if (db.child.lastSaveDay !== key) {
     db.child.lastSaveDay = key;
@@ -322,7 +316,7 @@ export function decide(db, approvalId, approve, note = "") {
 }
 
 export function requestAllowanceRun(db, now = Date.now()) {
-  const period = `allowance:${today(now)}`;
+  const period = `allowance:${dayKey(now, db.settings.timezone)}`;
   if (db.allowance.lastPeriod === period || db.transactions.some((t) => t.status === "posted" && (t.ref === period || t.idempotencyKey === `${period}:save` || t.idempotencyKey === `${period}:spend`))) {
     throw new GameError("Allowance for today was already paid");
   }
@@ -341,7 +335,7 @@ export function startAdventure(db, destId, now = Date.now()) {
   const bear = db.child.bear.name;
   if (db.adventures.some((a) => a.status === "away")) throw new GameError(`${bear} is already on an adventure!`);
   const owned = visitedSet(db);
-  const status = placeStatus(destId, db.child, owned, owned, new Date(now));
+  const status = placeStatus(destId, db.child, owned, owned, new Date(now), db.settings.timezone);
   if (!status.ok) throw new GameError(status.hidden ? "That place is still a secret!" : `Locked: ${status.reason}`);
   if (db.child.points < dest.cost) throw new GameError(`You need ${dest.cost - db.child.points} more points for ${dest.name}`);
   db.child.points -= dest.cost;

@@ -14,6 +14,7 @@
 import { transfer, reverse, BankError } from "./bank.js";
 import { audit, notify, checkMilestones } from "./domain.js";
 import { uid } from "./store.js";
+import { dayKey } from "./time.js";
 
 const dollars = (c) => `$${(c / 100).toFixed(2)}`;
 const DAY = 86400000;
@@ -132,7 +133,7 @@ export function runGuardian(db, now = Date.now(), trigger = "tick") {
   let safety = 0;
   const backPaid = [];
   while (now >= db.allowance.nextRun && safety++ < 4) {
-    const period = `allowance:${new Date(db.allowance.nextRun).toISOString().slice(0, 10)}`;
+    const period = `allowance:${dayKey(db.allowance.nextRun, db.settings.timezone)}`;
     const { amount, savePct } = db.allowance;
     const save = Math.round((amount * savePct) / 100);
     const spend = amount - save;

@@ -1,5 +1,6 @@
 // Static game content: the bear's 15 destinations (one postcard each), lessons,
 // cosmetics and milestones.
+import { dayKey } from "./time.js";
 
 // lon/lat place the pin on the adventure map.
 // rarity: common (always on the map) | rare (on the map, unlocked by a habit)
@@ -98,11 +99,11 @@ export const HOME = { name: "Maple's cabin", lon: -100.5, lat: 39.2 };
 const parksVisited = (visited) => [...visited].filter((id) => PLACES[id]?.kind === "park").length;
 
 /** Is this place open to visit right now? Returns { ok, reason }. */
-export function placeStatus(id, child, visited, discovered, now = new Date()) {
+export function placeStatus(id, child, visited, discovered, now = new Date(), timezone) {
   const p = PLACES[id];
   if (!p) return { ok: false, reason: "Unknown place" };
   if (p.rarity === "secret" && !discovered.has(id)) return { ok: false, hidden: true, reason: "Not discovered yet" };
-  if (p.rarity === "seasonal" && !p.season.months.includes(now.getMonth())) return { ok: false, reason: p.season.text };
+  if (p.rarity === "seasonal" && !p.season.months.includes(Number(dayKey(now, timezone).slice(5, 7)) - 1)) return { ok: false, reason: p.season.text };
   if (p.rarity === "rare") {
     const u = p.unlock;
     const s = child.stats;
