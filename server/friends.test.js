@@ -161,7 +161,7 @@ for (const step of ["parentA", "parentB", "kidB"]) test(`G3.2 decline at ${step}
   for (const who of [a, b]) {
     assert.equal(readChild(who.id).friends[0].status, "declined");
     assert.equal((await who.browser.call("GET", "/api/state")).body.friends.length, 0);
-    assert.equal(readChild(who.id).notifications.at(-1).text, "Your friend request didn't go through.");
+    assert.equal(readChild(who.id).notifications.filter((n) => n.to === "child").at(-1).text, who === a ? "Your friend request didn't go through." : "Request closed");
   }
   await request(a, b);
   assert.equal(readChild(a.id).friends.at(-1).status, "pending_parent_a");
@@ -180,7 +180,7 @@ test("G3.3 friend views expose first name, current bear and postcard counts, nev
   assert.equal(f.name, "Ben");
   assert.equal(f.bear.name, "Pip");
   assert.deepEqual(f.postcards, ["chicago", "chicago"]);
-  assert.deepEqual(Object.keys(f).sort(), ["bear", "greetings", "id", "name", "postcards", "real", "status"]);
+  assert.deepEqual(Object.keys(f).sort(), ["bear", "greetings", "id", "metrics", "name", "postcards", "real", "status"]);
   assert.ok(!JSON.stringify(f).includes("123456"));
   assert.ok(!JSON.stringify(f).includes("Jones"));
   assert.equal(f.bear.privateNote, undefined);

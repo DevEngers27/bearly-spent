@@ -49,7 +49,8 @@ export const actions = {
     for (const key of ["save", "needs", "fun", "give"]) {
       if (!Object.hasOwn(validated, key)) throw new game.GameError("Fill in every part of your budget");
     }
-    return game.completeBudget(db, validated);
+    const total = Object.hasOwn(body, "total") ? money(body.total, { min: 100, max: 20000 }) : 2000;
+    return game.completeBudget(db, validated, undefined, total);
   }),
   lesson: action((db, body) => {
     const lessonId = id(body.lessonId);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, money, plural, formatTime, formatDateTime, postcardMetrics, useAction, GOAL_ICONS, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
+import { api, money, moneyShort, plural, formatTime, formatDateTime, postcardMetrics, useAction, GOAL_ICONS, goalLabel, goalStatusLabel, currentSavingsGoal } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 import ChildProfileForm from "./ChildProfileForm.jsx";
 import Account from "./Account.jsx";
@@ -156,7 +156,7 @@ function Inbox({ state, run, demo, pending, busy, onAddMoney, mobile }) {
                 <tr key={a.id}>
                   <td data-label="Kind"><span className="p-cell-value">{KIND_LABEL[a.kind] || a.kind}</span></td>
                   <td data-label="Request"><span className="p-cell-value">{a.title}</span></td>
-                  <td data-label="Status" className={a.status === "approved" ? "pos" : "neg"}><span className="p-cell-value">{a.status}{a.paidTxnId ? " · paid" : ""}</span></td>
+                  <td data-label="Status" className={a.status === "approved" ? "pos" : "neg"}><span className="p-cell-value">{a.real && a.kind === "friend_request" && a.status === "declined" ? "didn't go through" : a.status}{a.paidTxnId ? " · paid" : ""}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -200,7 +200,7 @@ function Overview({ state, onAddMoney, busy }) {
               <tr><td>Money lessons passed</td><td>{learned.learningDone} ({state.child.lessonsDone.length}/5 unique)</td></tr>
               <tr><td>Savings actions</td><td>{learned.savingsActions}</td></tr>
               <tr><td>Days with money tracked</td><td>{learned.tracked}</td></tr>
-              <tr><td>Weekly budgets planned</td><td>{learned.budgetsDone}</td></tr>
+              <tr><td>Weekly budgets planned</td><td>{learned.budgetsDone}{state.child.lastBudget && <small className="p-muted"> · {moneyShort(state.child.lastBudget.total)}: {Object.entries(state.child.lastBudget.allocations).map(([k, v]) => `${k} ${v / 100}`).join(" · ")}</small>}</td></tr>
               <tr><td>Adventures taken</td><td>{learned.adventures}</td></tr>
               <tr><td>Postcards collected</td><td>{postcardMetrics(state).places} of {postcardMetrics(state).total} {plural(postcardMetrics(state).total, "place")} ({postcardMetrics(state).cards} {plural(postcardMetrics(state).cards, "card")})</td></tr>
             </tbody>
@@ -284,6 +284,7 @@ function Goals({ state, run, busy, mobile }) {
 }
 
 function SavingsGoal({ state, goal, create = false, run, busy }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const selected = create ? null : goal || currentSavingsGoal(state);
   const [sg, setSg] = useState({ title: selected?.title || "", target: selected ? selected.target / 100 : 50, icon: selected?.icon || "bike" });
   const live = !selected?.status || ["active", "reached"].includes(selected.status);
@@ -303,7 +304,8 @@ function SavingsGoal({ state, goal, create = false, run, busy }) {
       {selected && <div className="btn-row">
         {live && !current && <button disabled={busy} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/current`, {}, "Current goal changed")}>Make current</button>}
         {live && <button disabled={busy || waiting} className="pbtn" onClick={() => run(`parent/goals/${selected.id}/archive`, {}, "Goal archived")}>Archive</button>}
-        <button disabled={busy || current || waiting || selected.status === "bought"} className="pbtn" onClick={() => run(`parent/goals/${selected.id}`, undefined, "Goal deleted", { method: "DELETE" })}>Delete</button>
+        <button disabled={busy || current || waiting || selected.status === "bought"} className="pbtn" onClick={() => setConfirmDelete(true)}>Delete</button>
+        {confirmDelete && <div className="p-stack"><p>Delete {selected.title}?</p><div className="row"><button className="pbtn" disabled={busy} onClick={() => setConfirmDelete(false)}>Cancel</button><button className="pbtn danger" disabled={busy || current || waiting || selected.status === "bought"} onClick={async () => { if (await run(`parent/goals/${selected.id}`, undefined, "Goal deleted", { method: "DELETE" })) setConfirmDelete(false); }}>Confirm delete</button></div></div>}
         {(current || waiting || selected.status === "bought") && <small className="p-muted" role="note">{selected.status === "bought" ? "Bought goals stay as a memory; they can't be changed or deleted." : waiting ? "Waiting for the purchase decision first." : "Choose another current goal before deleting this one."}</small>}
       </div>}
     </section>
@@ -462,6 +464,7 @@ function BuddyLog({ state, run, busy }) {
 }
 
 function Settings({ state, run, demo, busy }) {
+  const [confirmFriend, setConfirmFriend] = useState(null);
   const s = state.settings;
   const timezones = [...new Set(["UTC", BROWSER_TIMEZONE, ...TIMEZONES, ...(s.timezone ? [s.timezone] : [])])].sort();
   const toggle = (k) => run("parent/settings", { [k]: !s[k] }, "Saved");
@@ -486,9 +489,10 @@ function Settings({ state, run, demo, busy }) {
       {!state.friends.length && <p className="p-muted">Add a friend with their code. Both children and both parents must agree.</p>}
       <table className="ptable" role="table">
         <tbody>
-          {state.friends.map((f) => <tr key={f.id}><td data-label="Friend"><span className="p-cell-value">{f.name || "Friend request"}</span></td><td data-label="Status"><span className="p-cell-value">{f.status.replaceAll("_", " ")}</span></td><td data-label="Action"><span className="p-cell-value">{f.real && f.status === "approved" && <button className="pbtn danger" disabled={busy} onClick={() => run(`parent/friend/${f.id}/remove`, {}, "Friend removed")}>Unfriend</button>}</span></td></tr>)}
+          {state.friends.map((f) => <tr key={f.id}><td data-label="Friend"><span className="p-cell-value">{f.name || "Friend request"}</span></td><td data-label="Status"><span className="p-cell-value">{f.status.replaceAll("_", " ")}</span></td><td data-label="Action"><span className="p-cell-value">{f.real && f.status === "approved" && <button className="pbtn danger" disabled={busy} onClick={() => setConfirmFriend(f.id)}>Unfriend</button>}</span></td></tr>)}
         </tbody>
       </table>
+      {confirmFriend && <div className="p-stack"><p>Unfriend {state.friends.find((f) => f.id === confirmFriend)?.name}?</p><div className="row"><button className="pbtn" disabled={busy} onClick={() => setConfirmFriend(null)}>Cancel</button><button className="pbtn danger" disabled={busy} onClick={async () => { if (await run(`parent/friend/${confirmFriend}/remove`, {}, "Friend removed")) setConfirmFriend(null); }}>Confirm unfriend</button></div></div>}
       {demo && <section className="p-card">
         <h2>Demo data</h2>
         <p className="p-muted">Restore the starting demo family. This erases all progress.</p>
@@ -502,7 +506,10 @@ function Settings({ state, run, demo, busy }) {
 function Children({ state, me, refreshMe, run, busy }) {
   useEffect(() => { if (state) refreshMe().catch(() => {}); }, [state?.version]);
   const [child, setChild] = useState({ name: "", age: "9", bearName: "" });
-  const [links, setLinks] = useState({});
+  const linksKey = `mq_kid_links:${encodeURIComponent(me.family.id)}`;
+  const [links, setLinks] = useState(() => { try { return JSON.parse(sessionStorage.getItem(linksKey) || "{}"); } catch { return {}; } });
+  useEffect(() => { try { sessionStorage.setItem(linksKey, JSON.stringify(links)); } catch {} }, [linksKey, links]);
+  const [confirmation, setConfirmation] = useState(null);
   const [shortcutVersions, setShortcutVersions] = useState({});
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -557,16 +564,19 @@ function Children({ state, me, refreshMe, run, busy }) {
         {summary.friendCode && <div className="p-stack">
           <label className="pform">Friend code<input className="kid-code" readOnly value={summary.friendCode || ""} onFocus={(event) => event.target.select()} /></label>
           <p className="p-muted">Share with a friend's family. This code stays valid until you replace it. It cannot pair a device.</p>
-          <button className="pbtn" disabled={busy} onClick={() => run(async () => {
-            const result = await api(`parent/children/${encodeURIComponent(summary.id)}/friend-code?child=${encodeURIComponent(summary.id)}`, {});
-            await refreshMe();
-            return result;
-          }, undefined, "Friend code replaced")}>Replace friend code</button>
-          {(summary.friends || []).map((f) => <div className="row" key={f.id}><span>{f.name} · {f.status.replaceAll("_", " ")}</span>{f.status === "approved" && <button className="pbtn danger" disabled={busy} onClick={() => run(async () => {
-            const result = await api(`parent/friend/${f.id}/remove?child=${encodeURIComponent(summary.id)}`, {});
-            await refreshMe();
-            return result;
-          }, undefined, "Friend removed")}>Unfriend</button>}</div>)}
+          <button className="pbtn" disabled={busy} onClick={() => setConfirmation({ childId: summary.id, kind: "code" })}>Replace friend code</button>
+          {(summary.friends || []).map((f) => <div className="row" key={f.id}><span>{f.name} · {f.status.replaceAll("_", " ")}</span>{f.status === "approved" && <button className="pbtn danger" disabled={busy} onClick={() => setConfirmation({ childId: summary.id, kind: "friend", friend: f })}>Unfriend</button>}</div>)}
+          {confirmation?.childId === summary.id && <div className="p-stack">
+            <p>{confirmation.kind === "code" ? `Replace ${summary.name}'s friend code? The old code will stop working.` : `Unfriend ${confirmation.friend.name}?`}</p>
+            <div className="row"><button className="pbtn" disabled={busy} onClick={() => setConfirmation(null)}>Cancel</button><button className="pbtn danger" disabled={busy} onClick={async () => {
+              const result = await run(async () => {
+                const result = await api(confirmation.kind === "code" ? `parent/children/${encodeURIComponent(summary.id)}/friend-code?child=${encodeURIComponent(summary.id)}` : `parent/friend/${confirmation.friend.id}/remove?child=${encodeURIComponent(summary.id)}`, {});
+                await refreshMe();
+                return result;
+              }, undefined, confirmation.kind === "code" ? "Friend code replaced" : "Friend removed");
+              if (result) setConfirmation(null);
+            }}>Confirm {confirmation.kind === "code" ? "replace code" : "unfriend"}</button></div>
+          </div>}
         </div>}
         <Devices childId={summary.id} busy={busy} onUnlink={(device) => {
           if (device?.kind === "shortcut") setShortcutVersions((current) => ({ ...current, [summary.id]: (current[summary.id] || 0) + 1 }));

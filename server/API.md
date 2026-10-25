@@ -89,7 +89,7 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | --- | --- |
 | `childId`, `version`, `now`, `dayKey`, `weekKey`, `offline`, `budgetDoneThisWeek` | Selected ID, child document version, server Unix milliseconds, zoned `YYYY-MM-DD`, ISO `YYYY-Www`, `false`, boolean |
 | `child` | `{name, age, points, bear, ownedCosmetics, milestonesUnlocked, stats, lessonsDone, ...progressMarkers}`; bear has `name, hat, eyes, neck, outfit, held, friend, background`; stats have `savingsActions, learningDone, tracked, budgetsDone, adventures` |
-| `profile` | `{name,age,bearName,friendCode?,since,stats,badges}`; `since` is document `createdAt` (legacy: earliest audit timestamp or migration time, persisted). `stats`: `{points,postcards:{collected,total,cards},tripsTaken,lessonsFinished,missionsDone,longestStreak?}`. Collected counts distinct postcard places; total counts currently open places; trips include away trips. Badges are stored unlocked milestone definitions in reverse unlock order. Friend code is omitted until available. |
+| `profile` | `{name,age,bearName,friendCode?,since,stats,badges}`; `since` is document `createdAt` (legacy: earliest audit timestamp or migration time, persisted). `stats`: `{points,postcards:{collected,total,cards},tripsTaken,lessonsFinished,missionsDone,longestStreak?}`. Collected counts distinct places visited on trips; total counts all catalog places, matching `metrics.postcards`; trips include away trips. Badges are stored unlocked milestone definitions in reverse unlock order. Friend code is omitted until available. |
 | `balances` | `{savings, spending}` in cents |
 | `goals` | `[{id, title, icon, target, createdAt, status, activeFlag, current, weeksLeft}]`; status is active/reached/bought/archived, target is cents; weeksLeft is null for history or no weekly saving |
 | `currentGoalId` | Current savings goal ID; null only for an empty legacy goal list. Also in `child.currentGoalId`. |
@@ -100,7 +100,7 @@ PIN is an optional quick switch **inside a parent-authenticated device**, not a 
 | `adventures` | Latest 10, newest first; `destId` omitted while away in child state; `{id, destId, startedAt, returnsAt, status, postcardIds, returnedAt?}` |
 | `metrics` | `{postcards:{places,cards,total}}`; unique trip places, all cards, and catalog total |
 | `postcards` | `[{id, defId, source, collectedAt, fromAdventure?, from?, lockedForTrade?}]` |
-| `friends` | Non-declined public `friendView` records: `{id, name, status, bear, postcards, greetings, coopLearning}` |
+| `friends` | Non-declined public `friendView` records: `{id, name, status, bear, postcards, metrics:{postcards:{places,cards,total}}, greetings, coopLearning}` |
 | `trades` | Latest 10, newest first; `{id, friendId, give, get, status, createdAt, ...executionFields}` |
 | `pendingRequests` | Pending child-visible `{id, kind, title}` approvals |
 | `plan` | Null or `{summary, steps, weeklySave, goalId, updatedAt, reason?, offline?}` |
@@ -139,7 +139,7 @@ All routes below have **Child** auth and support parent `?child=` selection. Unl
 | `POST /api/child/journal` | `{direction,amount,note}` | `{bonus:boolean}`; direction `received`, `spent` or `saved`; $0–$10,000. Records learning activity, does not move funds. |
 | `POST /api/child/extra` | `{amount,reason}` | Created extra-allowance approval record; $1–$50. |
 | `POST /api/child/lesson` | `{lessonId,answers:[integer,...]}` | `{passed,correct,total,firstTime?}`; one choice for every question. |
-| `POST /api/child/budget` | `{allocations:{save,needs,fun,give}}` | `{pointsAwarded}`; dollar amounts must total $20, save >=$4, needs >=$5. |
+| `POST /api/child/budget` | `{allocations:{save,needs,fun,give},total}` | `{pointsAwarded}`; dollar total $1–$200, allocations must sum exactly to total (in cents), save >=20%, needs >=25% (rounded up to cents). Omitted total defaults to $20 for older clients. The last plan is stored as `child.lastBudget:{total,allocations,plannedAt}` (integer cents and Unix milliseconds) and exposed in child/parent state. |
 | `POST /api/child/mission/:id/done` | No fields | Updated mission record, now `pending_review`. |
 | `POST /api/child/trip` | No fields | Surprise adventure record without `destId`; costs `catalog.trip.cost` (30 points), at most one away trip; draws only open places. |
 | `POST /api/child/adventure/:id/seen` | No fields | Returned adventure record; records idempotent `revealedAt` on the selected child's returned adventure. |
@@ -295,7 +295,7 @@ are necessary for `approved`. Either decline closes both records with only
 Pending friend views expose `{id,real:true,status,incoming,childAccepted}` plus
 only the incoming requester's first name. Approved views add `name` (first name),
 `bear` (cosmetic slots only), `postcards` (place IDs, repeated for counts), and
-`greetings`; they never expose money, family name, peer child IDs or friend codes.
+`greetings` and `metrics.postcards:{places,cards,total}`; the metrics use the same trip-place and physical-card counts as the owner view. They never expose money, family name, peer child IDs or friend codes.
 Parent state uses these same friend views. Recipient pending requests are hidden
 until the initiating parent approves. Friend approval titles in child state omit
 family labels.
@@ -319,3 +319,23 @@ to the accepted friend, with 20 messages per rolling 24 hours per friendship
 or send greetings. Unknown or foreign request/friend/trade IDs return 404;
 paired kid sessions cannot approve parent steps (403). Cross-family mutations
 publish each changed child's version to its own family stream after commit.
+
+## H4 budget and friend feedback
+
+The budget sheet starts from the weekly allowance (fallback $20 when unset or zero),
+within the editable $1–$200 range. Changing the total rescales all four allocations;
+this is a practice plan and never moves money. Replanning updates `child.lastBudget`
+while the existing once-per-week points rule still applies.
+
+When the recipient child or parent declines a real friend request, the requesting
+parent receives “Ben's family said not right now” (using the recipient child's
+first name). Child notices distinguish the sender (“Your friend request didn't
+go through.”) from the recipient (“Request closed”). `socialApprovalsView` presents
+friend-request approvals as `declined` when the friendship was declined, while
+stored approvals preserve each parent's original decision. Parent decided rows
+label these “didn't go through”. Decline reasons remain private.
+
+The child UI keeps an identical “Request sent” receipt for the browser session
+for valid and invalid codes. It never uses the presence of a pending record to
+choose that receipt. Children retains kid-code status in family-scoped session
+storage, including “Linked ✓”, when leaving and reopening the section.

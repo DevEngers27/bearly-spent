@@ -173,6 +173,7 @@ test("G3 parent privacy lists friendships, offers unfriend, and hides real-famil
   assert.match(text(render()), /Ben.*Friend request/);
   assert.doesNotMatch(text(render()), /Team challenges/);
   await byText(render(), "Unfriend").props.onClick();
+  await byText(render(), "Confirm unfriend").props.onClick();
   assert.equal(calls[0][0], "parent/friend/friend-one/remove");
 });
 
@@ -187,8 +188,10 @@ test("G3 Children distinguishes stable friend codes from pairing and scopes code
   const code = nodes(render(), (n) => n.type === "input" && n.props.value === "BCDF3467")[0];
   assert.equal(code.props.readOnly, true);
   await byText(render(), "Replace friend code").props.onClick();
+  await byText(render(), "Confirm replace code").props.onClick();
   assert.equal(calls[0][0], "/api/parent/children/child-two/friend-code?child=child-two");
   await byText(render(), "Unfriend").props.onClick();
+  await byText(render(), "Confirm unfriend").props.onClick();
   assert.equal(calls[1][0], "/api/parent/friend/friend-one/remove?child=child-two");
   assert.equal(refreshed, 2);
 });

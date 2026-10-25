@@ -73,13 +73,14 @@ export function childView(db, now = Date.now()) {
   const day = dayKey(now, db.settings.timezone);
   const week = weekKey(now, db.settings.timezone);
   const places = placesView(db, now);
+  const postcardCounts = game.postcardMetrics(db);
   const profile = {
     name: db.child.name, age: db.child.age, bearName: db.child.bear.name,
     friendCode: childIdFor(db) ? friendCode(childIdFor(db)) : null,
     since: db.createdAt,
     stats: {
       points: db.child.points,
-      postcards: { collected: new Set(db.postcards.map((p) => p.defId)).size, total: Object.values(places).filter((p) => p.open).length, cards: db.postcards.length },
+      postcards: { collected: postcardCounts.places, total: postcardCounts.total, cards: postcardCounts.cards },
       tripsTaken: db.adventures.length,
       lessonsFinished: db.child.lessonsDone.length,
       missionsDone: db.missions.filter((m) => m.status === "done").length,
@@ -109,7 +110,7 @@ export function childView(db, now = Date.now()) {
     notifications: db.notifications.filter((n) => n.to === "child").slice(-20).reverse(),
     adventures: db.adventures.slice(-10).reverse().map(({ destId, ...adventure }) => adventure.status === "away" ? adventure : { ...adventure, destId }),
     postcards: db.postcards,
-    metrics: { postcards: game.postcardMetrics(db) },
+    metrics: { postcards: postcardCounts },
     friends: game.socialFriendsView(db),
     trades: game.socialTradesView(db),
     pendingRequests: game.socialApprovalsView(db).filter((a) => (a.status === "pending" || (a.kind === "goal_purchase" && a.status === "approved" && !a.paidTxnId)) && ["spend", "extra", "reward", "task", "friend", "friend_request", "trade", "goal_purchase"].includes(a.kind)).map((a) => ({ id: a.id, kind: a.kind, title: a.real && a.kind === "friend_request" ? "Friend request waiting for grown-ups" : a.title, ...(a.goalId ? { goalId: a.goalId } : {}) })),
