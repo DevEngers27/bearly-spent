@@ -86,6 +86,15 @@ export const actions = {
     for (const key of ["requireTradeApproval", "buddyEnabled", "coopChallenge"]) {
       if (Object.hasOwn(body, key)) update[key] = bool(body[key]);
     }
+    if (Object.hasOwn(body, "timezone")) {
+      const timezone = str(body.timezone);
+      if (/^[+-]/.test(timezone)) throw new game.GameError("Choose a time zone from the list");
+      try {
+        update.timezone = new Intl.DateTimeFormat("en-US", { timeZone: timezone }).resolvedOptions().timeZone;
+      } catch {
+        throw new game.GameError("Choose a time zone from the list");
+      }
+    }
     Object.assign(db.settings, update);
     game.audit(db, "parent", "settings", `Updated settings: ${JSON.stringify(update)}`);
   }),

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { money, useAction } from "./api.js";
 import { BearFigure, bearScale } from "./Bear.jsx";
 
@@ -14,10 +14,22 @@ const SECTIONS = [
 ];
 
 const KIND_LABEL = { reward: "Reward", task: "Task check", spend: "Purchase", extra: "Extra allowance", friend: "Friend", trade: "Trade", mission_proposal: "Buddy suggestion", topup: "Funding", review: "Review" };
+const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
 
 export default function Parent({ state, toast }) {
   const [sec, setSec] = useState("inbox");
   const [run, busy] = useAction(toast);
+  const timezoneAttempted = useRef(false);
+  useEffect(() => {
+    if (state.settings.timezone) {
+      timezoneAttempted.current = false;
+      return;
+    }
+    if (timezoneAttempted.current) return;
+    timezoneAttempted.current = true;
+    run("parent/settings", { timezone: BROWSER_TIMEZONE });
+  }, [state.settings.timezone, run]);
   const pending = state.approvals.filter((a) => a.status === "pending");
   const ctx = { state, run, busy };
   return (
@@ -344,10 +356,19 @@ function BuddyLog({ state }) {
 
 function Settings({ state, run, busy }) {
   const s = state.settings;
+  const timezones = [...new Set(["UTC", BROWSER_TIMEZONE, ...TIMEZONES, ...(s.timezone ? [s.timezone] : [])])].sort();
   const toggle = (k) => run("parent/settings", { [k]: !s[k] }, "Saved");
   return (
     <div className="p-stack">
       <h1>Friends & privacy</h1>
+      <section className="p-card pform">
+        <label>Family time zone
+          <select value={s.timezone || BROWSER_TIMEZONE} disabled={busy} onChange={(e) => run("parent/settings", { timezone: e.target.value }, "Time zone saved")}>
+            {timezones.map((timezone) => <option key={timezone} value={timezone}>{timezone.replaceAll("_", " ")}</option>)}
+          </select>
+        </label>
+        <p className="p-muted">Daily points reset at midnight here. Weekly budgets run Monday through Sunday.</p>
+      </section>
       <section className="p-card">
         <label className="switch"><input type="checkbox" disabled={busy} checked={s.requireTradeApproval} onChange={() => toggle("requireTradeApproval")} /> Ask me before postcard trades</label>
         <label className="switch"><input type="checkbox" disabled={busy} checked={s.buddyEnabled} onChange={() => toggle("buddyEnabled")} /> Money Buddy is on</label>

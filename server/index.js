@@ -9,6 +9,7 @@ import { GameError } from "./domain.js";
 import { runGuardian, hasDueWork, injectDuplicatePosting, reconcileNow } from "./guardian.js";
 import { replan, buddyMode, offlinePlan } from "./buddy.js";
 import { actions } from "./actions.js";
+import { dayKey, weekKey } from "./time.js";
 import { synthesize, voiceEnabled, mintAccessToken, voiceConfig, CARTESIA_VERSION } from "./voice.js";
 import { setNessieAuditHook, nessieEnabled } from "./bank.js";
 import { PLACES, HOME, LESSONS, COSMETICS, MILESTONES, POINTS, placeStatus } from "./catalog.js";
@@ -72,11 +73,10 @@ function requireParent(req, res, next) {
 }
 
 // ------------------------------------------------------------------ views
-function placesView(db) {
+function placesView(db, now = Date.now()) {
   const owned = game.visitedSet(db);
-  const now = new Date();
   return Object.fromEntries(Object.entries(PLACES).map(([id, p]) => {
-    const status = placeStatus(id, db.child, owned, owned, now);
+    const status = placeStatus(id, db.child, owned, owned, new Date(now), db.settings.timezone);
     if (status.hidden) {
       return [id, { rarity: "secret", hidden: true, clue: p.discover.text, lon: id === "hawaii_volcanoes_national_park" ? p.lon : null, lat: id === "hawaii_volcanoes_national_park" ? p.lat : null }];
     }
@@ -85,13 +85,14 @@ function placesView(db) {
   }));
 }
 
-function childView(db) {
-  const now = Date.now();
-  const d = new Date(now), onejan = new Date(d.getFullYear(), 0, 1);
-  const week = `${d.getFullYear()}-w${Math.ceil(((d - onejan) / 86400000 + onejan.getDay() + 1) / 7)}`;
+function childView(db, now = Date.now()) {
+  const day = dayKey(now, db.settings.timezone);
+  const week = weekKey(now, db.settings.timezone);
   return {
     version: db.version,
     now,
+    dayKey: day,
+    weekKey: week,
     offline: false,
     budgetDoneThisWeek: db.child.lastBudgetWeek === week,
     child: db.child,
@@ -112,7 +113,7 @@ function childView(db) {
     settings: db.settings,
     catalog: {
       // Secrets stay out of the payload until discovered.
-      places: placesView(db),
+      places: placesView(db, now),
       home: HOME,
       // Answers stay on the server.
       lessons: LESSONS.map((l) => ({ ...l, questions: l.questions.map(({ q, options }) => ({ q, options })) })),

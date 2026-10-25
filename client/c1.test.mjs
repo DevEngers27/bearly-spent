@@ -8,6 +8,7 @@ import { build } from "esbuild";
 import { seed } from "../server/store.js";
 import * as game from "../server/domain.js";
 import * as catalog from "../server/catalog.js";
+import { dayKey, weekKey } from "../server/time.js";
 
 const sources = Object.fromEntries(await Promise.all(["api.js", "Child.jsx", "Parent.jsx", "App.jsx"].map(async (name) => {
   const extra = { "Child.jsx": "Home, Sheet, MoneySheet, LessonSheet, Missions, Buddy, MapScreen, MapView, Friends, DressSheet, BudgetSheet, PlaceSheet", "Parent.jsx": "Overview, Goals, Allowance, Inbox, Guardian, Settings", "App.jsx": "PinGate, Loading" }[name];
@@ -174,13 +175,14 @@ test("C9 / C8: saving three times preserves the amount and the label targets the
 test("C5: childView budget flag agrees with completeBudget; completed checklist hides its points", async () => {
   const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
   const fn = source.slice(source.indexOf("function childView("), source.indexOf("\nfunction parentView("));
-  const childView = vm.runInNewContext(`(${fn})`, { Date, game, ...catalog, placesView: () => ({}), buddyMode: () => "offline", voiceEnabled: () => false, nessieEnabled: () => false });
+  const childView = vm.runInNewContext(`(${fn})`, { Date, game, dayKey, weekKey, ...catalog, placesView: () => ({}), buddyMode: () => "offline", voiceEnabled: () => false, nessieEnabled: () => false });
   const db = seed(Date.now());
   assert.equal(childView(db).budgetDoneThisWeek, false);
   game.completeBudget(db, { save: 500, needs: 800, fun: 500, give: 200 });
   assert.equal(childView(db).budgetDoneThisWeek, true);
   const h = harness("Child.jsx"), state = stateFixture();
-  state.budgetDoneThisWeek = true;
+  state.weekKey = db.child.lastBudgetWeek;
+  state.child.lastBudgetWeek = db.child.lastBudgetWeek;
   const tree = h.render(h.exports.Missions, { state, open: noop });
   const button = byText(tree, "Weekly budget challenge");
   assert.equal(button.props.disabled, true);

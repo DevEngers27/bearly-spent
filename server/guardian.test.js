@@ -7,6 +7,7 @@ import { transfer } from "./bank.js";
 import { COSMETICS } from "./catalog.js";
 import { runGuardian, hasDueWork, pendingFindings, reconcileNow, spendPolicy, injectDuplicatePosting } from "./guardian.js";
 import { actions } from "./actions.js";
+import { dayKey } from "./time.js";
 
 const DAY = 86400000;
 const fresh = () => seed(Date.now());
@@ -120,7 +121,7 @@ test("M25 catch-up pays at most four periods per pass and summarizes each back-p
   assert.equal(hasDueWork(db, now), true);
   const summaries = () => db.notifications.filter((n) => n.to === "parent" && n.text.startsWith("Back-paid"));
   assert.equal(summaries().length, 1);
-  assert.equal(summaries()[0].text, `Back-paid 4 weeks of allowance (${new Date(first).toISOString().slice(0, 10)} → ${new Date(first + 3 * 7 * DAY).toISOString().slice(0, 10)})`);
+  assert.equal(summaries()[0].text, `Back-paid 4 weeks of allowance (${dayKey(first, db.settings.timezone)} → ${dayKey(first + 3 * 7 * DAY, db.settings.timezone)})`);
   runGuardian(db, now + 2000);
   assert.equal(before - db.accounts.parent.balance, 8000);
   runGuardian(db, now + 4000);
