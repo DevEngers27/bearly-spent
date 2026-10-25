@@ -2,7 +2,7 @@
 // Capital One's Nessie sandbox when NESSIE_API_KEY is set. No real money moves.
 import { uid } from "./store.js";
 
-const NESSIE_BASE = process.env.NESSIE_BASE_URL || "http://api.nessieisreal.com";
+const NESSIE_BASE = process.env.NESSIE_BASE_URL || "https://api.nessieisreal.com";
 
 export class BankError extends Error {
   constructor(code, message) {
@@ -54,12 +54,18 @@ export function reverse(db, txnId, reason) {
 // ---------------------------------------------------------------- Nessie mirror
 // Best effort and asynchronous: the local ledger stays the source of truth for
 // the demo, and Nessie failures are surfaced in the audit log, never thrown.
-let nessieAccounts = null;
+const nessieAccounts = new WeakMap();
 let auditHook = () => {};
 export function setNessieAuditHook(fn) {
   auditHook = fn;
 }
-export const nessieEnabled = () => Boolean(process.env.NESSIE_API_KEY);
+export function nessieEnabled() {
+  if (!process.env.NESSIE_API_KEY) return false;
+  if (new URL(NESSIE_BASE).protocol !== "https:" && process.env.NESSIE_ALLOW_HTTP !== "1") {
+    throw new Error("Nessie requires HTTPS (or NESSIE_ALLOW_HTTP=1 for local development)");
+  }
+  return true;
+}
 
 async function nessie(pathname, body) {
   const url = `${NESSIE_BASE}${pathname}${pathname.includes("?") ? "&" : "?"}key=${process.env.NESSIE_API_KEY}`;
@@ -74,8 +80,14 @@ async function nessie(pathname, body) {
 }
 
 async function ensureNessieAccounts(db) {
-  if (nessieAccounts) return nessieAccounts;
-  if (db.nessie?.accounts) return (nessieAccounts = db.nessie.accounts);
+  if (nessieAccounts.has(db)) return nessieAccounts.get(db);
+  const pending = createNessieAccounts(db);
+  nessieAccounts.set(db, pending);
+  try { return await pending; } catch (e) { nessieAccounts.delete(db); throw e; }
+}
+
+async function createNessieAccounts(db) {
+  if (db.nessie?.accounts) return db.nessie.accounts;
   const address = { street_number: "1", street_name: "Lyon St", city: "San Francisco", state: "CA", zip: "94123" };
   const parent = await nessie("/customers", { first_name: db.family.parentName, last_name: "Family", address });
   const child = await nessie("/customers", { first_name: db.child.name, last_name: "Family", address });
@@ -87,7 +99,6 @@ async function ensureNessieAccounts(db) {
     spending: (await mk(child, "Kid spending", "Checking", db.accounts.spending.balance))._id,
   };
   db.nessie = { accounts: accts };
-  nessieAccounts = accts;
   return accts;
 }
 
@@ -104,6 +115,6 @@ function nessieMirror(db, txn) {
         medium: "balance", payee_id: accts[txn.to], amount, transaction_date: date, description: txn.memo,
       });
     }
-    auditHook("nessie_mirrored", `Mirrored ${txn.kind} of $${amount.toFixed(2)} to Nessie sandbox`, { txnId: txn.id });
-  })().catch((e) => auditHook("nessie_error", `Nessie mirror failed (local ledger unaffected): ${e.message}`, { txnId: txn.id }));
+    auditHook("nessie_mirrored", `Mirrored ${txn.kind} of $${amount.toFixed(2)} to Nessie sandbox`, { txnId: txn.id }, db);
+  })().catch((e) => auditHook("nessie_error", `Nessie mirror failed (local ledger unaffected): ${e.message}`, { txnId: txn.id }, db));
 }

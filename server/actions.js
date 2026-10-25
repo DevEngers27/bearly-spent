@@ -2,6 +2,7 @@
 import * as game from "./domain.js";
 import { spendPolicy } from "./guardian.js";
 import { chat } from "./buddy.js";
+import { childIdFor } from "./store.js";
 import { PLACES, POINTS } from "./catalog.js";
 import { money, integer, str, bool, id, oneOf, object } from "./validate.js";
 
@@ -9,9 +10,6 @@ const action = (fn) => (db, body, ...args) => fn(db, object(body), ...args);
 const optionalNote = (body) => Object.hasOwn(body, "note") ? str(body.note, { required: false }) : "";
 
 export const actions = {
-  login: action((db, body) => {
-    if (typeof body.pin !== "string" || body.pin !== db.family.parentPin) throw new game.GameError("Wrong PIN", 401);
-  }),
   save: action((db, body) => game.childSave(db, money(body.amount, { min: 100 }))),
   spend: action((db, body) => game.childSpend(db, {
     amount: money(body.amount, { min: 1 }), memo: str(body.memo),
@@ -47,7 +45,7 @@ export const actions = {
     return game.proposeTrade(db, friendId, give, get);
   }),
   greet: action((db, body) => game.sendGreeting(db, id(body.friendId), integer(body.index, { max: game.GREETINGS.length - 1 }))),
-  chat: action((db, body, send = chat) => {
+  chat: action((db, body, send = (text) => chat(childIdFor(db), text)) => {
     if (typeof body.text === "string" && !body.text.trim()) throw new game.GameError("Say something first!");
     const text = str(body.text, { max: 500 });
     if (!db.settings.buddyEnabled) throw new game.GameError("Money Buddy is turned off by your grown-up");

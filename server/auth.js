@@ -1,0 +1,232 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { database, transaction } from "./db.js";
+import { createChild, childRecord, listChildren, seed, uid, importLegacy, DEMO_FAMILY_ID, DEMO_CHILD_ID } from "./store.js";
+import { GameError } from "./domain.js";
+import { object, str } from "./validate.js";
+import { takeLimit, MINUTE } from "./limits.js";
+
+const DAY = 86400000;
+const N = 2 ** 15;
+const HASH_OPTIONS = { N, r: 8, p: 1, maxmem: 128 * 1024 * 1024 };
+export const tokenHash = (token) => crypto.createHash("sha256").update(token).digest("hex");
+
+export function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, 64, HASH_OPTIONS);
+  return `scrypt$${N}$8$1$${salt.toString("base64")}$${hash.toString("base64")}`;
+}
+
+export function verifyPassword(password, encoded) {
+  if (typeof password !== "string" || typeof encoded !== "string") return false;
+  const [kind, n, r, p, saltText, hashText, extra] = encoded.split("$");
+  if (kind !== "scrypt" || n !== String(N) || r !== "8" || p !== "1" || extra !== undefined || !saltText || !hashText) return false;
+  const salt = Buffer.from(saltText, "base64"), expected = Buffer.from(hashText, "base64");
+  if (salt.length !== 16 || expected.length !== 64) return false;
+  const actual = crypto.scryptSync(password, salt, 64, HASH_OPTIONS);
+  return crypto.timingSafeEqual(actual, expected);
+}
+
+function emailAddress(value) {
+  const email = str(value, { max: 254 }).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GameError("Enter your email address");
+  return email;
+}
+
+function passwordText(value, registering = false) {
+  if (typeof value !== "string" || value.length > 1024 || (registering && value.length < 8)) throw new GameError("Use a password with at least 8 characters");
+  return value;
+}
+
+function timezoneName(value = "UTC") {
+  const timezone = str(value, { max: 80 });
+  try { new Intl.DateTimeFormat("en", { timeZone: timezone }); } catch { throw new GameError("Pick a valid timezone"); }
+  return timezone;
+}
+
+export function familyById(id) {
+  const row = database().prepare("SELECT * FROM families WHERE id = ?").get(id);
+  if (!row) throw new GameError("Please sign in again", 401);
+  return { id: row.id, name: row.name, parentPin: row.parent_pin, timezone: row.timezone, createdAt: row.created_at };
+}
+
+export function createSession({ familyId, userId = null, role = "parent", childId = null, ua = "", now = Date.now() }) {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const duration = (role === "parent" ? 30 : 180) * DAY;
+  database().prepare(`INSERT INTO sessions
+    (token_hash, user_id, family_id, role, child_id, created_at, expires_at, last_seen, ua)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(tokenHash(token), userId, familyId, role, childId, now, now + duration, now, String(ua).slice(0, 500));
+  return { token, session: database().prepare("SELECT * FROM sessions WHERE token_hash = ?").get(tokenHash(token)) };
+}
+
+export function register(body, { ip = "unknown", ua, now = Date.now() } = {}) {
+  takeLimit("register", ip, now);
+  body = object(body);
+  const email = emailAddress(body.email), password = passwordText(body.password, true);
+  const name = str(body.parentName, { max: 64 }), timezone = timezoneName(body.timezone);
+  const familyId = uid("family"), userId = uid("user");
+  return transaction((db) => {
+    if (db.prepare("SELECT id FROM users WHERE email = ?").get(email)) throw new GameError("That email is already registered");
+    db.prepare("INSERT INTO families (id, name, created_at, timezone) VALUES (?, ?, ?, ?)").run(familyId, name, now, timezone);
+    db.prepare("INSERT INTO users (id, family_id, role, email, pass_hash, name, created_at) VALUES (?, ?, 'parent', ?, ?, ?, ?)")
+      .run(userId, familyId, email, hashPassword(password), name, now);
+    createChild(familyId, { name: body.childName, age: body.childAge, bearName: body.bearName });
+    return createSession({ familyId, userId, ua, now });
+  });
+}
+
+let dummyHash;
+export function login(body, { ip = "unknown", ua, now = Date.now() } = {}) {
+  takeLimit("loginIp", ip, now);
+  body = object(body);
+  const email = emailAddress(body.email);
+  takeLimit("loginEmail", email, now);
+  const password = passwordText(body.password);
+  const user = database().prepare("SELECT * FROM users WHERE email = ?").get(email);
+  // Unknown addresses still pay the same scrypt verification cost.
+  dummyHash ||= hashPassword(crypto.randomBytes(32).toString("hex"));
+  if (!verifyPassword(password, user?.pass_hash || dummyHash) || !user) throw new GameError("Email or password didn't match", 401);
+  return createSession({ familyId: user.family_id, userId: user.id, ua, now });
+}
+
+export function sessionToken(req) {
+  const authorization = req.get?.("authorization") || req.headers?.authorization;
+  if (authorization) return /^Bearer ([A-Za-z0-9_-]{43})$/i.exec(authorization)?.[1] || null;
+  const cookie = req.get?.("cookie") || req.headers?.cookie || "";
+  return cookie.split(";").map((p) => p.trim()).find((p) => p.startsWith("mq_session="))?.slice(11) || null;
+}
+
+export function authenticate(req, now = Date.now()) {
+  const token = sessionToken(req);
+  if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) throw new GameError("Please sign in first", 401);
+  const hash = tokenHash(token);
+  const db = database();
+  const session = db.prepare("SELECT * FROM sessions WHERE token_hash = ?").get(hash);
+  if (!session || now >= session.expires_at || (session.role === "parent" && now >= session.created_at + 90 * DAY)) {
+    db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(hash);
+    throw new GameError("Please sign in again", 401);
+  }
+  if (session.role === "parent") session.expires_at = Math.min(now + 30 * DAY, session.created_at + 90 * DAY);
+  session.last_seen = now;
+  db.prepare("UPDATE sessions SET expires_at = ?, last_seen = ? WHERE token_hash = ?").run(session.expires_at, now, hash);
+  return session;
+}
+
+export function cookieHeader(req, session, token, now = Date.now()) {
+  const secure = process.env.NODE_ENV === "production" || req.secure || req.protocol === "https";
+  return `mq_session=${token || ""}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${token ? Math.max(0, Math.floor((session.expires_at - now) / 1000)) : 0}${secure ? "; Secure" : ""}`;
+}
+
+export function resolveContext(req, { parent = false, unlocked = parent, child = true } = {}, now = Date.now()) {
+  const session = authenticate(req, now);
+  const family = familyById(session.family_id);
+  if (parent && session.role !== "parent") throw new GameError("A grown-up needs to sign in", 403);
+  if (unlocked && family.parentPin && session.unlocked_until <= now) throw new GameError("Please unlock parent mode", 403);
+  let childId = session.child_id;
+  const selected = req.query?.child;
+  if (selected !== undefined && (typeof selected !== "string" || selected.length > 64)) throw new GameError("Pick a child");
+  if (session.role === "child") {
+    if (selected !== undefined && selected !== childId) throw new GameError("Child not found", 404);
+  } else {
+    childId = selected || listChildren(family.id)[0]?.id;
+  }
+  if (child) {
+    const row = childId && childRecord(childId);
+    if (!row || row.family_id !== family.id) throw new GameError("Child not found", 404);
+  }
+  return { family, role: session.role, childId, session };
+}
+
+export function me(context) {
+  const { family, session, role, childId } = context;
+  const children = listChildren(family.id).filter((c) => role === "parent" || c.id === childId);
+  return {
+    family: { id: family.id, name: family.name, timezone: family.timezone, pinSet: Boolean(family.parentPin) },
+    role, children, activeChild: children.find((c) => c.id === childId) || null,
+    unlockedUntil: session.unlocked_until,
+  };
+}
+
+export function logout(session) {
+  database().prepare("DELETE FROM sessions WHERE token_hash = ?").run(session.token_hash);
+}
+
+export function createLink(context, childId, now = Date.now()) {
+  const row = childRecord(childId);
+  if (!row || row.family_id !== context.family.id) throw new GameError("Child not found", 404);
+  const alphabet = "BCDFGHJKMNPQRTVWXY346789";
+  for (let i = 0; i < 10; i++) {
+    const code = Array.from({ length: 6 }, () => alphabet[crypto.randomInt(alphabet.length)]).join("");
+    const result = database().prepare("INSERT OR IGNORE INTO kid_links (code, family_id, child_id, expires_at) VALUES (?, ?, ?, ?)")
+      .run(code, context.family.id, childId, now + 15 * MINUTE);
+    if (result.changes) return { code, expiresAt: now + 15 * MINUTE };
+  }
+  throw new GameError("Try making a new code in a moment", 429);
+}
+
+export function redeemLink(body, { ua, ip = "unknown", now = Date.now() } = {}) {
+  // Protect the short pairing code from online guessing too.
+  takeLimit("loginIp", `link:${ip}`, now);
+  const code = str(object(body).code, { max: 6 }).toUpperCase();
+  return transaction((db) => {
+    const link = db.prepare("SELECT * FROM kid_links WHERE code = ?").get(code);
+    if (!link || link.used_at !== null || now >= link.expires_at) throw new GameError("That code expired or was used. Ask for a new one.");
+    db.prepare("UPDATE kid_links SET used_at = ? WHERE code = ?").run(now, code);
+    return createSession({ familyId: link.family_id, childId: link.child_id, role: "child", ua, now });
+  });
+}
+
+export function setPin(context, body, now = Date.now()) {
+  const pin = object(body).pin;
+  if (typeof pin !== "string" || !/^\d{4,8}$/.test(pin)) throw new GameError("Use a PIN with 4 to 8 digits");
+  transaction((db) => {
+    db.prepare("UPDATE families SET parent_pin = ? WHERE id = ?").run(hashPassword(pin), context.family.id);
+    db.prepare("UPDATE sessions SET unlocked_until = 0 WHERE family_id = ? AND role = 'parent'").run(context.family.id);
+    db.prepare("UPDATE sessions SET unlocked_until = ? WHERE token_hash = ?").run(now + 15 * MINUTE, context.session.token_hash);
+  });
+  return { ok: true, unlockedUntil: now + 15 * MINUTE };
+}
+
+export function unlock(context, body, now = Date.now()) {
+  const session = context.session;
+  if (session.pin_locked_until > now) throw new GameError("Let's take a little break. Try again soon!", 429);
+  const quota = takeLimit("unlock", session.token_hash, now);
+  const pin = object(body).pin;
+  if (!context.family.parentPin || typeof pin !== "string" || !/^\d{4,8}$/.test(pin) || !verifyPassword(pin, context.family.parentPin)) {
+    if (!quota.remaining) database().prepare("UPDATE sessions SET pin_locked_until = ? WHERE token_hash = ?").run(now + 15 * MINUTE, session.token_hash);
+    throw new GameError("That PIN didn't match", 401);
+  }
+  database().prepare("UPDATE sessions SET unlocked_until = ? WHERE token_hash = ?").run(now + 15 * MINUTE, session.token_hash);
+  return { ok: true, unlockedUntil: now + 15 * MINUTE };
+}
+
+export function initializeAccounts() {
+  const defaultDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data");
+  const filename = path.join(process.env.MQ_DATA_DIR || defaultDir, "db.json");
+  if (fs.existsSync(filename)) importLegacy(filename);
+  if (process.env.MQ_DEMO !== "1") return;
+  transaction((db) => {
+    const now = Date.now();
+    db.prepare("INSERT OR IGNORE INTO families (id, name, created_at) VALUES (?, ?, ?)").run(DEMO_FAMILY_ID, "Jordan", now);
+    if (!db.prepare("SELECT id FROM children WHERE id = ?").get(DEMO_CHILD_ID)) {
+      const d = seed(now);
+      delete d.family.parentPin;
+      db.prepare("INSERT INTO children (id, family_id, doc, version, updated_at) VALUES (?, ?, ?, ?, ?)")
+        .run(DEMO_CHILD_ID, DEMO_FAMILY_ID, JSON.stringify(d), d.version, now);
+    }
+    if (!db.prepare("SELECT id FROM users WHERE email = ?").get("demo@moneyquest.test")) {
+      db.prepare("INSERT INTO users (id, family_id, role, email, pass_hash, name, created_at) VALUES (?, ?, 'parent', ?, ?, ?, ?)")
+        .run(uid("user"), DEMO_FAMILY_ID, "demo@moneyquest.test", hashPassword("demo-pass-1234"), "Jordan", now);
+    }
+  });
+}
+
+export function demoLogin(options = {}) {
+  if (process.env.MQ_DEMO !== "1") throw new GameError("Not found", 404);
+  const user = database().prepare("SELECT id FROM users WHERE family_id = ? AND email = ?").get(DEMO_FAMILY_ID, "demo@moneyquest.test");
+  if (!user) throw new GameError("Demo is not ready", 404);
+  return createSession({ ...options, familyId: DEMO_FAMILY_ID, userId: user.id });
+}

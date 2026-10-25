@@ -5,12 +5,12 @@
   "type": "module",
   "description": "MoneyQuest — save money, grow your Blob, explore the world.",
   "scripts": {
-    "dev": "concurrently -n api,web -c magenta,cyan \"node --env-file-if-exists=.env --watch server/index.js\" \"vite\"",
+    "dev": "concurrently -n api,web -c magenta,cyan \"node --experimental-sqlite --env-file-if-exists=.env --watch server/index.js\" \"vite\"",
     "build": "vite build",
-    "start": "node --env-file-if-exists=.env server/index.js",
-    "reset": "rm -f data/db.json && echo 'Demo data reset.'",
+    "start": "node --experimental-sqlite --env-file-if-exists=.env server/index.js",
+    "reset": "MQ_DEMO=1 node --experimental-sqlite --env-file-if-exists=.env --input-type=module -e \"const { initializeAccounts } = await import('./server/auth.js'); const { resetChild, DEMO_CHILD_ID } = await import('./server/store.js'); initializeAccounts(); resetChild(DEMO_CHILD_ID);\"",
     "test": "node --test server/*.test.js",
-    "phone": "npm run build && concurrently -k -n app,phone -c magenta,green \"node --env-file-if-exists=.env server/index.js\" \"npx -y cloudflared tunnel --protocol http2 --url http://localhost:8787\""
+    "phone": "npm run build && concurrently -k -n app,phone -c magenta,green \"node --experimental-sqlite --env-file-if-exists=.env server/index.js\" \"npx -y cloudflared tunnel --protocol http2 --url http://localhost:8787\""
   },
   "engines": {
     "node": ">=22.9"

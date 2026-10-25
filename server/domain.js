@@ -1,5 +1,5 @@
 // Game + family rules. Every function takes the db object and mutates it; the
-// HTTP layer wraps calls in store.mutate(). Throw GameError for user-facing
+// HTTP layer wraps calls in store.mutateChild(). Throw GameError for user-facing
 // validation problems.
 import { uid } from "./store.js";
 import { transfer, BankError } from "./bank.js";
@@ -28,12 +28,14 @@ export function onMoneyChanged(fn) {
 // ------------------------------------------------------------------ utilities
 export function audit(db, actor, action, detail, data = {}) {
   db.audit.push({ id: uid("aud"), ts: Date.now(), actor, action, detail, data });
-  if (db.audit.length > 500) db.audit.splice(0, db.audit.length - 500);
+  if (db.audit.length > 2000) db.audit.splice(0, db.audit.length - 2000);
 }
 
 export function notify(db, to, text, kind = "info", ref = null) {
   db.notifications.push({ id: uid("ntf"), ts: Date.now(), to, text, kind, ref, read: false });
-  if (db.notifications.length > 200) db.notifications.splice(0, db.notifications.length - 200);
+  const own = db.notifications.filter((n) => n.to === to);
+  const remove = new Set(own.slice(0, Math.max(0, own.length - 200)).map((n) => n.id));
+  if (remove.size) db.notifications = db.notifications.filter((n) => !remove.has(n.id));
 }
 
 function addPoints(db, n, reason) {
@@ -44,7 +46,7 @@ function addPoints(db, n, reason) {
 
 function moneyMoved(db, reason) {
   checkMilestones(db);
-  hooks.moneyChanged(reason);
+  hooks.moneyChanged(reason, db);
 }
 
 function dailyTrackingBonus(db, now) {
