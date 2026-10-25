@@ -11,6 +11,23 @@ merged by Claude (see `docs/VERSIONING.md`).
 ### In progress (branches)
 - (none)
 
+## [0.8.2] — 2026-10-25
+
+### Added
+- Kids can sign out from their Me page (a new kid code brings them back).
+- Ten more money lessons (fifteen in all): the Missions tab shows five at a
+  time, finishing one brings the next, and finished lessons wait in a review
+  list without points.
+- Friend requests show up on both sides right away: the other family's parent
+  gets an anonymous card and the kid a bell notice while the grown-ups check;
+  names appear once the sender's parent approves; approvals can happen in any
+  order.
+- Chat renders bold, lists and line breaks safely.
+
+### Removed
+- Voice: the microphone, read-aloud and the Cartesia integration are gone;
+  Buddy is text only. 352 server tests and 211 client tests.
+
 ## [0.8.1] — 2026-10-25
 
 ### Fixed
