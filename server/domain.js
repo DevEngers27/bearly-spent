@@ -139,11 +139,13 @@ export function completeLesson(db, lessonId, answers) {
     return { passed, correct, total: lesson.questions.length };
   }
   const firstTime = !db.child.lessonsDone.includes(lessonId);
-  if (firstTime) db.child.lessonsDone.push(lessonId);
-  db.child.stats.learningDone += 1;
-  addPoints(db, POINTS.lesson, `finished lesson "${lesson.title}"`);
-  bumpGoals(db, "lessons");
-  coopProgress(db);
+  if (firstTime) {
+    db.child.lessonsDone.push(lessonId);
+    db.child.stats.learningDone += 1;
+    addPoints(db, POINTS.lesson, `finished lesson "${lesson.title}"`);
+    bumpGoals(db, "lessons");
+    coopProgress(db);
+  }
   return { passed, correct, total: lesson.questions.length, firstTime };
 }
 
@@ -241,7 +243,7 @@ export function decide(db, approvalId, approve, note = "") {
   a.status = approve ? "approved" : "declined";
   a.decidedAt = Date.now();
   a.note = note;
-  audit(db, "parent", approve ? "approved" : "declined", `${approve ? "Approved" : "Declined"}: ${a.title}`, { approvalId: a.id, kind: a.kind });
+  audit(db, "parent", a.kind === "topup" ? "handled" : approve ? "approved" : "declined", `${a.kind === "topup" ? "Handled" : approve ? "Approved" : "Declined"}: ${a.title}`, { approvalId: a.id, kind: a.kind });
 
   switch (a.kind) {
     case "reward": {
@@ -282,6 +284,9 @@ export function decide(db, approvalId, approve, note = "") {
       if (approve) executeTrade(db, t);
       else {
         t.status = "declined";
+        for (const card of db.postcards) {
+          if (card.lockedForTrade === t.id) delete card.lockedForTrade;
+        }
         notify(db, "child", `Your postcard trade wasn't approved.`, "info");
       }
       break;
@@ -290,6 +295,7 @@ export function decide(db, approvalId, approve, note = "") {
       if (approve) createParentMission(db, { title: a.missionTitle, points: a.points, by: "buddy+parent" });
       break;
     case "topup":
+      a.handled = true;
       break;
   }
   return a;
@@ -297,7 +303,7 @@ export function decide(db, approvalId, approve, note = "") {
 
 // ------------------------------------------------------------------ adventures
 export function visitedSet(db) {
-  return new Set(db.postcards.map((p) => p.defId));
+  return new Set(db.postcards.filter((p) => p.source === "trip" || (p.source === undefined && !p.from)).map((p) => p.defId));
 }
 
 export function startAdventure(db, destId, now = Date.now()) {
@@ -326,7 +332,7 @@ export function finalizeAdventures(db, now = Date.now()) {
   for (const adv of dueAdventures(db, now)) {
     const defs = [adv.destId, ...bonusDiscoveries(adv.destId, db.child, visitedSet(db))];
     for (const defId of defs) {
-      const pc = { id: uid("pc"), defId, collectedAt: now, fromAdventure: adv.id };
+      const pc = { id: uid("pc"), defId, source: "trip", collectedAt: now, fromAdventure: adv.id };
       db.postcards.push(pc);
       adv.postcardIds.push(pc.id);
     }
@@ -390,11 +396,13 @@ const DIRECTORY = {
 
 export function addFriendByCode(db, code) {
   code = String(code || "").trim().toUpperCase();
-  if (db.friends.some((f) => f.code === code)) throw new GameError("You already added that friend");
-  const entry = DIRECTORY[code];
+  const existing = db.friends.find((f) => f.code === code);
+  if (existing && existing.status !== "declined") throw new GameError("You already added that friend");
+  const entry = existing ? { name: existing.name, bear: existing.bear, postcards: existing.postcards } : DIRECTORY[code];
   if (!entry) throw new GameError("No friend found with that code. Try SAM-12 or ZOE-88 in the demo!");
   const f = { id: uid("fr"), code, status: "pending_parent", coopLearning: 0, ...structuredClone(entry) };
-  db.friends.push(f);
+  if (existing) db.friends.splice(db.friends.indexOf(existing), 1, f);
+  else db.friends.push(f);
   const approval = { id: uid("apr"), kind: "friend", status: "pending", createdAt: Date.now(), friendId: f.id,
     title: `${db.child.name} wants to add ${f.name} as a friend`, detail: `Invitation code ${code}. Friends only see bears and postcards — never balances.` };
   db.approvals.push(approval);
@@ -431,13 +439,15 @@ function executeTrade(db, t) {
   const idx = db.postcards.findIndex((p) => p.lockedForTrade === t.id);
   if (!f || idx < 0 || !f.postcards.includes(t.get)) {
     t.status = "failed";
-    if (idx >= 0) delete db.postcards[idx].lockedForTrade;
+    for (const card of db.postcards) {
+      if (card.lockedForTrade === t.id) delete card.lockedForTrade;
+    }
     return;
   }
   db.postcards.splice(idx, 1);
   f.postcards.splice(f.postcards.indexOf(t.get), 1);
   f.postcards.push(t.give);
-  db.postcards.push({ id: uid("pc"), defId: t.get, collectedAt: Date.now(), note: `Traded with ${f.name}!`, from: f.name });
+  db.postcards.push({ id: uid("pc"), defId: t.get, source: "trade", collectedAt: Date.now(), note: `Traded with ${f.name}!`, from: f.name });
   t.status = "done";
   notify(db, "child", `Trade complete! ${f.name} sent you ${PLACES[t.get].name}.`, "celebrate");
   audit(db, "system", "trade_done", `Traded ${t.give} for ${t.get} with ${f.name}`);

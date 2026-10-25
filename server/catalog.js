@@ -86,7 +86,7 @@ export const PLACES = {
   },
   arches_national_park: {
     name: "Arches", state: "Utah", lon: -109.6, lat: 38.7, cost: 140, rarity: "secret", kind: "park",
-    discover: { from: "zion", type: "lessons", count: 3, text: "Learners who wander Utah's canyons might find a hidden doorway of stone…" },
+    discover: { from: "zion_national_park", type: "lessons", count: 3, text: "Learners who wander Utah's canyons might find a hidden doorway of stone…" },
     stamp: { value: "14¢", color: "#B77E50" },
     story: "On the way home from Zion, Maple took a wrong turn (on purpose) and found a giant stone arch. A buzzing bee showed the way.",
   },
